@@ -1,0 +1,14 @@
+.gradle/
+build/
+/.toolchain/
+/local.properties
+*.iml
+.idea/
+/captures
+.externalNativeBuild
+.cxx
+.claude/
+.kotlin/
+hvNote/
+tools/
+
