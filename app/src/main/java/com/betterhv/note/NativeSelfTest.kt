@@ -2,6 +2,9 @@ package com.betterhv.note
 
 import android.graphics.Bitmap
 import android.graphics.Color
+import com.betterhv.note.ink.InkPoint
+import com.betterhv.note.jni.InkStrokeModelerJNI
+import com.betterhv.note.jni.ModelerStrokeSmoother
 import hanvon.aebr.dither.HVDitherJNI
 import hanvon.aebr.hvnote.jni.GraphJniUtil
 import hanvon.aebr.penengine.HWPenEngine
@@ -24,14 +27,13 @@ object NativeSelfTest {
         } catch (t: Throwable) {
             EventLog.log("SelfTest", "GraphJniUtil FAIL: ${t.javaClass.simpleName}: ${t.message}")
         }
-        // libhw_PenEngine.so — touch static init (loadLibrary) + a native call
+        // libhw_PenEngine.so — pen rendering no longer goes through this library
+        // (stroke geometry and rasterization are ours now), so only confirm the
+        // library still loads. Kept because the eraser rework in the editing
+        // phase may still want the native engine; drop the wrapper if it does not.
         try {
             val d3566 = HWPenEngine.DENSITY_3566
-            val bmp = Bitmap.createBitmap(4, 4, Bitmap.Config.ARGB_8888)
-            val pixels = IntArray(16)
-            val pts = floatArrayOf(1f, 1f, 1f, 2f, 2f, 1f)
-            HWPenEngine.drawPencil32(4, 4, d3566, Color.BLACK, pixels, 0, pts, IntArray(4))
-            EventLog.log("SelfTest", "HWPenEngine loaded, drawPencil32 returned (DENSITY_3566=$d3566)")
+            EventLog.log("SelfTest", "HWPenEngine loaded (DENSITY_3566=$d3566, unused for rendering)")
         } catch (t: Throwable) {
             EventLog.log("SelfTest", "HWPenEngine FAIL: ${t.javaClass.simpleName}: ${t.message}")
         }
@@ -43,6 +45,25 @@ object NativeSelfTest {
             EventLog.log("SelfTest", "HVDitherJNI loaded, ditherBitmapARGB32 returned")
         } catch (t: Throwable) {
             EventLog.log("SelfTest", "HVDitherJNI FAIL: ${t.javaClass.simpleName}: ${t.message}")
+        }
+        // libink_stroke_modeler_jni.so (Google ink-stroke-modeler). Drive a full
+        // DOWN->MOVE->pen-up round-trip through the smoother so this confirms not
+        // just that the .so loaded, but that the native modeler actually produces
+        // output rather than silently degrading to the OneEuro fallback -- which
+        // is otherwise invisible on-device short of writing by hand.
+        try {
+            val smoother = ModelerStrokeSmoother()
+            var t = 1_000L
+            val batch = (0..8).map { InkPoint(it * 12f, it * 6f, 0.5f, t++) }
+            val modeled = smoother.smoothBatch(batch)
+            val tail = smoother.finishStroke()
+            EventLog.log(
+                "SelfTest",
+                "InkStrokeModeler available=${InkStrokeModelerJNI.available} " +
+                    "in=${batch.size} modeled=${modeled.size} tail=${tail.size}"
+            )
+        } catch (t: Throwable) {
+            EventLog.log("SelfTest", "InkStrokeModeler FAIL: ${t.javaClass.simpleName}: ${t.message}")
         }
     }
 }

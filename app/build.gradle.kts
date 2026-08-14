@@ -15,6 +15,20 @@ android {
         versionCode = 1
         versionName = "0.1-phase1"
         ndk { abiFilters += "arm64-v8a" }
+        externalNativeBuild {
+            cmake {
+                cppFlags += "-std=c++20"
+            }
+        }
+    }
+
+    ndkVersion = "30.0.15729638"
+
+    externalNativeBuild {
+        cmake {
+            path = file("src/main/cpp/CMakeLists.txt")
+            version = "4.1.2"
+        }
     }
 
     buildTypes {
@@ -42,4 +56,9 @@ dependencies {
     implementation("androidx.compose.ui:ui-graphics")
     implementation("androidx.compose.foundation:foundation")
     implementation("androidx.compose.material3:material3")
+    implementation("androidx.compose.material:material-icons-extended")
+
+    // The ink core (com.betterhv.note.ink, excluding InkRenderer) has no Android
+    // dependencies, so plain JUnit on the JVM covers it -- no Robolectric needed.
+    testImplementation("junit:junit:4.13.2")
 }

@@ -66,4 +66,67 @@ object PenGeometry {
             else -> when (a) { 0 -> 7; 1 -> 8; 2 -> 9; 3 -> 10; else -> 0 }
         }
     }
+
+    /**
+     * Port of HandView.pointSysToClient(x, y, location, rotation).
+     *
+     * Points delivered by onPenTouchUpStatus() are in the pen digitizer's system
+     * coordinate space, NOT in view coordinates -- for most orientations the axes
+     * are swapped relative to the view. The vendor runs every incoming point
+     * through this before drawing, and skipping it renders the stroke rotated.
+     *
+     * `location` is the view's getLocationOnScreen() offset. [orgPos] is the
+     * screen origin (HvPenDrawManager.getScreenOrgPos()) and [rotation] the
+     * display rotation, same pair that selects the branch in getPenDrawArea.
+     *
+     * Branch structure mirrors the bytecode; do not "simplify" it.
+     */
+    fun pointSysToClient(
+        x: Float,
+        y: Float,
+        locationX: Int,
+        locationY: Int,
+        rotation: Int,
+        orgPos: Int,
+        screenWidth: Int,
+        screenHeight: Int
+    ): FloatArray {
+        val lx = locationX.toFloat()
+        val ly = locationY.toFloat()
+        val sw = screenWidth.toFloat()
+        val sh = screenHeight.toFloat()
+
+        var outX: Float
+        var outY: Float
+
+        when (orgPos) {
+            LEFT_TOP -> when (rotation) {
+                0 -> { outX = x - lx; outY = y - ly }
+                1 -> { outX = y - lx; outY = (sh - x) - ly }
+                2 -> { outX = (sw - x) - lx; outY = (sh - y) - ly }
+                3 -> { outX = (sw - y) - lx; outY = x - ly }
+                else -> { outX = x; outY = y }
+            }
+            RIGHT_TOP -> when (rotation) {
+                0 -> { outX = (sw - y) - lx; outY = x - ly }
+                1 -> { outX = x - lx; outY = y - ly }
+                2 -> { outX = y - lx; outY = (sh - x) - ly }
+                3 -> { outX = (sw - x) - lx; outY = (sh - y) - ly }
+                else -> { outX = x; outY = y }
+            }
+            LEFT_BOTTOM -> when (rotation) {
+                0 -> { outX = y - lx; outY = (sh - x) - ly }
+                1 -> { outX = (sw - x) - lx; outY = (sh - y) - ly }
+                2 -> { outX = (sw - y) - lx; outY = x - ly }
+                3 -> { outX = x - lx; outY = y - ly }
+                else -> { outX = x; outY = y }
+            }
+            else -> { outX = x; outY = y }
+        }
+        return floatArrayOf(outX, outY)
+    }
+
+    const val RIGHT_TOP = 0
+    const val LEFT_BOTTOM = 1
+    const val LEFT_TOP = 2
 }
