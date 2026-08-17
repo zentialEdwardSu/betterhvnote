@@ -10,6 +10,11 @@ class DeleteObjectsCommand(
     private val page: Page,
     private val ids: List<UUID>
 ) : Command {
+    override val affectedObjects = mapOf(page.id to ids.toSet())
+    override fun currentObject(pageId: UUID, objectId: UUID): PageObject? =
+        if (pageId == page.id) page.getObject(objectId) else null
+    override fun currentPage(pageId: UUID): Page? = if (pageId == page.id) page else null
+
     private var snapshots: List<PageObject> = emptyList()
 
     override fun execute() {

@@ -1,0 +1,403 @@
+package com.betterhv.note
+
+import android.graphics.Bitmap
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.RectangleShape
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Popup
+import androidx.compose.ui.window.PopupProperties
+import com.betterhv.note.export.ExportArtifact
+import com.betterhv.note.export.ExportActionAvailability
+import com.betterhv.note.export.ExportFormat
+import com.betterhv.note.export.ExportManagerState
+import com.betterhv.note.export.ExportNotebookOption
+import com.betterhv.note.export.ExportProgress
+import com.betterhv.note.export.ExportScope
+import com.betterhv.note.export.ExportTaskState
+import com.betterhv.note.export.ExportTaskSummary
+import com.betterhv.note.export.ExportViewModel
+import java.text.DateFormat
+import java.util.Date
+import java.util.UUID
+
+private val ExportBorder = Color(0xFFE3E3E1)
+private val ExportMuted = Color(0xFF787774)
+
+@Composable
+fun ExportManagerScreen(
+    viewModel: ExportViewModel,
+    initialNotebookId: UUID,
+    creationRequest: Long,
+    currentNotebookId: UUID,
+    phoneTransferAvailable: Boolean,
+    pageBitmap: (UUID) -> Bitmap?,
+    requestThumbnails: (List<UUID>) -> Unit,
+    beforeExport: suspend (UUID) -> Boolean,
+    sendToNoteLink: suspend (ExportArtifact, (Long, Long) -> Unit) -> Unit,
+    onNotice: (String) -> Unit,
+    onClose: () -> Unit
+) {
+    val state by viewModel.state.collectAsState()
+    var creating by remember { mutableStateOf(false) }
+    var deleteTask by remember { mutableStateOf<ExportTaskSummary?>(null) }
+
+    LaunchedEffect(creationRequest) {
+        if (creationRequest > 0) creating = true
+    }
+    LaunchedEffect(state.message) {
+        state.message?.let {
+            onNotice(it)
+            viewModel.consumeMessage()
+        }
+    }
+
+    Surface(Modifier.fillMaxSize(), color = Color.White, shape = RectangleShape) {
+        if (creating) {
+            ExportTaskCreator(
+                state = state,
+                initialNotebookId = initialNotebookId,
+                currentNotebookId = currentNotebookId,
+                pageBitmap = pageBitmap,
+                requestThumbnails = requestThumbnails,
+                onCreate = { notebookId, scope, format, ids ->
+                    viewModel.createTask(notebookId, scope, format, ids)
+                    creating = false
+                },
+                onBack = { creating = false }
+            )
+        } else {
+            Column(Modifier.fillMaxSize()) {
+                ExportTopBar(
+                    taskCount = state.tasks.size,
+                    busy = state.activeTaskId != null,
+                    onBack = onClose,
+                    onAdd = { creating = true }
+                )
+                HorizontalDivider(color = ExportBorder)
+                if (state.tasks.isEmpty()) {
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Text("暂无导出任务", color = ExportMuted)
+                    }
+                } else {
+                    LazyColumn(Modifier.fillMaxSize()) {
+                        items(state.tasks, key = { it.task.id }) { summary ->
+                            ExportTaskRow(
+                                summary = summary,
+                                active = state.activeTaskId == summary.task.id,
+                                busy = state.activeTaskId != null,
+                                phoneTransferAvailable = phoneTransferAvailable,
+                                progress = state.progress,
+                                onSave = { viewModel.saveToDownloads(summary.task.id, beforeExport) },
+                                onSend = {
+                                    viewModel.sendToNoteLink(summary.task.id, beforeExport, sendToNoteLink)
+                                },
+                                onDelete = { deleteTask = summary }
+                            )
+                            HorizontalDivider(color = ExportBorder)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    deleteTask?.let { summary ->
+        EinkModalOverlay(onDismissRequest = { deleteTask = null }) {
+            Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                Text("删除导出任务？", fontSize = 20.sp, fontWeight = FontWeight.Medium)
+                Text("内部生成文件和增量缓存将被删除，Downloads 与 NoteLink 中的副本不受影响。")
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.End)
+                ) {
+                    EinkDialogAction("取消") { deleteTask = null }
+                    EinkDialogAction("删除") {
+                        viewModel.deleteTask(summary.task.id)
+                        deleteTask = null
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ExportTopBar(taskCount: Int, busy: Boolean, onBack: () -> Unit, onAdd: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().height(64.dp).padding(horizontal = 18.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        IconButton(onClick = onBack, enabled = !busy) {
+            Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回")
+        }
+        Text("导出", fontSize = 18.sp, fontWeight = FontWeight.Medium)
+        Text("$taskCount 项", color = ExportMuted, fontSize = 13.sp, modifier = Modifier.padding(start = 10.dp))
+        Spacer(Modifier.weight(1f))
+        IconButton(onClick = onAdd, enabled = !busy) { Icon(Icons.Filled.Add, "新建导出任务") }
+    }
+}
+
+@Composable
+private fun ExportTaskRow(
+    summary: ExportTaskSummary,
+    active: Boolean,
+    busy: Boolean,
+    phoneTransferAvailable: Boolean,
+    progress: ExportProgress?,
+    onSave: () -> Unit,
+    onSend: () -> Unit,
+    onDelete: () -> Unit
+) {
+    Column(Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 16.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text(taskTitle(summary), fontSize = 16.sp, fontWeight = FontWeight.Medium,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(
+                    "${summary.notebookTitle} · ${summary.pageCount} 页 · ${summary.task.format.name}",
+                    color = ExportMuted, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis
+                )
+                Text(taskStatus(summary), color = stateColor(summary.state), fontSize = 13.sp)
+            }
+            if (active) {
+                CircularProgressIndicator(Modifier.size(28.dp), strokeWidth = 2.dp, color = Color.Black)
+                Spacer(Modifier.width(4.dp))
+            }
+            val availability = ExportActionAvailability.resolve(summary.state, busy, phoneTransferAvailable)
+            IconButton(onClick = onSave, enabled = availability.saveEnabled) {
+                Icon(Icons.Filled.Download, "保存 ${summary.notebookTitle} 到 Downloads")
+            }
+            IconButton(onClick = onSend, enabled = availability.sendEnabled) {
+                Icon(
+                    Icons.AutoMirrored.Filled.Send,
+                    if (phoneTransferAvailable) "发送 ${summary.notebookTitle} 到 NoteLink"
+                    else "NoteLink 未配对或不可用"
+                )
+            }
+            IconButton(onClick = onDelete, enabled = availability.deleteEnabled) {
+                Icon(Icons.Filled.Delete, "删除导出任务")
+            }
+        }
+        if (active && progress != null) {
+            val ratio = if (progress.total <= 0) 0f else progress.current.toFloat() / progress.total
+            LinearProgressIndicator(
+                progress = { ratio.coerceIn(0f, 1f) },
+                modifier = Modifier.fillMaxWidth().padding(top = 10.dp),
+                color = Color.Black
+            )
+        }
+    }
+}
+
+@Composable
+private fun ExportTaskCreator(
+    state: ExportManagerState,
+    initialNotebookId: UUID,
+    currentNotebookId: UUID,
+    pageBitmap: (UUID) -> Bitmap?,
+    requestThumbnails: (List<UUID>) -> Unit,
+    onCreate: (UUID, ExportScope, ExportFormat, List<UUID>) -> Unit,
+    onBack: () -> Unit
+) {
+    var notebookId by remember(state.notebooks, initialNotebookId) {
+        mutableStateOf(state.notebooks.firstOrNull { it.id == initialNotebookId }?.id ?: state.notebooks.firstOrNull()?.id)
+    }
+    var scope by remember { mutableStateOf(ExportScope.SINGLE_PAGE) }
+    var format by remember { mutableStateOf(ExportFormat.PDF) }
+    var selected by remember(notebookId, scope) { mutableStateOf(emptySet<UUID>()) }
+    var notebookMenu by remember { mutableStateOf(false) }
+    var notebookMenuWidth by remember { mutableStateOf(0) }
+    val notebook = state.notebooks.firstOrNull { it.id == notebookId }
+    val pages = notebook?.pages.orEmpty().mapIndexed { index, source ->
+        PageUiInfo(source.id, index + 1, false, source.contentRevision)
+    }
+
+    LaunchedEffect(notebookId, scope) {
+        if (notebookId == currentNotebookId && scope != ExportScope.ALL_PAGES) {
+            requestThumbnails(pages.map(PageUiInfo::id))
+        }
+    }
+
+    Column(Modifier.fillMaxSize()) {
+        Row(
+            Modifier.fillMaxWidth().height(64.dp).padding(horizontal = 18.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回") }
+            Text("新建导出任务", fontSize = 18.sp, fontWeight = FontWeight.Medium)
+            Spacer(Modifier.weight(1f))
+            val valid = notebookId != null && (scope == ExportScope.ALL_PAGES || selected.isNotEmpty())
+            IconButton(
+                enabled = valid,
+                onClick = { notebookId?.let { onCreate(it, scope, format, selected.toList()) } }
+            ) { Icon(Icons.Filled.Check, "创建") }
+        }
+        HorizontalDivider(color = ExportBorder)
+        Column(Modifier.fillMaxWidth().padding(24.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            Box {
+                Row(
+                    Modifier.fillMaxWidth().onSizeChanged { notebookMenuWidth = it.width }
+                        .border(1.dp, ExportBorder).clickable { notebookMenu = true }.padding(14.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(notebook?.title ?: "选择笔记本", modifier = Modifier.weight(1f))
+                    Icon(Icons.Filled.ExpandMore, null)
+                }
+                NotebookPickerPopup(
+                    expanded = notebookMenu,
+                    widthPx = notebookMenuWidth,
+                    options = state.notebooks,
+                    onSelect = { option -> notebookId = option.id; notebookMenu = false },
+                    onDismiss = { notebookMenu = false }
+                )
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                ScopeButton("单页", scope == ExportScope.SINGLE_PAGE) { scope = ExportScope.SINGLE_PAGE }
+                ScopeButton("选择页面", scope == ExportScope.SELECTED_PAGES) { scope = ExportScope.SELECTED_PAGES }
+                ScopeButton("全部页面", scope == ExportScope.ALL_PAGES) { scope = ExportScope.ALL_PAGES; format = ExportFormat.PDF }
+            }
+            if (scope == ExportScope.SINGLE_PAGE) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    ScopeButton("PDF", format == ExportFormat.PDF) { format = ExportFormat.PDF }
+                    ScopeButton("PNG", format == ExportFormat.PNG) { format = ExportFormat.PNG }
+                }
+            }
+        }
+        if (scope == ExportScope.ALL_PAGES) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Text("将持续跟随 ${pages.size} 个页面，并增量更新变化内容", color = ExportMuted)
+            }
+        } else {
+            PageSelectionGrid(
+                pages = pages,
+                selectedIds = selected,
+                pageBitmap = { id -> if (notebookId == currentNotebookId) pageBitmap(id) else null },
+                onToggle = { id ->
+                    selected = if (scope == ExportScope.SINGLE_PAGE) setOf(id)
+                    else if (id in selected) selected - id else selected + id
+                }
+            )
+        }
+    }
+}
+
+@Composable
+private fun NotebookPickerPopup(
+    expanded: Boolean,
+    widthPx: Int,
+    options: List<ExportNotebookOption>,
+    onSelect: (ExportNotebookOption) -> Unit,
+    onDismiss: () -> Unit
+) {
+    if (!expanded || widthPx <= 0) return
+    val density = LocalDensity.current
+    val offset = with(density) { IntOffset(0, 52.dp.roundToPx()) }
+    val width = with(density) { widthPx.toDp() }
+    Popup(
+        alignment = Alignment.TopStart,
+        offset = offset,
+        onDismissRequest = onDismiss,
+        properties = PopupProperties(focusable = true, dismissOnBackPress = true, dismissOnClickOutside = true)
+    ) {
+        Surface(
+            modifier = Modifier.width(width).heightIn(max = 360.dp).border(1.dp, Color.Black, RectangleShape),
+            shape = RectangleShape,
+            color = Color.White,
+            tonalElevation = 0.dp,
+            shadowElevation = 0.dp
+        ) {
+            Column(Modifier.verticalScroll(rememberScrollState())) {
+                options.forEach { option ->
+                    Text(
+                        option.title,
+                        modifier = Modifier.fillMaxWidth().clickable { onSelect(option) }.padding(14.dp),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    HorizontalDivider(color = ExportBorder)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ScopeButton(text: String, selected: Boolean, onClick: () -> Unit) {
+    Box(
+        Modifier.background(if (selected) Color.Black else Color.White, RectangleShape)
+            .border(1.dp, if (selected) Color.Black else ExportBorder, RectangleShape)
+            .clickable(onClick = onClick).padding(horizontal = 16.dp, vertical = 10.dp)
+    ) { Text(text, color = if (selected) Color.White else Color.Black) }
+}
+
+private fun taskTitle(summary: ExportTaskSummary): String = when (summary.task.scope) {
+    ExportScope.SINGLE_PAGE -> "单页导出"
+    ExportScope.SELECTED_PAGES -> "选定页面"
+    ExportScope.ALL_PAGES -> "全部页面"
+}
+
+private fun taskStatus(summary: ExportTaskSummary): String = when (summary.state) {
+    ExportTaskState.NEVER_GENERATED -> "从未生成"
+    ExportTaskState.CURRENT -> summary.lastGeneratedAt?.let {
+        "最新 · ${DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT).format(Date(it))}"
+    } ?: "最新"
+    ExportTaskState.OUTDATED -> if (summary.stalePageCount == 0) "页面集合或顺序待更新"
+        else "${summary.stalePageCount} 页待更新"
+    ExportTaskState.SOURCE_MISSING -> "源页面已删除"
+    ExportTaskState.FAILED -> summary.lastError?.let { "失败 · $it" } ?: "生成失败"
+}
+
+private fun stateColor(state: ExportTaskState): Color = when (state) {
+    ExportTaskState.CURRENT -> Color(0xFF2E7D32)
+    ExportTaskState.SOURCE_MISSING, ExportTaskState.FAILED -> Color(0xFFB00020)
+    else -> ExportMuted
+}

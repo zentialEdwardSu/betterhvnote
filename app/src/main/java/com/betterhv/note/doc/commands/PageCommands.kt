@@ -15,6 +15,10 @@ class AddPageCommand(
     private val page: Page = Page(),
     private val index: Int = notebook.pageOrder.size
 ) : Command {
+    override val affectedPages = setOf(page.id)
+    override val changesPageStructure = true
+    override fun currentPage(pageId: UUID): Page? = if (pageId == page.id) page else null
+
     override fun execute() {
         notebook.addPage(page, index)
     }
@@ -28,8 +32,12 @@ class DeletePageCommand(
     private val notebook: Notebook,
     private val pageId: UUID
 ) : Command {
+    override val affectedPages = setOf(pageId)
+    override val changesPageStructure = true
+
     private var removedPage: Page? = null
     private var removedIndex: Int = -1
+    override fun currentPage(pageId: UUID): Page? = removedPage?.takeIf { it.id == pageId }
 
     override fun execute() {
         removedIndex = notebook.pageOrder.indexOf(pageId)
@@ -47,7 +55,11 @@ class MovePageCommand(
     private val pageId: UUID,
     private val toIndex: Int
 ) : Command {
+    override val affectedPages = setOf(pageId)
+    override val changesPageStructure = true
+
     private var fromIndex: Int = -1
+    override fun currentPage(pageId: UUID): Page? = notebook.getPage(pageId)
 
     override fun execute() {
         fromIndex = notebook.pageOrder.indexOf(pageId)

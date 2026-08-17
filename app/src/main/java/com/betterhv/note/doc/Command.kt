@@ -1,10 +1,28 @@
 package com.betterhv.note.doc
 
+import java.util.UUID
+
 /** Spec §41-43: every document mutation goes through a Command so it can be undone. */
 interface Command {
     fun execute()
     fun undo()
+
+    /** Object ids that must be reconciled after execute/undo/redo. */
+    val affectedObjects: Map<UUID, Set<UUID>> get() = emptyMap()
+
+    /** Resolves post-command state even if the page Scene was evicted from Notebook's page cache. */
+    fun currentObject(pageId: UUID, objectId: UUID): PageObject? = null
+
+    /** Resolves the Page held by undo history even after Notebook detached it from the Scene cache. */
+    fun currentPage(pageId: UUID): Page? = null
+
+    /** Page ids whose creation/deletion/order metadata changed. */
+    val affectedPages: Set<UUID> get() = emptySet()
+
+    val changesPageStructure: Boolean get() = false
 }
+
+enum class CommandAction { EXECUTE, UNDO, REDO }
 
 /**
  * Stack-based undo/redo (spec §41, §44). A new command clears the redo stack --
@@ -15,7 +33,9 @@ interface Command {
  * one command incrementally while the gesture is in progress and only call
  * [execute] once, at gesture end -- see SelectionTool.
  */
-class CommandStack {
+class CommandStack(
+    private var onCommitted: ((Command, CommandAction) -> Unit)? = null
+) {
     private val undoStack = ArrayDeque<Command>()
     private val redoStack = ArrayDeque<Command>()
 
@@ -26,18 +46,21 @@ class CommandStack {
         command.execute()
         undoStack.addLast(command)
         redoStack.clear()
+        onCommitted?.invoke(command, CommandAction.EXECUTE)
     }
 
     fun undo() {
         val command = undoStack.removeLastOrNull() ?: return
         command.undo()
         redoStack.addLast(command)
+        onCommitted?.invoke(command, CommandAction.UNDO)
     }
 
     fun redo() {
         val command = redoStack.removeLastOrNull() ?: return
         command.execute()
         undoStack.addLast(command)
+        onCommitted?.invoke(command, CommandAction.REDO)
     }
 
     /**
@@ -49,10 +72,15 @@ class CommandStack {
     fun push(command: Command) {
         undoStack.addLast(command)
         redoStack.clear()
+        onCommitted?.invoke(command, CommandAction.EXECUTE)
     }
 
     fun clear() {
         undoStack.clear()
         redoStack.clear()
+    }
+
+    fun setOnCommitted(listener: ((Command, CommandAction) -> Unit)?) {
+        onCommitted = listener
     }
 }

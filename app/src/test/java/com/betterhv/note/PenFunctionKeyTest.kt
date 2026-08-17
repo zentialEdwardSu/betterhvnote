@@ -37,4 +37,12 @@ class PenFunctionKeyTest {
         assertFalse(PenFunctionKey.isPressed(toolType = 1, buttonState = 0, source = 0x1002))
         assertFalse(PenFunctionKey.isPressed(toolType = 2, buttonState = 0, source = 0x5002))
     }
+
+    @Test
+    fun uiClickClassifierGivesExplicitSideTwoAndThreePriorityOverVendorToolFallback() {
+        assertTrue(PenFunctionKey.classifyClickModifier(6, 0x40) == PenSideButton.SIDE_2)
+        assertTrue(PenFunctionKey.classifyClickModifier(6, 0x80) == PenSideButton.SIDE_3)
+        assertTrue(PenFunctionKey.classifyClickModifier(6, 0) == PenSideButton.SIDE_1)
+        assertTrue(PenFunctionKey.classifyClickModifier(2, 0xA0) == PenSideButton.SIDE_3)
+    }
 }

@@ -2,6 +2,7 @@ package com.betterhv.note.doc.commands
 
 import com.betterhv.note.doc.Command
 import com.betterhv.note.doc.Page
+import com.betterhv.note.doc.PageObject
 import com.betterhv.note.doc.Transform2D
 import java.util.UUID
 
@@ -18,6 +19,11 @@ class TransformObjectsCommand(
     private val before: Map<UUID, Transform2D>,
     private var after: Map<UUID, Transform2D>
 ) : Command {
+    override val affectedObjects = mapOf(page.id to ids.toSet())
+    override fun currentObject(pageId: UUID, objectId: UUID): PageObject? =
+        if (pageId == page.id) page.getObject(objectId) else null
+    override fun currentPage(pageId: UUID): Page? = if (pageId == page.id) page else null
+
 
     fun updateAfter(newAfter: Map<UUID, Transform2D>) {
         after = newAfter

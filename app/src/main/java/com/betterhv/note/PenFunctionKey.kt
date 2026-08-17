@@ -34,4 +34,12 @@ object PenFunctionKey {
 
     fun isPressed(toolType: Int, buttonState: Int, source: Int = 0): Boolean =
         classify(toolType, buttonState, source) == PenSideButton.SIDE_1
+
+    /** UI click classification: explicit Side2/Side3 bits outrank the vendor Side1 tool fallback. */
+    fun classifyClickModifier(toolType: Int, buttonState: Int, source: Int = 0): PenSideButton = when {
+        buttonState and SIDE_KEY_3_STATE != 0 -> PenSideButton.SIDE_3
+        buttonState and SIDE_KEY_2_STATE != 0 -> PenSideButton.SIDE_2
+        buttonState and SIDE_KEY_1_STATE != 0 -> PenSideButton.SIDE_1
+        else -> classify(toolType, buttonState, source)
+    }
 }

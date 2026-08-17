@@ -22,3 +22,6 @@ dependencyResolutionManagement {
 rootProject.name = "BetterHvNote"
 include(":app")
 include(":framework-stubs")
+include(":transfer-core")
+include(":transfer-android")
+include(":phone-app")

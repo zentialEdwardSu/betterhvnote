@@ -5,11 +5,9 @@ package com.betterhv.note.ink
  * Spec §2.1 -- this is the real data; any bitmap is a cache that can be thrown
  * away and regenerated from these points.
  *
- * Phase 1 keeps this deliberately narrow. Identity (UUID), z-order, transform,
- * and timestamps-as-metadata belong to PageObject in the Document Core phase;
- * adding them now would mean guessing at that model before it exists. Per-point
- * timestamps are already retained here, so the §2.5 requirement (time recorded
- * from the first version) is satisfied without needing the object wrapper yet.
+ * This remains deliberately narrow after Document Core landed: identity,
+ * z-order, transform, and object timestamps live in StrokeObject/PageObject.
+ * Per-point timestamps stay here for the §2.5 timeline requirement.
  */
 data class Stroke(
     val points: List<InkPoint>,

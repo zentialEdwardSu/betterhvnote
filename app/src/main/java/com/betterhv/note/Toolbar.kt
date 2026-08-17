@@ -18,27 +18,29 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Redo
 import androidx.compose.material.icons.automirrored.filled.Undo
-import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.CropFree
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.AddPhotoAlternate
+import androidx.compose.material.icons.filled.IosShare
+import androidx.compose.material.icons.filled.PostAdd
+import androidx.compose.material.icons.filled.TextFields
 import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.OpenWith
 import androidx.compose.material.icons.filled.RemoveCircleOutline
-import androidx.compose.material3.DropdownMenu
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
@@ -75,6 +77,8 @@ private val WIDTH_SAMPLE_DP = listOf(1.5f, 3f, 5f, 8f, 12f)
 @Composable
 fun EditorToolbar(
     modifier: Modifier = Modifier,
+    dockEdge: DockEdge,
+    onDockEdgeChange: (DockEdge) -> Unit,
     toolKind: ToolKind,
     onToolSelected: (ToolKind) -> Unit,
     eraserMode: EraserMode,
@@ -85,15 +89,30 @@ fun EditorToolbar(
     onRedo: () -> Unit,
     hasSelection: Boolean,
     onDelete: () -> Unit,
+    insertionActive: Boolean,
+    onInsertImage: () -> Unit,
+    onInsertText: () -> Unit,
+    pageManagerOpen: Boolean,
+    onPageManagerToggle: () -> Unit,
+    onPageAdd: () -> Unit,
+    onPreviousPage: () -> Unit,
+    onNextPage: () -> Unit,
+    notebookManagerOpen: Boolean,
+    onNotebookManagerToggle: () -> Unit,
+    onNotebookCurrentPage: () -> Unit,
+    onNotebookCurrentToEnd: () -> Unit,
+    exportPanelOpen: Boolean,
+    onExportPanelToggle: () -> Unit,
+    settingsOpen: Boolean,
+    debugMode: Boolean,
+    onSettingsOpen: () -> Unit,
+    onDebugToggle: () -> Unit,
     penToolbarSettings: PenToolbarSettings,
     onPenSlotSelected: (Int) -> Unit,
     onPenSettingsChange: (Int, PenSettings) -> Unit,
     onPenPanelVisibilityChange: (Boolean) -> Unit,
-    debugMode: Boolean,
-    onDebugModeChange: (Boolean) -> Unit
+    onInteractionBlockChange: (Boolean) -> Unit
 ) {
-    var dockEdge by rememberSaveable { mutableStateOf(DockEdge.START) }
-
     Box(modifier) {
         Box(
             modifier = Modifier
@@ -101,6 +120,7 @@ fun EditorToolbar(
                 .padding(8.dp)
         ) {
             Surface(
+                modifier = Modifier.penInputGuard(onInteractionBlockChange),
                 shape = RectangleShape,
                 color = Color(0xFFEFEFEF),
                 contentColor = Color.Black,
@@ -109,7 +129,9 @@ fun EditorToolbar(
                 ToolbarContent(
                     dockEdge = dockEdge,
                     onReposition = {
-                        dockEdge = DOCK_CYCLE[(DOCK_CYCLE.indexOf(dockEdge) + 1) % DOCK_CYCLE.size]
+                        onDockEdgeChange(
+                            DOCK_CYCLE[(DOCK_CYCLE.indexOf(dockEdge) + 1) % DOCK_CYCLE.size]
+                        )
                     },
                     toolKind = toolKind,
                     onToolSelected = onToolSelected,
@@ -121,12 +143,28 @@ fun EditorToolbar(
                     onRedo = onRedo,
                     hasSelection = hasSelection,
                     onDelete = onDelete,
+                    insertionActive = insertionActive,
+                    onInsertImage = onInsertImage,
+                    onInsertText = onInsertText,
+                    pageManagerOpen = pageManagerOpen,
+                    onPageManagerToggle = onPageManagerToggle,
+                    onPageAdd = onPageAdd,
+                    onPreviousPage = onPreviousPage,
+                    onNextPage = onNextPage,
+                    notebookManagerOpen = notebookManagerOpen,
+                    onNotebookManagerToggle = onNotebookManagerToggle,
+                    onNotebookCurrentPage = onNotebookCurrentPage,
+                    onNotebookCurrentToEnd = onNotebookCurrentToEnd,
+                    exportPanelOpen = exportPanelOpen,
+                    onExportPanelToggle = onExportPanelToggle,
+                    settingsOpen = settingsOpen,
+                    debugMode = debugMode,
+                    onSettingsOpen = onSettingsOpen,
+                    onDebugToggle = onDebugToggle,
                     penToolbarSettings = penToolbarSettings,
                     onPenSlotSelected = onPenSlotSelected,
                     onPenSettingsChange = onPenSettingsChange,
-                    onPenPanelVisibilityChange = onPenPanelVisibilityChange,
-                    debugMode = debugMode,
-                    onDebugModeChange = onDebugModeChange
+                    onPenPanelVisibilityChange = onPenPanelVisibilityChange
                 )
             }
         }
@@ -147,17 +185,34 @@ private fun ToolbarContent(
     onRedo: () -> Unit,
     hasSelection: Boolean,
     onDelete: () -> Unit,
+    insertionActive: Boolean,
+    onInsertImage: () -> Unit,
+    onInsertText: () -> Unit,
+    pageManagerOpen: Boolean,
+    onPageManagerToggle: () -> Unit,
+    onPageAdd: () -> Unit,
+    onPreviousPage: () -> Unit,
+    onNextPage: () -> Unit,
+    notebookManagerOpen: Boolean,
+    onNotebookManagerToggle: () -> Unit,
+    onNotebookCurrentPage: () -> Unit,
+    onNotebookCurrentToEnd: () -> Unit,
+    exportPanelOpen: Boolean,
+    onExportPanelToggle: () -> Unit,
+    settingsOpen: Boolean,
+    debugMode: Boolean,
+    onSettingsOpen: () -> Unit,
+    onDebugToggle: () -> Unit,
     penToolbarSettings: PenToolbarSettings,
     onPenSlotSelected: (Int) -> Unit,
     onPenSettingsChange: (Int, PenSettings) -> Unit,
-    onPenPanelVisibilityChange: (Boolean) -> Unit,
-    debugMode: Boolean,
-    onDebugModeChange: (Boolean) -> Unit
+    onPenPanelVisibilityChange: (Boolean) -> Unit
 ) {
-    var menuExpanded by remember { mutableStateOf(false) }
     var editingPenSlot by remember { mutableStateOf<Int?>(null) }
-    LaunchedEffect(editingPenSlot) {
-        onPenPanelVisibilityChange(editingPenSlot != null)
+    var insertExpanded by remember { mutableStateOf(false) }
+    var quickPanelExpanded by remember { mutableStateOf(false) }
+    LaunchedEffect(editingPenSlot, insertExpanded, quickPanelExpanded) {
+        onPenPanelVisibilityChange(editingPenSlot != null || insertExpanded || quickPanelExpanded)
     }
 
     val buttons: @Composable () -> Unit = {
@@ -222,6 +277,31 @@ private fun ToolbarContent(
             enabled = true,
             selected = toolKind == ToolKind.LASSO
         ) { onToolSelected(ToolKind.LASSO) }
+        Box {
+            SquareIconButton(
+                Icons.Filled.PostAdd,
+                "插入图片或文字",
+                enabled = true,
+                selected = insertionActive,
+                onClick = {
+                    quickPanelExpanded = false
+                    insertExpanded = true
+                }
+            )
+            InsertTypeMenu(
+                expanded = insertExpanded,
+                onDismiss = { insertExpanded = false },
+                dockEdge = dockEdge,
+                onImage = {
+                    insertExpanded = false
+                    onInsertImage()
+                },
+                onText = {
+                    insertExpanded = false
+                    onInsertText()
+                }
+            )
+        }
         SquareIconButton(
             Icons.AutoMirrored.Filled.Undo,
             "Undo",
@@ -243,22 +323,59 @@ private fun ToolbarContent(
             selected = false,
             onClick = onDelete
         )
+        SquareIconButton(
+            Icons.Filled.Layers,
+            "Pages: tap to manage; Side1 add; Side2 previous; Side3 next",
+            enabled = true,
+            selected = pageManagerOpen,
+            onFunctionClick = onPageAdd,
+            onSide2Click = onPreviousPage,
+            onSide3Click = onNextPage,
+            onClick = onPageManagerToggle
+        )
+        SquareIconButton(
+            NotebookBookIcon,
+            "Notebooks: tap to manage; Side1 current page; Side2 current to end",
+            enabled = true,
+            selected = notebookManagerOpen,
+            onFunctionClick = onNotebookCurrentPage,
+            onSide2Click = onNotebookCurrentToEnd,
+            onSide3Click = {},
+            onClick = onNotebookManagerToggle
+        )
+        SquareIconButton(
+            Icons.Filled.IosShare,
+            "Export: tap to open export panel",
+            enabled = true,
+            selected = exportPanelOpen,
+            onClick = onExportPanelToggle
+        )
         Box {
-            SquareIconButton(Icons.Filled.Menu, "More", enabled = true, selected = menuExpanded) {
-                menuExpanded = true
-            }
-            DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }) {
-                Row(
-                    modifier = Modifier
-                        .clickable { onDebugModeChange(!debugMode) }
-                        .padding(horizontal = 16.dp, vertical = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Icon(Icons.Filled.BugReport, contentDescription = null)
-                    Text("Debug mode", modifier = Modifier.padding(horizontal = 8.dp))
-                    Switch(checked = debugMode, onCheckedChange = onDebugModeChange)
+            SquareIconButton(
+                Icons.Filled.Menu,
+                "Settings: tap to open; Side1 opens quick panel",
+                enabled = true,
+                selected = settingsOpen || quickPanelExpanded,
+                onFunctionClick = {
+                    insertExpanded = false
+                    quickPanelExpanded = true
+                },
+                onClick = onSettingsOpen
+            )
+            QuickMenuPanel(
+                expanded = quickPanelExpanded,
+                onDismiss = { quickPanelExpanded = false },
+                dockEdge = dockEdge,
+                debugMode = debugMode,
+                onSettings = {
+                    quickPanelExpanded = false
+                    onSettingsOpen()
+                },
+                onDebugToggle = {
+                    quickPanelExpanded = false
+                    onDebugToggle()
                 }
-            }
+            )
         }
     }
 
@@ -280,6 +397,112 @@ private fun penTypeName(type: PenType): String = when (type) {
     PenType.NormalPen -> "pen"
     PenType.Pencil -> "pencil"
     PenType.Marker -> "marker"
+}
+
+@Composable
+private fun InsertTypeMenu(
+    expanded: Boolean,
+    onDismiss: () -> Unit,
+    dockEdge: DockEdge,
+    onImage: () -> Unit,
+    onText: () -> Unit
+) {
+    if (!expanded) return
+    ToolbarPopup(dockEdge = dockEdge, onDismiss = onDismiss) {
+        Row(
+            modifier = Modifier.padding(4.dp),
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            PopupIconButton(
+                icon = Icons.Filled.AddPhotoAlternate,
+                contentDescription = "插入图片",
+                onClick = onImage
+            )
+            PopupIconButton(
+                icon = Icons.Filled.TextFields,
+                contentDescription = "插入文字",
+                onClick = onText
+            )
+        }
+    }
+}
+
+@Composable
+private fun QuickMenuPanel(
+    expanded: Boolean,
+    onDismiss: () -> Unit,
+    dockEdge: DockEdge,
+    debugMode: Boolean,
+    onSettings: () -> Unit,
+    onDebugToggle: () -> Unit
+) {
+    if (!expanded) return
+    ToolbarPopup(dockEdge = dockEdge, onDismiss = onDismiss) {
+        Row(
+            modifier = Modifier.padding(4.dp),
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            PopupIconButton(
+                icon = Icons.Filled.Settings,
+                contentDescription = "打开设置",
+                onClick = onSettings
+            )
+            PopupIconButton(
+                icon = Icons.Filled.BugReport,
+                contentDescription = if (debugMode) "关闭调试模式" else "开启调试模式",
+                selected = debugMode,
+                onClick = onDebugToggle
+            )
+        }
+    }
+}
+
+@Composable
+private fun ToolbarPopup(
+    dockEdge: DockEdge,
+    onDismiss: () -> Unit,
+    content: @Composable () -> Unit
+) {
+    val gapPx = with(LocalDensity.current) { 12.dp.roundToPx() }
+    Popup(
+        popupPositionProvider = remember(dockEdge, gapPx) {
+            PenPanelPositionProvider(dockEdge, gapPx)
+        },
+        onDismissRequest = onDismiss,
+        properties = PopupProperties(
+            focusable = true,
+            dismissOnBackPress = true,
+            dismissOnClickOutside = true
+        )
+    ) {
+        Surface(
+            shape = RectangleShape,
+            color = Color(0xFFF7F7F7),
+            tonalElevation = 0.dp,
+            shadowElevation = 0.dp,
+            border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF707070)),
+            content = content
+        )
+    }
+}
+
+@Composable
+private fun PopupIconButton(
+    icon: ImageVector,
+    contentDescription: String,
+    selected: Boolean = false,
+    onClick: () -> Unit
+) {
+    Box(
+        modifier = Modifier
+            .size(48.dp)
+            .background(if (selected) Color(0xFFB0C4DE) else Color.White)
+            .border(1.dp, if (selected) Color(0xFF516780) else Color(0xFFB0B0B0))
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center
+    ) {
+        Icon(icon, contentDescription = contentDescription, tint = Color.Black)
+    }
 }
 
 @Composable
@@ -306,11 +529,11 @@ private fun PenSettingsMenu(
         )
     ) {
         Surface(
-            modifier = Modifier.width(292.dp),
-            shape = MaterialTheme.shapes.extraSmall,
-            color = MaterialTheme.colorScheme.surface,
-            tonalElevation = 3.dp,
-            shadowElevation = 8.dp
+            modifier = Modifier.width(292.dp).border(1.dp, Color(0xFF707070), RectangleShape),
+            shape = RectangleShape,
+            color = Color.White,
+            tonalElevation = 0.dp,
+            shadowElevation = 0.dp
         ) {
             Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
                 Spacer(Modifier.height(6.dp))
@@ -480,6 +703,8 @@ private fun SquareIconButton(
     enabled: Boolean,
     selected: Boolean,
     onFunctionClick: (() -> Unit)? = null,
+    onSide2Click: (() -> Unit)? = null,
+    onSide3Click: (() -> Unit)? = null,
     onDoubleClick: (() -> Unit)? = null,
     onClick: () -> Unit
 ) = SquarePainterButton(
@@ -488,6 +713,8 @@ private fun SquareIconButton(
     enabled = enabled,
     selected = selected,
     onFunctionClick = onFunctionClick,
+    onSide2Click = onSide2Click,
+    onSide3Click = onSide3Click,
     onDoubleClick = onDoubleClick,
     onClick = onClick
 )
@@ -500,17 +727,21 @@ private fun SquarePainterButton(
     enabled: Boolean,
     selected: Boolean,
     onFunctionClick: (() -> Unit)? = null,
+    onSide2Click: (() -> Unit)? = null,
+    onSide3Click: (() -> Unit)? = null,
     onDoubleClick: (() -> Unit)? = null,
     onClick: () -> Unit
 ) {
-    var functionClickArmed by remember { mutableStateOf(false) }
+    val stylusClick = remember { StylusClickResolver() }
     val background = if (selected) Color(0xFFB0C4DE) else Color.Transparent
     val tint = if (enabled) Color.Black else Color.Gray
     val resolvedClick = {
-        val functionPressed = onFunctionClick != null &&
-            (functionClickArmed || PenButtonTracker.consumeSideKey1Click())
-        if (functionPressed) onFunctionClick?.invoke() else onClick()
-        functionClickArmed = false
+        when (stylusClick.consume()) {
+            PenSideButton.SIDE_1 -> (onFunctionClick ?: onClick).invoke()
+            PenSideButton.SIDE_2 -> (onSide2Click ?: onClick).invoke()
+            PenSideButton.SIDE_3 -> (onSide3Click ?: onClick).invoke()
+            PenSideButton.NONE -> onClick()
+        }
     }
     val gestures = if (onDoubleClick != null) {
         Modifier.combinedClickable(
@@ -521,12 +752,13 @@ private fun SquarePainterButton(
     } else {
         Modifier.clickable(enabled = enabled, onClick = resolvedClick)
     }
-    val functionKeyDetector = if (onFunctionClick != null) {
+    val functionKeyDetector = if (
+        onFunctionClick != null || onSide2Click != null || onSide3Click != null
+    ) {
         @Suppress("DEPRECATION")
         Modifier.pointerInteropFilter { event ->
             if (event.actionMasked == MotionEvent.ACTION_DOWN) {
-                functionClickArmed = event.pointerCount > 0 &&
-                    PenFunctionKey.isPressed(event.getToolType(0), event.buttonState, event.source)
+                stylusClick.observe(event)
                 PenButtonTracker.observeMotion(event, "pen-icon")
             }
             false

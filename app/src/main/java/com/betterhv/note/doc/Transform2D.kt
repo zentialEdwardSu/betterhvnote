@@ -82,5 +82,15 @@ data class Transform2D(
                 tx = centerX - scale * centerX,
                 ty = centerY - scale * centerY
             )
+
+        fun rotateAbout(centerX: Float, centerY: Float, radians: Float): Transform2D {
+            val cos = kotlin.math.cos(radians)
+            val sin = kotlin.math.sin(radians)
+            return Transform2D(
+                a = cos, b = sin, c = -sin, d = cos,
+                tx = centerX - cos * centerX + sin * centerY,
+                ty = centerY - sin * centerX - cos * centerY
+            )
+        }
     }
 }

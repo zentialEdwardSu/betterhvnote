@@ -30,7 +30,7 @@ object PenButtonTracker {
     private var keyButtons: Int = 0
 
     @Volatile
-    private var sideKey1TouchGestureArmed: Boolean = false
+    private var touchGestureModifier: PenSideButton = PenSideButton.NONE
 
     private var lastLoggedMotionButtons: Int = Int.MIN_VALUE
     private var lastLoggedToolType: Int = Int.MIN_VALUE
@@ -40,14 +40,25 @@ object PenButtonTracker {
     fun isSideKey1Pressed(): Boolean =
         currentButtonState and SIDE_KEY_1_MASK != 0
 
+    fun currentClickModifier(): PenSideButton = when {
+        currentButtonState and SIDE_KEY_3_MASK != 0 -> PenSideButton.SIDE_3
+        currentButtonState and SIDE_KEY_2_MASK != 0 -> PenSideButton.SIDE_2
+        currentButtonState and SIDE_KEY_1_MASK != 0 -> PenSideButton.SIDE_1
+        else -> touchGestureModifier
+    }
+
     /** Survives ROMs that clear buttonState on ACTION_UP before Compose invokes onClick. */
     fun consumeSideKey1Click(): Boolean {
-        val pressed = sideKey1TouchGestureArmed || isSideKey1Pressed()
-        sideKey1TouchGestureArmed = false
-        // Do not let a ROM that omits ACTION_BUTTON_RELEASE turn one Side1 tap
-        // into a permanent modifier. A real subsequent press will arm it again.
-        actionButtons = actionButtons and SIDE_KEY_1_MASK.inv()
-        return pressed
+        return consumeClickModifier() == PenSideButton.SIDE_1
+    }
+
+    /** Consumes one complete tip click and clears stale action-button state for every side key. */
+    fun consumeClickModifier(): PenSideButton {
+        val modifier = currentClickModifier()
+        touchGestureModifier = PenSideButton.NONE
+        actionButtons = actionButtons and
+            (SIDE_KEY_1_MASK or SIDE_KEY_2_MASK or SIDE_KEY_3_MASK).inv()
+        return modifier
     }
 
     fun observeMotion(event: MotionEvent, channel: String) {
@@ -67,7 +78,9 @@ object PenButtonTracker {
         val effectiveButtons = currentButtonState
         val hvNoteButton = PenFunctionKey.classify(toolType, effectiveButtons, event.source)
         if (event.actionMasked == MotionEvent.ACTION_DOWN) {
-            sideKey1TouchGestureArmed = hvNoteButton == PenSideButton.SIDE_1
+            touchGestureModifier = PenFunctionKey.classifyClickModifier(
+                toolType, effectiveButtons, event.source
+            )
         }
 
         val isButtonAction = action == MotionEvent.ACTION_BUTTON_PRESS ||
