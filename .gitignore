@@ -12,3 +12,7 @@ build/
 hvNote/
 tools/
 
+# Keep repository-facing docs only; implementation notes and plans stay local.
+*.md
+!CLAUDE.md
+!README.md

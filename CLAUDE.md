@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 BetterHvNote is an Android app that replaces the stock note-taking app on Hanvon e-ink stylus tablets (e.g. N10Pro, running a custom ROM on API 34/Android 14). The device ROM exposes a proprietary low-latency pen overlay service (`android.os.HvPenDrawManager` / `HvPenDrawListener`, obtained via `getSystemService("hvpen")`) and several vendor native libraries for pen rendering, gesture recognition, and e-ink dithering. This codebase is a clean-room Kotlin rewrite of the stock app's pen pipeline, reverse-engineered from the decompiled vendor app (referred to in comments as "hvNote 7.16") and ported bit-exact where the ROM's expected behavior is undocumented (coordinate transforms, mode constants).
 
-`inkengine-plan.md` is the long-term architecture spec (in Chinese) for the full note app — Notebook/Page/Scene, Command pattern with Undo/Redo, spatial index, SQLite+WAL persistence, tile-cache rendering, PDF/PNG export, and later image/audio/AI features. **The actual code implements only an early slice of that plan**: Phase 1 ("Ink Engine") — vector strokes as the source of truth, pressure-mapped variable-width geometry, online smoothing/filtering, RDP simplification, and a Skia-based renderer with dirty-rect repaint. There is no Document Core (Notebook/Page/UUID), no Command/Undo system, no persistence layer, and no spatial index yet — erasing is currently a linear scan over all strokes. When implementing new features, check `inkengine-plan.md` section numbers (referenced in code comments as "spec §N") for the target architecture, but don't assume anything beyond the ink engine already exists.
+`inkengine-plan.md` is the long-term architecture spec (in Chinese). The code now implements Phases 1–6: vector ink, Notebook/Page/Scene/UUID, uniform-grid spatial queries, eraser/lasso/transform editing, Command-based undo/redo, SQLite+WAL autosave/recovery/migrations, and multi-page navigation with a three-Scene cache and asynchronous vector thumbnails. **Phase 7 export** is now implemented (PNG/PDF export with vector strokes, see `export/` package). Future image/audio/sync/AI providers are not implemented. When adding features, check the cited `inkengine-plan.md` section numbers and preserve the existing Core → storage/render boundary.
 
 ## Tooling preference
 
@@ -23,7 +23,7 @@ For refactoring, building, or deploying to a device, prefer the Android Studio M
 
 `build.sh` sets `JAVA_HOME` to a JDK 17 install and runs `assembleDebug` — useful as a reference for the required JDK version if `./gradlew` fails with a Java version error.
 
-Only the `com.betterhv.note.ink` package has tests, and deliberately so — see the comment in `app/build.gradle.kts`: that package has no Android dependencies, so plain JUnit4 on the JVM covers it fully with no Robolectric/instrumentation needed. Anything touching `android.graphics`, `View`, or the vendor JNI/ROM classes (`PenDrawView`, `StrokeRenderer`, `PenGeometry`, `NativeSelfTest`) is not unit-testable this way and has no test coverage — verify changes to those files on-device.
+The framework-free `ink`, `doc`, `tool`, and pure `storage` components use plain JUnit4 without Robolectric. Android SQLite, `android.graphics`, `View`, and vendor JNI/ROM integration (`PenDrawView`, `ThumbnailManager`, `PenGeometry`, `NativeSelfTest`) still require an Android device for end-to-end verification.
 
 There is no CI config in this repo; `./gradlew test` and `./gradlew assembleDebug` are the checks to run before considering a change done.
 
@@ -92,3 +92,39 @@ Before adding or changing a native method signature, verify the exported symbol 
 
 - Comments in this codebase frequently cite `inkengine-plan.md` by section number (e.g. "spec §22") and/or the decompiled vendor source ("hvNote 7.16 smali", "HandView", "PslOp", "MemoView"). When modifying pipeline code, check whether a similar cross-reference should be added/updated — these comments are load-bearing documentation of *why*, not incidental.
 - Do not "clean up" or refactor `PenGeometry`'s branch structure or the ROM mode constants in `PenDrawView` — they encode reverse-engineered, per-device-model vendor behavior with no independent spec to verify against; a simplification that looks equivalent can silently break specific hardware/rotation combinations.
+
+### Export system (`com.betterhv.note.export`)
+
+The export functionality (Phase 7) follows the architecture principle: **strokes are source of truth**. Export never reads from rendered bitmaps; it renders fresh from `PageSnapshot`.
+
+**Key components:**
+- `ExportTaskRepository` stores reusable single-page, fixed-selection, and all-page tasks in the notebook SQLite database.
+- `PageRenderer` uses one Android Canvas path for 2x PNG and vector PDF output, including multiline text, object transforms, and image EXIF orientation.
+- `ExportEngine` caches one PDF per `pageId + contentRevision + rendererVersion`; multi-page output re-renders only stale pages and combines the cached pages with the Android-specific iTextG port.
+- `ExportViewModel` owns the active job, progress/cancellation, Downloads destination, and task list state.
+- `ExportManagerScreen` is the full-screen, cross-notebook task manager opened from both the toolbar and notebook cards.
+
+**Export formats:**
+- **PNG**: Single page only, 2x resolution, ARGB_8888
+- **PDF**: Single page, page range, or all pages, vector strokes (scalable)
+
+**File locations:**
+- Internal reusable artifacts and page caches live below `files/exports/` and are written atomically.
+- User-facing local copies are published through MediaStore to `Downloads/BetterHvNote`.
+
+**NoteLink integration:**
+- BLE capability negotiation and push commands extend the existing protocol without renumbering Phone→Note commands.
+- NoteLink remains discoverable after pairing, receives PDF/PNG over the encrypted Wi-Fi Direct file channel, and keeps a persistent inbox.
+- Artifact IDs make retry idempotent; the receiver validates declared length and SHA-256 before committing a file.
+
+**Known limitations:**
+- PDF ink annotations (editability in PDF viewers) deferred to future phase
+- Large notebooks (>100 pages) not stress-tested
+- Memory: renders one page at a time, recycles bitmaps immediately
+
+**Testing:**
+- `ExportRevisionTest` covers revision/order fingerprints, stale-page calculation, and source-invalid state.
+- `PageRendererInstrumentedTest` covers actual Android PNG/PDF rendering, page dimensions, and multi-page PDF assembly.
+- `BleQueueProtocolTest` covers the backward-compatible export push command/response codec.
+
+When adding a format, extend `ExportFormat`, task validation, `ExportEngine.generate()`, and NoteLink's accepted MIME allowlist together.
