@@ -121,7 +121,13 @@ internal fun Modifier.penInputGuard(onBlockedChange: (Boolean) -> Unit): Modifie
                 updateBlocked(true)
             }
             MotionEvent.ACTION_DOWN -> updateBlocked(true)
-            MotionEvent.ACTION_UP -> if (!stylusHovering) updateBlocked(false)
+            // Some digitizers do not emit HOVER_EXIT after a stylus click on a
+            // Compose control. The touch-up is the end of the blocking gesture;
+            // waiting only for hover exit can leave the canvas disabled forever.
+            MotionEvent.ACTION_UP -> {
+                stylusHovering = false
+                updateBlocked(false)
+            }
             MotionEvent.ACTION_HOVER_EXIT -> {
                 stylusHovering = false
                 updateBlocked(false)

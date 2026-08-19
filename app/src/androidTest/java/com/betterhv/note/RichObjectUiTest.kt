@@ -38,11 +38,9 @@ class RichObjectUiTest {
         device.wakeUp()
         device.executeShellCommand("wm dismiss-keyguard")
         rule.scenario.onActivity { activity ->
-            activity.window.addFlags(
-                android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON or
-                    android.view.WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON or
-                    android.view.WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED
-            )
+            activity.window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+            activity.setTurnScreenOn(true)
+            activity.setShowWhenLocked(true)
         }
         device.waitForIdle()
     }

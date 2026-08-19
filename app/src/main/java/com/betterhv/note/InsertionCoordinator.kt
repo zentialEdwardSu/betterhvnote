@@ -14,9 +14,21 @@ import kotlinx.coroutines.withContext
 sealed interface InsertionState {
     data object Idle : InsertionState
     data class ChoosingSource(val kind: ContentKind) : InsertionState
+    data class ChoosingClient(
+        val kind: ContentKind,
+        val clients: List<PhoneTransferClient.AvailableNoteLink>
+    ) : InsertionState
     data class WaitingForPhone(val kind: ContentKind) : InsertionState
-    data class ImageReady(val image: ImportedImage, val lease: ReceivedLease?) : InsertionState
-    data class TextReady(val initialText: String, val lease: ReceivedLease?) : InsertionState
+    data class ImageReady(
+        val image: ImportedImage,
+        val lease: ReceivedLease?,
+        val sourceDeviceId: String? = null
+    ) : InsertionState
+    data class TextReady(
+        val initialText: String,
+        val lease: ReceivedLease?,
+        val sourceDeviceId: String? = null
+    ) : InsertionState
     data class Error(val message: String) : InsertionState
 }
 
@@ -36,9 +48,13 @@ class InsertionCoordinator(private val phone: PhoneTransferClient) : AutoCloseab
         cancel()
         val generation = requestGeneration
         mutableState.value = InsertionState.WaitingForPhone(kind)
-        val available = phone.hasAvailable(kind)
+        val available = phone.discoverAvailable(kind)
         if (generation != requestGeneration) return
-        if (available) remote(kind) else mutableState.value = InsertionState.ChoosingSource(kind)
+        when (available.size) {
+            0 -> mutableState.value = InsertionState.ChoosingSource(kind)
+            1 -> remote(available.single().client.id, kind)
+            else -> mutableState.value = InsertionState.ChoosingClient(kind, available)
+        }
     }
 
     suspend fun localImage(uri: Uri) {
@@ -59,30 +75,55 @@ class InsertionCoordinator(private val phone: PhoneTransferClient) : AutoCloseab
         cancel()
         val generation = requestGeneration
         mutableState.value = InsertionState.WaitingForPhone(kind)
-        runCatching { phone.requestNext(kind) }
+        val available = phone.discoverAvailable(kind)
+        if (generation != requestGeneration) return
+        when (available.size) {
+            0 -> mutableState.value = InsertionState.Error(
+                "没有发现包含${if (kind == ContentKind.IMAGE) "图片" else "文字"}的 NoteLink"
+            )
+            1 -> remote(available.single().client.id, kind)
+            else -> mutableState.value = InsertionState.ChoosingClient(kind, available)
+        }
+    }
+
+    suspend fun remote(clientId: String, kind: ContentKind) {
+        cancel()
+        val generation = requestGeneration
+        mutableState.value = InsertionState.WaitingForPhone(kind)
+        runCatching { phone.requestNext(clientId, kind) }
             .onSuccess { lease ->
-                if (generation != requestGeneration) {
-                    (lease?.payload as? RemotePayload.Image)?.stagedFile?.delete()
-                    lease?.release()
-                    return@onSuccess
-                }
-                if (lease == null) {
-                    mutableState.value = InsertionState.Error("手机队列中没有${if (kind == ContentKind.IMAGE) "图片" else "文字"}")
-                    return@onSuccess
-                }
-                when (val payload = lease.payload) {
-                    is RemotePayload.Image -> {
-                        val staged = withContext(Dispatchers.IO) {
-                            requireNotNull(penView).stageRemoteImage(payload.stagedFile, payload.item.mimeType)
-                                .also { payload.stagedFile.delete() }
-                        }
-                        if (generation == requestGeneration) mutableState.value = InsertionState.ImageReady(staged, lease)
-                        else {
-                            penView?.discardImportedImage(staged)
-                            lease.release()
-                        }
+                try {
+                    if (generation != requestGeneration) {
+                        (lease?.payload as? RemotePayload.Image)?.stagedFile?.delete()
+                        lease?.let { runCatching(it::release) }
+                        return@onSuccess
                     }
-                    is RemotePayload.Text -> mutableState.value = InsertionState.TextReady(payload.text, lease)
+                    if (lease == null) {
+                        mutableState.value = InsertionState.Error("手机队列中没有${if (kind == ContentKind.IMAGE) "图片" else "文字"}")
+                        return@onSuccess
+                    }
+                    when (val payload = lease.payload) {
+                        is RemotePayload.Image -> {
+                            val staged = withContext(Dispatchers.IO) {
+                                requireNotNull(penView).stageRemoteImage(payload.stagedFile, payload.item.mimeType)
+                                    .also { payload.stagedFile.delete() }
+                            }
+                            if (generation == requestGeneration) {
+                                mutableState.value = InsertionState.ImageReady(staged, lease, clientId)
+                            }
+                            else {
+                                penView?.discardImportedImage(staged)
+                                runCatching(lease::release)
+                            }
+                        }
+                        is RemotePayload.Text -> mutableState.value = InsertionState.TextReady(payload.text, lease, clientId)
+                    }
+                } catch (error: Throwable) {
+                    (lease?.payload as? RemotePayload.Image)?.stagedFile?.delete()
+                    lease?.let { runCatching(it::release) }
+                    if (generation == requestGeneration) {
+                        mutableState.value = InsertionState.Error(error.message ?: "手机传输失败")
+                    }
                 }
             }
             .onFailure {
@@ -98,7 +139,7 @@ class InsertionCoordinator(private val phone: PhoneTransferClient) : AutoCloseab
             runCatching { view.placeImage(ready.image, x, y) }
         } else {
             val item = ready.lease.offer.item
-            view.placeTransferredImage(ready.image, x, y, PHONE_DEVICE_ID, item.id)
+            view.placeTransferredImage(ready.image, x, y, requireNotNull(ready.sourceDeviceId), item.id)
                 .onSuccess { ready.lease.commit() }
         }
         if (result.isSuccess) mutableState.value = InsertionState.Idle
@@ -112,7 +153,9 @@ class InsertionCoordinator(private val phone: PhoneTransferClient) : AutoCloseab
         val result = if (ready.lease == null) {
             runCatching { view.placeText(text, x, y) }
         } else {
-            view.placeTransferredText(text, x, y, PHONE_DEVICE_ID, ready.lease.offer.item.id)
+            view.placeTransferredText(
+                text, x, y, requireNotNull(ready.sourceDeviceId), ready.lease.offer.item.id
+            )
                 .onSuccess { ready.lease.commit() }
         }
         if (result.isSuccess) mutableState.value = InsertionState.Idle

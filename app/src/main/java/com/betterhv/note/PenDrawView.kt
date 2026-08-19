@@ -1037,8 +1037,33 @@ class PenDrawView @JvmOverloads constructor(
         if (uiInputBlocked == blocked) return
         if (blocked) materialize()
         uiInputBlocked = blocked
+        // UI surfaces only suspend hvpen temporarily. Some gesture paths also
+        // change romPenInkRequested, so explicitly restore the user's normal
+        // writing state when the last blocking surface closes.
+        if (!blocked) romPenInkRequested = true
         applyRomPenInkState(resetData = true)
-        EventLog.log(TAG, "ui input blocked=$blocked")
+        EventLog.log(TAG, "ui input blocked=$blocked romRequested=$romPenInkRequested")
+    }
+
+    /** Reasserts the vendor pen service after Android has suspended the process. */
+    fun recoverAfterWake() {
+        if (uiInputBlocked || width <= 0 || height <= 0) return
+        romPenInkRequested = true
+        try {
+            if (!initPenService) {
+                initPenDraw()
+            } else {
+                applyPenStyleToService()
+                penDraw?.setAreaActive(penDrawPt, true)
+                applyRomPenInkState(resetData = true)
+            }
+            EventLog.log(TAG, "hvpen recovered after wake handle=$penDrawPt")
+        } catch (t: Throwable) {
+            EventLog.log(TAG, "ERROR recovering hvpen: ${t.javaClass.simpleName}: ${t.message}")
+            initPenService = false
+            penDraw = null
+            initPenDraw()
+        }
     }
 
     // -- Lasso API, called by LassoOverlayView --------------------------------

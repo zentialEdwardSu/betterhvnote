@@ -65,6 +65,7 @@ import com.betterhv.note.export.ExportScope
 import com.betterhv.note.export.ExportTaskState
 import com.betterhv.note.export.ExportTaskSummary
 import com.betterhv.note.export.ExportViewModel
+import com.betterhv.transfer.core.PairedDevice
 import java.text.DateFormat
 import java.util.Date
 import java.util.UUID
@@ -78,17 +79,18 @@ fun ExportManagerScreen(
     initialNotebookId: UUID,
     creationRequest: Long,
     currentNotebookId: UUID,
-    phoneTransferAvailable: Boolean,
+    pairedClients: List<PairedDevice>,
     pageBitmap: (UUID) -> Bitmap?,
     requestThumbnails: (List<UUID>) -> Unit,
     beforeExport: suspend (UUID) -> Boolean,
-    sendToNoteLink: suspend (ExportArtifact, (Long, Long) -> Unit) -> Unit,
+    sendToNoteLink: suspend (String, ExportArtifact, (Long, Long) -> Unit) -> Unit,
     onNotice: (String) -> Unit,
     onClose: () -> Unit
 ) {
     val state by viewModel.state.collectAsState()
     var creating by remember { mutableStateOf(false) }
     var deleteTask by remember { mutableStateOf<ExportTaskSummary?>(null) }
+    var sendTask by remember { mutableStateOf<ExportTaskSummary?>(null) }
 
     LaunchedEffect(creationRequest) {
         if (creationRequest > 0) creating = true
@@ -134,11 +136,16 @@ fun ExportManagerScreen(
                                 summary = summary,
                                 active = state.activeTaskId == summary.task.id,
                                 busy = state.activeTaskId != null,
-                                phoneTransferAvailable = phoneTransferAvailable,
+                                phoneTransferAvailable = pairedClients.isNotEmpty(),
                                 progress = state.progress,
                                 onSave = { viewModel.saveToDownloads(summary.task.id, beforeExport) },
                                 onSend = {
-                                    viewModel.sendToNoteLink(summary.task.id, beforeExport, sendToNoteLink)
+                                    if (pairedClients.size == 1) {
+                                        val clientId = pairedClients.single().id
+                                        viewModel.sendToNoteLink(summary.task.id, beforeExport) { artifact, progress ->
+                                            sendToNoteLink(clientId, artifact, progress)
+                                        }
+                                    } else sendTask = summary
                                 },
                                 onDelete = { deleteTask = summary }
                             )
@@ -165,6 +172,23 @@ fun ExportManagerScreen(
                         deleteTask = null
                     }
                 }
+            }
+        }
+    }
+
+    sendTask?.let { summary ->
+        EinkModalOverlay(onDismissRequest = { sendTask = null }) {
+            Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text("发送到 NoteLink", fontSize = 20.sp, fontWeight = FontWeight.Medium)
+                pairedClients.sortedByDescending(PairedDevice::lastUsedAt).forEach { client ->
+                    EinkDialogAction(client.name) {
+                        sendTask = null
+                        viewModel.sendToNoteLink(summary.task.id, beforeExport) { artifact, progress ->
+                            sendToNoteLink(client.id, artifact, progress)
+                        }
+                    }
+                }
+                EinkDialogAction("取消") { sendTask = null }
             }
         }
     }

@@ -77,7 +77,17 @@ sealed interface TransferState {
     data class Error(val message: String, val recoverable: Boolean = true) : TransferState
 }
 
-data class PairedDevice(val id: String, val name: String, val pairedAt: Long)
+data class PairedClient(
+    val id: String,
+    val name: String,
+    val pairedAt: Long,
+    val identityHash: String? = null,
+    val lastUsedAt: Long = pairedAt,
+    val legacy: Boolean = false
+)
+
+/** Kept as a source-compatible alias while Android callers migrate to the multi-client API. */
+typealias PairedDevice = PairedClient
 
 data class TransferOffer(val item: QueueItem, val inlinePayload: ByteArray? = null)
 

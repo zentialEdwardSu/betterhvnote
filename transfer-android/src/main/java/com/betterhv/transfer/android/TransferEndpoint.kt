@@ -30,7 +30,10 @@ data class DiscoveredSender(
     val name: String,
     val imageCount: Int,
     val textCount: Int
-)
+) {
+    /** Version-1 advertisements carry the first five SHA-256 bytes, not the full device ID. */
+    val identityHash: String get() = deviceId
+}
 
 interface ReceivedLease : TransferLease {
     val payload: RemotePayload
@@ -56,11 +59,15 @@ interface ReceiptStore {
 
 interface PairingController {
     val localDeviceId: String
-    val pairedDevice: PairedDevice?
+    val pairedClients: List<PairedDevice>
+    val pairedDevice: PairedDevice? get() = pairedClients.maxByOrNull(PairedDevice::lastUsedAt)
+    fun pairedClient(deviceId: String): PairedDevice? = pairedClients.firstOrNull { it.id == deviceId }
     fun begin(localDeviceName: String): PairingOffer
     fun accept(offer: PairingOffer, remoteDeviceName: String): PairingConfirmation
     fun confirm(confirmation: PairingConfirmation): PairedDevice
-    fun unpair()
+    fun unpair(deviceId: String? = null)
+    fun rename(deviceId: String, name: String): PairedDevice
+    fun markLastUsed(deviceId: String): PairedDevice
     fun sharedKey(deviceId: String): ByteArray?
 }
 
@@ -72,4 +79,12 @@ data class PairingConfirmation(
     val remoteDeviceName: String,
     val verificationCode: String,
     internal val sharedKey: ByteArray
+)
+
+data class BleIdentity(
+    val protocolVersion: Int,
+    val imageCount: Int,
+    val textCount: Int,
+    val deviceId: String,
+    val deviceName: String
 )

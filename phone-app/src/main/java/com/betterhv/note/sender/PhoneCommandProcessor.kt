@@ -1,14 +1,14 @@
 package com.betterhv.note.sender
 
 import com.betterhv.transfer.android.AndroidPairingController
-import com.betterhv.transfer.android.BleCommand
-import com.betterhv.transfer.android.BleQueueProtocol
-import com.betterhv.transfer.android.BleResponse
 import com.betterhv.transfer.android.BleReplayCache
 import com.betterhv.transfer.android.BleSecureEnvelope
 import com.betterhv.transfer.android.EncryptedFileTransfer
 import com.betterhv.transfer.android.SenderLease
 import com.betterhv.transfer.android.WifiDirectController
+import com.betterhv.transfer.core.BleCommand
+import com.betterhv.transfer.core.BleQueueProtocol
+import com.betterhv.transfer.core.BleResponse
 import android.util.Log
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap

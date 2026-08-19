@@ -26,6 +26,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.AddPhotoAlternate
 import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.ContentPaste
@@ -67,7 +68,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -646,7 +647,7 @@ private fun InboxCard(
             )
             Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 if (item.state == InboxExportState.COMPLETE) {
-                    IconButton(onClick = onOpen) { Icon(Icons.Default.OpenInNew, "打开") }
+                    IconButton(onClick = onOpen) { Icon(Icons.AutoMirrored.Filled.OpenInNew, "打开") }
                     IconButton(onClick = onShare) { Icon(Icons.Default.Share, "分享") }
                     IconButton(onClick = onSave) { Icon(Icons.Default.Download, "保存到 Downloads") }
                 }

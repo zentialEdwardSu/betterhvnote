@@ -9,6 +9,7 @@ import android.bluetooth.BluetoothGattDescriptor
 import android.bluetooth.BluetoothGattServer
 import android.bluetooth.BluetoothGattServerCallback
 import android.bluetooth.BluetoothManager
+import android.bluetooth.BluetoothStatusCodes
 import android.bluetooth.le.AdvertiseCallback
 import android.bluetooth.le.AdvertiseData
 import android.bluetooth.le.AdvertiseSettings
@@ -16,8 +17,12 @@ import android.content.Context
 import android.os.ParcelUuid
 import android.util.Log
 import com.betterhv.transfer.core.ContentKind
-import java.nio.ByteBuffer
-import java.nio.ByteOrder
+import com.betterhv.transfer.core.BleTransportFrameCodec
+import com.betterhv.transfer.core.BleTransportReassembler
+import com.betterhv.transfer.core.NoteLinkAdvertisementCodec
+import com.betterhv.transfer.core.TransferCrypto
+import java.util.ArrayDeque
+import java.util.concurrent.atomic.AtomicInteger
 
 /** BLE peripheral used by the phone. Control payloads are deliberately small and MTU-safe. */
 class BleSenderPeripheral(
@@ -33,10 +38,28 @@ class BleSenderPeripheral(
     private var server: BluetoothGattServer? = null
     private var response: BluetoothGattCharacteristic? = null
     private val subscribed = LinkedHashSet<BluetoothDevice>()
+    private val commandReassemblers = mutableMapOf<String, BleTransportReassembler>()
+    private val framedPeers = mutableMapOf<String, Boolean>()
+    private val negotiatedMtus = mutableMapOf<String, Int>()
+    private val pendingNotifications = mutableMapOf<String, ArrayDeque<ByteArray>>()
+    private val notificationInFlight = mutableSetOf<String>()
 
     private val callback = object : BluetoothGattServerCallback() {
         override fun onConnectionStateChange(device: BluetoothDevice, status: Int, newState: Int) {
-            if (newState != BluetoothGatt.STATE_CONNECTED) subscribed.remove(device)
+            if (newState != BluetoothGatt.STATE_CONNECTED) {
+                subscribed.remove(device)
+                synchronized(this@BleSenderPeripheral) {
+                    commandReassemblers.remove(device.address)
+                    framedPeers.remove(device.address)
+                    negotiatedMtus.remove(device.address)
+                    pendingNotifications.remove(device.address)
+                    notificationInFlight.remove(device.address)
+                }
+            }
+        }
+
+        override fun onMtuChanged(device: BluetoothDevice, mtu: Int) {
+            synchronized(this@BleSenderPeripheral) { negotiatedMtus[device.address] = mtu }
         }
 
         override fun onCharacteristicReadRequest(
@@ -51,7 +74,19 @@ class BleSenderPeripheral(
             device: BluetoothDevice, requestId: Int, characteristic: BluetoothGattCharacteristic,
             preparedWrite: Boolean, responseNeeded: Boolean, offset: Int, value: ByteArray
         ) {
-            val result = runCatching { onCommand(device, value) }
+            val reassembler = synchronized(this@BleSenderPeripheral) {
+                commandReassemblers.getOrPut(device.address) { BleTransportReassembler() }
+            }
+            val result = runCatching {
+                if (BleTransportFrameCodec.isFrame(value)) {
+                    synchronized(this@BleSenderPeripheral) { framedPeers[device.address] = true }
+                    reassembler.add(value)
+                } else {
+                    synchronized(this@BleSenderPeripheral) { framedPeers[device.address] = false }
+                    value.also { reassembler.reset() }
+                }
+            }.mapCatching { complete -> complete?.let { onCommand(device, it) } }
+            if (result.isFailure) reassembler.reset()
             if (responseNeeded) server?.sendResponse(
                 device, requestId,
                 if (result.isSuccess) BluetoothGatt.GATT_SUCCESS else BluetoothGatt.GATT_FAILURE,
@@ -70,6 +105,15 @@ class BleSenderPeripheral(
                 else subscribed -= device
             }
             if (responseNeeded) server?.sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, offset, null)
+        }
+
+        override fun onNotificationSent(device: BluetoothDevice, status: Int) {
+            synchronized(this@BleSenderPeripheral) {
+                notificationInFlight.remove(device.address)
+                if (status != BluetoothGatt.GATT_SUCCESS) pendingNotifications.remove(device.address)
+            }
+            if (status == BluetoothGatt.GATT_SUCCESS) sendNextNotification(device)
+            else Log.e(TAG, "BLE response frame failed: $status")
         }
     }
 
@@ -112,7 +156,7 @@ class BleSenderPeripheral(
             .addServiceUuid(ParcelUuid(BleConstants.SERVICE_UUID))
             .setIncludeDeviceName(false).build()
         val scanResponse = AdvertiseData.Builder()
-            .addManufacturerData(MANUFACTURER_ID, advertisementBytes())
+            .addManufacturerData(NoteLinkAdvertisementCodec.MANUFACTURER_ID, advertisementBytes())
             .setIncludeDeviceName(false).build()
         val settings = AdvertiseSettings.Builder()
             .setAdvertiseMode(AdvertiseSettings.ADVERTISE_MODE_LOW_LATENCY)
@@ -124,42 +168,75 @@ class BleSenderPeripheral(
     @SuppressLint("MissingPermission")
     fun notify(device: BluetoothDevice, value: ByteArray) {
         if (device !in subscribed) return
+        val framed = synchronized(this) { framedPeers[device.address] != false }
+        val maxFrameBytes = synchronized(this) {
+            ((negotiatedMtus[device.address] ?: 23) - 3)
+                .coerceAtLeast(BleTransportFrameCodec.HEADER_BYTES)
+                .coerceAtMost(BleTransportFrameCodec.DEFAULT_FRAME_BYTES)
+        }
+        val frames = if (framed) {
+            BleTransportFrameCodec.fragment(value, NEXT_MESSAGE_ID.getAndIncrement(), maxFrameBytes)
+        } else {
+            listOf(value)
+        }
+        synchronized(this) {
+            pendingNotifications.getOrPut(device.address) { ArrayDeque() }.addAll(frames)
+        }
+        sendNextNotification(device)
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun sendNextNotification(device: BluetoothDevice) {
         val characteristic = response ?: return
-        if (android.os.Build.VERSION.SDK_INT >= 33) {
-            server?.notifyCharacteristicChanged(device, characteristic, true, value)
+        val frame = synchronized(this) {
+            if (device.address in notificationInFlight) return
+            val queue = pendingNotifications[device.address] ?: return
+            queue.pollFirst()?.also { notificationInFlight += device.address }
+        } ?: return
+        val accepted = if (android.os.Build.VERSION.SDK_INT >= 33) {
+            server?.notifyCharacteristicChanged(device, characteristic, true, frame) == BluetoothStatusCodes.SUCCESS
         } else {
             @Suppress("DEPRECATION")
-            characteristic.value = value
+            characteristic.value = frame
             @Suppress("DEPRECATION")
-            server?.notifyCharacteristicChanged(device, characteristic, true)
+            server?.notifyCharacteristicChanged(device, characteristic, true) == true
+        }
+        if (!accepted) {
+            synchronized(this) {
+                notificationInFlight.remove(device.address)
+                pendingNotifications.remove(device.address)
+            }
+            Log.e(TAG, "BLE response frame was rejected")
+        } else {
+            synchronized(this) {
+                if (pendingNotifications[device.address]?.isEmpty() == true) pendingNotifications.remove(device.address)
+            }
         }
     }
 
     private fun advertisementBytes(): ByteArray {
         val (images, texts) = counts()
-        val idHash = com.betterhv.transfer.core.TransferCrypto.sha256(deviceId.encodeToByteArray())
-        val encodedName = deviceName.encodeToByteArray()
-        val name = encodedName.copyOfRange(0, encodedName.size.coerceAtMost(MAX_ADVERTISED_NAME_BYTES))
-        return byteArrayOf(
-            BleConstants.PROTOCOL_VERSION.toByte(), images.coerceIn(0, 255).toByte(),
-            texts.coerceIn(0, 255).toByte()
-        ) + idHash.copyOf(5) + name
+        return NoteLinkAdvertisementCodec.encode(
+            TransferCrypto.sha256(deviceId.encodeToByteArray()), deviceName, images, texts
+        )
     }
 
     private fun identityBytes(): ByteArray {
-        val name = deviceName.encodeToByteArray().copyOf(48)
-        val id = deviceId.encodeToByteArray().copyOf(48)
         val (images, texts) = counts()
-        return ByteBuffer.allocate(4 + id.size + name.size).order(ByteOrder.BIG_ENDIAN)
-            .put(BleConstants.PROTOCOL_VERSION.toByte())
-            .put(images.coerceIn(0, 255).toByte()).put(texts.coerceIn(0, 255).toByte())
-            .put(id.size.toByte()).put(id).put(name).array()
+        return BleIdentityCodec.encode(deviceId, deviceName, images, texts)
     }
 
     @SuppressLint("MissingPermission")
     override fun close() {
         runCatching { adapter.bluetoothLeAdvertiser?.stopAdvertising(advertiseCallback) }
         subscribed.clear()
+        synchronized(this) {
+            commandReassemblers.clear()
+            framedPeers.clear()
+            negotiatedMtus.clear()
+            pendingNotifications.clear()
+            notificationInFlight.clear()
+        }
         server?.close(); server = null
     }
 
@@ -174,9 +251,8 @@ class BleSenderPeripheral(
     }
 
     private companion object {
-        const val MANUFACTURER_ID = 0x0B17
         const val TAG = "BetterHvBle"
-        const val MAX_ADVERTISED_NAME_BYTES = 18
+        val NEXT_MESSAGE_ID = AtomicInteger(1)
     }
 
 }

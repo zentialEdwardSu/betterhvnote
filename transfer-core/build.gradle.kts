@@ -1,3 +1,5 @@
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+
 plugins {
     id("org.jetbrains.kotlin.jvm")
 }
@@ -8,11 +10,20 @@ java {
 }
 
 kotlin {
-    compilerOptions {
-        jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
+    compilerOptions { jvmTarget.set(JvmTarget.JVM_17) }
+    sourceSets {
+        main {
+            kotlin.srcDir("src/commonMain/kotlin")
+            kotlin.srcDir("src/main/kotlin")
+        }
+        test {
+            kotlin.srcDir("src/commonTest/kotlin")
+            kotlin.srcDir("src/test/kotlin")
+        }
     }
 }
 
 dependencies {
+    testImplementation(kotlin("test"))
     testImplementation("junit:junit:4.13.2")
 }

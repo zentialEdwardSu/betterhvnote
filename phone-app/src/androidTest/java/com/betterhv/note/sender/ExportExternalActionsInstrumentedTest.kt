@@ -4,6 +4,7 @@ import android.content.Intent
 import android.net.Uri
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.core.content.IntentCompat
 import java.util.UUID
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
@@ -32,13 +33,16 @@ class ExportExternalActionsInstrumentedTest {
                 val item = inboxItem("application/pdf", "test.pdf")
                 val uri = Uri.parse("content://${activity.packageName}.files/inbox/${item.artifactId}.pdf")
                 val chooser = shareExportIntent(activity, item, uri)
-                val send = chooser.getParcelableExtra<Intent>(Intent.EXTRA_INTENT)
+                val send = IntentCompat.getParcelableExtra(chooser, Intent.EXTRA_INTENT, Intent::class.java)
 
                 assertEquals(Intent.ACTION_CHOOSER, chooser.action)
                 assertNotNull(chooser.clipData)
                 assertTrue(chooser.flags and Intent.FLAG_GRANT_READ_URI_PERMISSION != 0)
                 assertEquals(Intent.ACTION_SEND, send?.action)
-                assertEquals(uri, send?.getParcelableExtra(Intent.EXTRA_STREAM))
+                assertEquals(
+                    uri,
+                    send?.let { IntentCompat.getParcelableExtra(it, Intent.EXTRA_STREAM, Uri::class.java) }
+                )
                 assertNotNull(send?.clipData)
                 assertTrue(requireNotNull(send).flags and Intent.FLAG_GRANT_READ_URI_PERMISSION != 0)
                 activity.startActivity(chooser)

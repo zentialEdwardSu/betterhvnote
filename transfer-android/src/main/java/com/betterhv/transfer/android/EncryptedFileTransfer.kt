@@ -20,7 +20,8 @@ import java.util.UUID
 data class ReceivedFile(val file: File, val byteLength: Long, val sha256: ByteArray)
 
 object EncryptedFileTransfer {
-    private const val CHUNK_SIZE = 256 * 1024
+    private const val CHUNK_SIZE = 512 * 1024
+    private const val SOCKET_BUFFER_BYTES = 1024 * 1024
 
     fun send(
         ownerAddress: String,
@@ -32,6 +33,8 @@ object EncryptedFileTransfer {
     ) {
         require(offset in 0..source.length())
         Socket().use { socket ->
+            socket.sendBufferSize = SOCKET_BUFFER_BYTES
+            socket.receiveBufferSize = SOCKET_BUFFER_BYTES
             socket.connect(InetSocketAddress(ownerAddress, BleConstants.SOCKET_PORT), 20_000)
             socket.soTimeout = 30_000
             val channel = SecureFrameChannel(key, SEND_PREFIX, RECEIVE_PREFIX)
@@ -71,8 +74,11 @@ object EncryptedFileTransfer {
     ): ReceivedFile {
         destination.parentFile?.mkdirs()
         ServerSocket(BleConstants.SOCKET_PORT).use { server ->
+            server.receiveBufferSize = SOCKET_BUFFER_BYTES
             server.soTimeout = 30_000
             server.accept().use { socket ->
+                socket.sendBufferSize = SOCKET_BUFFER_BYTES
+                socket.receiveBufferSize = SOCKET_BUFFER_BYTES
                 socket.soTimeout = 30_000
                 val input = DataInputStream(socket.getInputStream())
                 val output = DataOutputStream(socket.getOutputStream())

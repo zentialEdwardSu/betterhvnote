@@ -1,0 +1,31 @@
+CREATE TABLE inbox_exports (
+  artifact_id TEXT NOT NULL PRIMARY KEY,
+  source_device_id TEXT NOT NULL,
+  display_name TEXT NOT NULL,
+  mime_type TEXT NOT NULL,
+  byte_length INTEGER NOT NULL,
+  sha256 BLOB NOT NULL,
+  file_path TEXT NOT NULL,
+  state TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  received_at INTEGER,
+  error TEXT
+);
+
+selectAll:
+SELECT * FROM inbox_exports ORDER BY created_at DESC;
+
+selectById:
+SELECT * FROM inbox_exports WHERE artifact_id = ?;
+
+upsert:
+INSERT OR REPLACE INTO inbox_exports(
+  artifact_id, source_device_id, display_name, mime_type, byte_length, sha256,
+  file_path, state, created_at, received_at, error
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+
+updateState:
+UPDATE inbox_exports SET state = ?, received_at = ?, error = ? WHERE artifact_id = ?;
+
+deleteById:
+DELETE FROM inbox_exports WHERE artifact_id = ?;

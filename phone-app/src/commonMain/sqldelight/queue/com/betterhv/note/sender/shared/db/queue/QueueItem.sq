@@ -1,0 +1,58 @@
+CREATE TABLE queue_items (
+  id TEXT NOT NULL PRIMARY KEY,
+  destination_device_id TEXT,
+  kind TEXT NOT NULL,
+  mime_type TEXT NOT NULL,
+  byte_length INTEGER NOT NULL,
+  sha256 BLOB NOT NULL,
+  created_at INTEGER NOT NULL,
+  position INTEGER NOT NULL,
+  state TEXT NOT NULL,
+  display_name TEXT,
+  lease_expires_at INTEGER,
+  failure_reason TEXT,
+  payload_path TEXT,
+  text_content TEXT
+);
+
+CREATE INDEX queue_position ON queue_items(position);
+
+selectAll:
+SELECT * FROM queue_items ORDER BY position, created_at;
+
+selectById:
+SELECT * FROM queue_items WHERE id = ?;
+
+selectPayloadPath:
+SELECT payload_path FROM queue_items WHERE id = ?;
+
+selectText:
+SELECT text_content FROM queue_items WHERE id = ?;
+
+insertItem:
+INSERT INTO queue_items(
+  id, destination_device_id, kind, mime_type, byte_length, sha256, created_at,
+  position, state, display_name, lease_expires_at, failure_reason, payload_path, text_content
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+
+updateItem:
+UPDATE queue_items SET
+  destination_device_id = ?, kind = ?, mime_type = ?, byte_length = ?, sha256 = ?,
+  created_at = ?, position = ?, state = ?, display_name = ?, lease_expires_at = ?, failure_reason = ?
+WHERE id = ?;
+
+deleteById:
+DELETE FROM queue_items WHERE id = ?;
+
+updatePosition:
+UPDATE queue_items SET position = ? WHERE id = ?;
+
+releaseExpired:
+UPDATE queue_items SET state = 'PENDING', lease_expires_at = NULL, failure_reason = NULL
+WHERE state IN ('LEASED', 'TRANSFERRING', 'AWAITING_COMMIT')
+  AND lease_expires_at IS NOT NULL AND lease_expires_at <= ?;
+
+countExpired:
+SELECT count(*) FROM queue_items
+WHERE state IN ('LEASED', 'TRANSFERRING', 'AWAITING_COMMIT')
+  AND lease_expires_at IS NOT NULL AND lease_expires_at <= ?;

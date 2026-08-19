@@ -1,6 +1,9 @@
 package com.betterhv.transfer.android
 
 import com.betterhv.transfer.core.ExportTransferOffer
+import com.betterhv.transfer.core.BleCommand
+import com.betterhv.transfer.core.BleQueueProtocol
+import com.betterhv.transfer.core.BleResponse
 import java.util.UUID
 import org.junit.Assert.assertEquals
 import org.junit.Test

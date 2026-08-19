@@ -69,7 +69,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -90,24 +90,36 @@ import java.util.UUID
 
 class MainActivity : ComponentActivity() {
     private var penView: PenDrawView? = null
+    private var releaseTransientInputGuards: (() -> Unit)? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         EventLog.log("MainActivity", "onCreate")
         NativeSelfTest.run()
         setContent {
-            AppRoot(onView = { penView = it })
+            AppRoot(
+                onView = { penView = it },
+                onTransientInputGuardReleaseReady = { releaseTransientInputGuards = it }
+            )
         }
     }
 
     override fun dispatchTouchEvent(event: MotionEvent): Boolean {
         PenButtonTracker.observeMotion(event, "touch")
-        return super.dispatchTouchEvent(event)
+        val handled = super.dispatchTouchEvent(event)
+        if (event.actionMasked == MotionEvent.ACTION_UP || event.actionMasked == MotionEvent.ACTION_CANCEL) {
+            releaseTransientInputGuards?.invoke()
+        }
+        return handled
     }
 
     override fun dispatchGenericMotionEvent(event: MotionEvent): Boolean {
         PenButtonTracker.observeMotion(event, "generic")
-        return super.dispatchGenericMotionEvent(event)
+        val handled = super.dispatchGenericMotionEvent(event)
+        if (event.actionMasked == MotionEvent.ACTION_HOVER_EXIT || event.actionMasked == MotionEvent.ACTION_CANCEL) {
+            releaseTransientInputGuards?.invoke()
+        }
+        return handled
     }
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
@@ -116,6 +128,7 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
+        releaseTransientInputGuards = null
         penView?.teardown()
         super.onDestroy()
     }
@@ -136,7 +149,10 @@ private sealed interface TextEditorRequest {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun AppRoot(onView: (PenDrawView) -> Unit) {
+private fun AppRoot(
+    onView: (PenDrawView) -> Unit,
+    onTransientInputGuardReleaseReady: ((() -> Unit)?) -> Unit
+) {
     val context = LocalContext.current
     val exportViewModel: ExportViewModel = viewModel()
     val configuration = LocalConfiguration.current
@@ -205,6 +221,15 @@ private fun AppRoot(onView: (PenDrawView) -> Unit) {
         var pageControlInteractionBlocked by remember { mutableStateOf(false) }
         var snackbarInteractionBlocked by remember { mutableStateOf(false) }
         var debugInteractionBlocked by remember { mutableStateOf(false) }
+        DisposableEffect(Unit) {
+            onTransientInputGuardReleaseReady {
+                toolbarInteractionBlocked = false
+                pageControlInteractionBlocked = false
+                snackbarInteractionBlocked = false
+                debugInteractionBlocked = false
+            }
+            onDispose { onTransientInputGuardReleaseReady(null) }
+        }
         var startupBehavior by remember { mutableStateOf(StartupBehavior.WORKING_COPY) }
         var skipSourceSelectionWhenQueueAvailable by remember {
             mutableStateOf(appSettingsStore.skipSourceSelectionWhenQueueAvailable)
@@ -212,12 +237,36 @@ private fun AppRoot(onView: (PenDrawView) -> Unit) {
         var autoCreatePageOnNextAtEnd by remember {
             mutableStateOf(appSettingsStore.autoCreatePageOnNextAtEnd)
         }
-        var pairedPhoneName by remember { mutableStateOf(phoneTransfer.pairing.pairedDevice?.name) }
+        var pairedClients by remember { mutableStateOf(phoneTransfer.pairing.pairedClients) }
+        var onlineNoteLinks by remember {
+            mutableStateOf<List<PhoneTransferClient.AvailableNoteLink>>(emptyList())
+        }
+        var pairingCandidates by remember {
+            mutableStateOf<List<PhoneTransferClient.PairingCandidate>>(emptyList())
+        }
+        var pairingScanActive by remember { mutableStateOf(false) }
         var transferStatusRevision by remember { mutableIntStateOf(0) }
         val lifecycleOwner = LocalLifecycleOwner.current
         DisposableEffect(lifecycleOwner) {
+            var stopped = false
             val observer = LifecycleEventObserver { _, event ->
-                if (event == Lifecycle.Event.ON_RESUME) transferStatusRevision++
+                when (event) {
+                    Lifecycle.Event.ON_STOP -> stopped = true
+                    Lifecycle.Event.ON_RESUME -> {
+                        if (stopped) {
+                            stopped = false
+                            snackbarScope.launch {
+                                phoneTransfer.recoverAfterWake()
+                                penView?.recoverAfterWake()
+                                transferStatusRevision++
+                            }
+                        } else {
+                            penView?.recoverAfterWake()
+                            transferStatusRevision++
+                        }
+                    }
+                    else -> Unit
+                }
             }
             lifecycleOwner.lifecycle.addObserver(observer)
             onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
@@ -225,8 +274,15 @@ private fun AppRoot(onView: (PenDrawView) -> Unit) {
         val missingTransferPermissions = remember(transferStatusRevision) {
             TransferPermissions.missingNotePermissions(context)
         }
-        val transferStatus = remember(transferStatusRevision, pairedPhoneName) {
-            noteTransferStatus(context, pairedPhoneName != null, missingTransferPermissions.isEmpty())
+        val transferStatus = remember(transferStatusRevision, pairedClients) {
+            noteTransferStatus(context, pairedClients.isNotEmpty(), missingTransferPermissions.isEmpty())
+        }
+        LaunchedEffect(transferStatusRevision, pairedClients) {
+            onlineNoteLinks = if (missingTransferPermissions.isEmpty() && pairedClients.isNotEmpty()) {
+                runCatching {
+                    phoneTransfer.discoverAvailable(timeoutMillis = 3_000L) { onlineNoteLinks = it }
+                }.getOrDefault(emptyList())
+            } else emptyList()
         }
 
         val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
@@ -557,14 +613,42 @@ private fun AppRoot(onView: (PenDrawView) -> Unit) {
             }
         }
 
+        (insertionState as? InsertionState.ChoosingClient)?.let { choosing ->
+            EinkModalOverlay(onDismissRequest = insertion::cancel, position = EinkModalPosition.TOP) {
+                Column(
+                    Modifier.fillMaxWidth().padding(20.dp),
+                    verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(10.dp)
+                ) {
+                    Text("选择 NoteLink", fontSize = 24.sp)
+                    choosing.clients.forEach { available ->
+                        val count = if (choosing.kind == ContentKind.IMAGE) {
+                            available.imageCount
+                        } else available.textCount
+                        Button(
+                            onClick = {
+                                snackbarScope.launch {
+                                    insertion.remote(available.client.id, choosing.kind)
+                                }
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RectangleShape
+                        ) {
+                            Text("${available.client.name} · $count 项")
+                        }
+                    }
+                    EinkDialogAction("取消", onClick = insertion::cancel)
+                }
+            }
+        }
+
         (insertionState as? InsertionState.WaitingForPhone)?.let { waiting ->
             EinkModalOverlay(onDismissRequest = insertion::cancel) {
                 Column(Modifier.padding(20.dp), verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(16.dp)) {
-                    Text("正在查找手机", fontSize = 20.sp)
+                    Text("正在查找 NoteLink", fontSize = 20.sp)
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         CircularProgressIndicator()
                         Text(
-                            "等待手机发送${if (waiting.kind == ContentKind.IMAGE) "图片" else "文字"}",
+                            "等待 NoteLink 发送${if (waiting.kind == ContentKind.IMAGE) "图片" else "文字"}",
                             modifier = Modifier.padding(start = 16.dp)
                         )
                     }
@@ -578,7 +662,7 @@ private fun AppRoot(onView: (PenDrawView) -> Unit) {
         (insertionState as? InsertionState.Error)?.let { error ->
             EinkModalOverlay(onDismissRequest = insertion::dismissError) {
                 Column(Modifier.padding(20.dp), verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(16.dp)) {
-                    Text("手机传输", fontSize = 20.sp)
+                    Text("NoteLink 传输", fontSize = 20.sp)
                     Text(error.message)
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = androidx.compose.foundation.layout.Arrangement.End) {
                         EinkDialogAction("知道了", onClick = insertion::dismissError)
@@ -784,7 +868,10 @@ private fun AppRoot(onView: (PenDrawView) -> Unit) {
             SettingsScreen(
                 debugMode = debugMode,
                 startupBehavior = startupBehavior,
-                pairedPhoneName = pairedPhoneName,
+                pairedClients = pairedClients,
+                onlineClients = onlineNoteLinks,
+                pairingCandidates = pairingCandidates,
+                pairingScanActive = pairingScanActive,
                 transferStatus = transferStatus,
                 transferPermissionsGranted = missingTransferPermissions.isEmpty(),
                 skipSourceSelectionWhenQueueAvailable = skipSourceSelectionWhenQueueAvailable,
@@ -807,22 +894,50 @@ private fun AppRoot(onView: (PenDrawView) -> Unit) {
                     appSettingsStore.autoCreatePageOnNextAtEnd = it
                     penView?.autoCreatePageOnNextAtEnd = it
                 },
-                onPairPhone = { code ->
-                    runCatching {
-                        phoneTransfer.pairing.confirmManual(
-                            InsertionCoordinator.PHONE_DEVICE_ID, "NoteLink", code
-                        )
-                    }.onSuccess {
-                        pairedPhoneName = it.name
-                        transferStatusRevision++
-                        showNotice("手机配对完成")
-                    }.onFailure { showNotice("配对失败：${it.message}") }
+                onScanClients = {
+                    if (missingTransferPermissions.isNotEmpty()) {
+                        showNotice("请先授予附近设备权限")
+                    } else if (!pairingScanActive) {
+                        pairingScanActive = true
+                        snackbarScope.launch {
+                            runCatching { phoneTransfer.discoverPairingCandidates() }
+                                .onSuccess { pairingCandidates = it }
+                                .onFailure { showNotice("扫描失败：${it.message}") }
+                            onlineNoteLinks = runCatching {
+                                phoneTransfer.discoverAvailable(timeoutMillis = 2_000L) { onlineNoteLinks = it }
+                            }.getOrDefault(emptyList())
+                            pairingScanActive = false
+                        }
+                    }
                 },
-                onUnpairPhone = {
-                    phoneTransfer.pairing.unpair()
-                    pairedPhoneName = null
+                onPairClient = { candidate, code ->
+                    snackbarScope.launch {
+                        pairingScanActive = true
+                        runCatching { phoneTransfer.pair(candidate, code) }
+                            .onSuccess {
+                                pairedClients = phoneTransfer.pairing.pairedClients
+                                pairingCandidates = pairingCandidates.filterNot { value -> value.deviceId == it.id }
+                                onlineNoteLinks = phoneTransfer.discoverAvailable(timeoutMillis = 2_000L)
+                                transferStatusRevision++
+                                showNotice("${it.name} 配对完成")
+                            }
+                            .onFailure { showNotice("配对失败：${it.message}") }
+                        pairingScanActive = false
+                    }
+                },
+                onRenameClient = { id, name ->
+                    runCatching { phoneTransfer.pairing.rename(id, name) }
+                        .onSuccess {
+                            pairedClients = phoneTransfer.pairing.pairedClients
+                            showNotice("名称已保存")
+                        }
+                        .onFailure { showNotice("重命名失败：${it.message}") }
+                },
+                onUnpairClient = { id ->
+                    phoneTransfer.pairing.unpair(id)
+                    pairedClients = phoneTransfer.pairing.pairedClients
                     transferStatusRevision++
-                    showNotice("已取消手机配对")
+                    showNotice("已移除 NoteLink 配对")
                 },
                 onTransferPermissions = {
                     permissionRemoteKind = null
@@ -845,7 +960,10 @@ private fun AppRoot(onView: (PenDrawView) -> Unit) {
                 initialNotebookId = exportInitialNotebookId ?: currentNotebookId,
                 creationRequest = exportCreationRequest,
                 currentNotebookId = currentNotebookId,
-                phoneTransferAvailable = pairedPhoneName != null && missingTransferPermissions.isEmpty(),
+                pairedClients = if (missingTransferPermissions.isEmpty()) {
+                    val onlineIds = onlineNoteLinks.map { it.client.id }.toSet()
+                    pairedClients.filter { it.id in onlineIds }
+                } else emptyList(),
                 pageBitmap = { id -> pv.pageThumbnail(id) },
                 requestThumbnails = { ids -> pv.requestThumbnails(ids) },
                 beforeExport = { notebookId ->
@@ -853,7 +971,9 @@ private fun AppRoot(onView: (PenDrawView) -> Unit) {
                         pv.flushPersistenceForExport()
                     } else true
                 },
-                sendToNoteLink = { artifact, progress -> phoneTransfer.sendExport(artifact, progress) },
+                sendToNoteLink = { clientId, artifact, progress ->
+                    phoneTransfer.sendExport(clientId, artifact, progress)
+                },
                 onNotice = showNotice,
                 onClose = { exportPanelOpen = false }
             )

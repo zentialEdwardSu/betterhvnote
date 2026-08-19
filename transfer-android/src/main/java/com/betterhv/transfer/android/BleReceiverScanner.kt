@@ -3,33 +3,73 @@ package com.betterhv.transfer.android
 import android.annotation.SuppressLint
 import android.bluetooth.BluetoothManager
 import android.bluetooth.le.ScanCallback
-import android.bluetooth.le.ScanFilter
 import android.bluetooth.le.ScanResult
 import android.bluetooth.le.ScanSettings
 import android.content.Context
 import android.os.ParcelUuid
-import com.betterhv.transfer.core.TransferCrypto
+import com.betterhv.transfer.core.NoteLinkAdvertisementCodec
 import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.CompletableDeferred
-import kotlinx.coroutines.delay
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.withTimeoutOrNull
 
 class BleReceiverScanner(context: Context) {
     private val manager = context.applicationContext.getSystemService(BluetoothManager::class.java)
 
     @SuppressLint("MissingPermission")
-    suspend fun discover(timeoutMillis: Long = 20_000L): List<DiscoveredSender> {
+    suspend fun discover(
+        timeoutMillis: Long = 20_000L,
+        settleAfterFirstMillis: Long = 600L,
+        onUpdate: (List<DiscoveredSender>) -> Unit = {}
+    ): List<DiscoveredSender> {
         val scanner = manager.adapter?.bluetoothLeScanner ?: error("Bluetooth is disabled")
         val found = ConcurrentHashMap<String, DiscoveredSender>()
+        val changed = Channel<Unit>(Channel.CONFLATED)
         val callback = object : ScanCallback() {
-            override fun onScanResult(callbackType: Int, result: ScanResult) { result.toSender()?.let { found[it.bluetoothAddress] = it } }
-            override fun onBatchScanResults(results: MutableList<ScanResult>) { results.forEach { it.toSender()?.let { sender -> found[sender.bluetoothAddress] = sender } } }
+            private fun accept(result: ScanResult) {
+                val sender = result.toSender() ?: return
+                var contentChanged = false
+                found.compute(sender.bluetoothAddress) { _, previous ->
+                    val merged = previous?.let { mergeDiscoveredSender(it, sender) } ?: sender
+                    contentChanged = previous != merged
+                    merged
+                }
+                if (contentChanged) changed.trySend(Unit)
+            }
+
+            override fun onScanResult(callbackType: Int, result: ScanResult) {
+                accept(result)
+            }
+            override fun onBatchScanResults(results: MutableList<ScanResult>) {
+                results.forEach(::accept)
+            }
+            override fun onScanFailed(errorCode: Int) {
+                changed.close(IllegalStateException("BLE scan failed: $errorCode"))
+            }
         }
-        val filter = ScanFilter.Builder().setServiceUuid(ParcelUuid(BleConstants.SERVICE_UUID)).build()
         val settings = ScanSettings.Builder().setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY).build()
-        scanner.startScan(listOf(filter), settings, callback)
-        try { delay(timeoutMillis.coerceIn(1_000L, 60_000L)) } finally { scanner.stopScan(callback) }
-        return found.values.sortedBy { it.name }
+        // Do application-level filtering. Some Android BLE controllers do not
+        // merge scan responses when hardware ScanFilter entries are present.
+        scanner.startScan(null, settings, callback)
+        val deadline = System.nanoTime() + timeoutMillis.coerceIn(1_000L, 60_000L) * 1_000_000L
+        try {
+            while (true) {
+                val remainingMillis = ((deadline - System.nanoTime()).coerceAtLeast(0L) / 1_000_000L)
+                if (remainingMillis <= 0L) break
+                val waitMillis = if (found.isEmpty()) remainingMillis else minOf(
+                    remainingMillis,
+                    settleAfterFirstMillis.coerceIn(150L, 2_000L)
+                )
+                val received = withTimeoutOrNull(waitMillis.coerceAtLeast(1L)) { changed.receiveCatching() }
+                    ?: break
+                received.getOrThrow()
+                onUpdate(found.values.sortedBy { it.name })
+            }
+        } finally {
+            scanner.stopScan(callback)
+            changed.close()
+        }
+        return found.values.sortedBy { it.name }.also(onUpdate)
     }
 
     /** Stops the radio scan as soon as a usable sender is observed. */
@@ -51,9 +91,8 @@ class BleReceiverScanner(context: Context) {
                 found.completeExceptionally(IllegalStateException("BLE scan failed: $errorCode"))
             }
         }
-        val filter = ScanFilter.Builder().setServiceUuid(ParcelUuid(BleConstants.SERVICE_UUID)).build()
         val settings = ScanSettings.Builder().setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY).build()
-        scanner.startScan(listOf(filter), settings, callback)
+        scanner.startScan(null, settings, callback)
         return try {
             withTimeoutOrNull(timeoutMillis.coerceIn(1_000L, 60_000L)) { found.await() }
         } finally {
@@ -63,14 +102,44 @@ class BleReceiverScanner(context: Context) {
 
     @SuppressLint("MissingPermission")
     private fun ScanResult.toSender(): DiscoveredSender? {
-        val data = scanRecord?.getManufacturerSpecificData(0x0B17) ?: return null
-        if (data.size < 8 || data[0].toInt() != BleConstants.PROTOCOL_VERSION) return null
-        val hash = data.copyOfRange(3, 8).joinToString("") { "%02x".format(it) }
-        val advertisedName = data.takeIf { it.size > 8 }
-            ?.copyOfRange(8, data.size)?.decodeToString()?.takeIf(String::isNotBlank)
+        val record = scanRecord ?: return null
+        val service = ParcelUuid(BleConstants.SERVICE_UUID)
+        val serviceData = record.getServiceData(service)
+        val hasNoteLinkService = record.serviceUuids?.contains(service) == true || serviceData != null
+        // The Windows implementation publishes queue metadata separately from
+        // its connectable GATT provider. That metadata has a different radio
+        // address and must never be used as a GATT connection target.
+        // Require the NoteLink service UUID whenever manufacturer data is used
+        // so we only retain an address that actually hosts the GATT service.
+        val manufacturerData = record.getManufacturerSpecificData(NoteLinkAdvertisementCodec.MANUFACTURER_ID)
+        if (!hasNoteLinkService && manufacturerData != null) return null
+        val data = manufacturerData ?: serviceData
+        if (data == null) {
+            if (!hasNoteLinkService) return null
+            return DiscoveredSender(device.address, "", record.deviceName ?: "NoteLink", 0, 0)
+        }
+        // Android phones use manufacturer data in the scan response. Windows
+        // uses service data so queue discovery and the connectable GATT service
+        // are guaranteed to come from one advertisement instance.
+        val advertisement = runCatching { NoteLinkAdvertisementCodec.decode(data) }.getOrNull() ?: return null
+        val hash = advertisement.identityHash.joinToString("") { "%02x".format(it) }
         return DiscoveredSender(
-            device.address, hash, advertisedName ?: device.name ?: scanRecord?.deviceName ?: "NoteLink",
-            data[1].toInt() and 0xff, data[2].toInt() and 0xff
+            device.address, hash, advertisement.deviceName,
+            advertisement.imageCount, advertisement.textCount
         )
     }
+
+}
+
+internal fun mergeDiscoveredSender(
+    previous: DiscoveredSender,
+    update: DiscoveredSender
+): DiscoveredSender {
+    if (update.identityHash.isNotBlank()) return update
+    if (previous.identityHash.isNotBlank()) return previous
+    return update.copy(
+        name = update.name.takeUnless { it == "NoteLink" } ?: previous.name,
+        imageCount = maxOf(previous.imageCount, update.imageCount),
+        textCount = maxOf(previous.textCount, update.textCount)
+    )
 }

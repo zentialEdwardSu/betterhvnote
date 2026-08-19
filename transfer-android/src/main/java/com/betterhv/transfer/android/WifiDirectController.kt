@@ -109,7 +109,13 @@ class WifiDirectController(context: Context) : AutoCloseable {
         timeoutMillis: Long = 30_000L
     ): WifiDirectSession {
         prepareForOperation()
+        // N10Pro's Wi-Fi P2P implementation reports success for the
+        // credential-only API but never creates the underlying interface
+        // ("No such device" in WifiP2pService). Discovering the Windows peer
+        // first and connecting by its P2P address uses the legacy path that
+        // works on this firmware.
         val canJoinWithCredentials = Build.VERSION.SDK_INT >= 29 &&
+            !Build.MODEL.equals("N10Pro", ignoreCase = true) &&
             !networkName.isNullOrBlank() && !passphrase.isNullOrBlank()
         val owner = if (canJoinWithCredentials) null else {
             discoverPeer(ownerDeviceAddress, ownerDeviceName, (timeoutMillis / 2).coerceAtLeast(5_000L))

@@ -84,6 +84,19 @@ class TransferCoreTest {
         assertArrayEquals(frame.payload, decoded.payload)
     }
 
+    @Test fun `BLE queue protocol golden bytes are owned by transfer core`() {
+        assertArrayEquals(
+            byteArrayOf(1, 11),
+            BleQueueProtocol.encode(BleCommand.Capabilities)
+        )
+        assertArrayEquals(
+            byteArrayOf(1, 1, 0, 2, 0, 3),
+            BleQueueProtocol.encode(BleResponse.Counts(2, 3))
+        )
+        assertEquals(BleCommand.Capabilities, BleQueueProtocol.decodeCommand(byteArrayOf(1, 11)))
+        assertEquals(BleResponse.Counts(2, 3), BleQueueProtocol.decodeResponse(byteArrayOf(1, 1, 0, 2, 0, 3)))
+    }
+
     private fun item(kind: ContentKind, position: Long) = QueueItem(
         UUID.randomUUID(), null, kind, if (kind == ContentKind.IMAGE) "image/jpeg" else "text/plain",
         1, ByteArray(32) { position.toByte() }, position, position
