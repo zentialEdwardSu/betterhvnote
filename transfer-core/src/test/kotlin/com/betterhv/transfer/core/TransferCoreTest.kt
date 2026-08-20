@@ -85,16 +85,97 @@ class TransferCoreTest {
     }
 
     @Test fun `BLE queue protocol golden bytes are owned by transfer core`() {
-        assertArrayEquals(
-            byteArrayOf(1, 11),
-            BleQueueProtocol.encode(BleCommand.Capabilities)
+        val capabilities = DeviceCapabilities(
+            modes = TransferModes.LAN,
+            lanEndpoint = NetworkEndpoint("192.168.1.20"),
+            ssidFingerprint = ByteArray(8) { it.toByte() }
         )
         assertArrayEquals(
-            byteArrayOf(1, 1, 0, 2, 0, 3),
+            byteArrayOf(2, 1, 0, 2, 0, 3),
             BleQueueProtocol.encode(BleResponse.Counts(2, 3))
         )
-        assertEquals(BleCommand.Capabilities, BleQueueProtocol.decodeCommand(byteArrayOf(1, 11)))
-        assertEquals(BleResponse.Counts(2, 3), BleQueueProtocol.decodeResponse(byteArrayOf(1, 1, 0, 2, 0, 3)))
+        val command = BleCommand.Capabilities(capabilities)
+        assertEquals(command, BleQueueProtocol.decodeCommand(BleQueueProtocol.encode(command)))
+        assertEquals(BleResponse.Counts(2, 3), BleQueueProtocol.decodeResponse(byteArrayOf(2, 1, 0, 2, 0, 3)))
+        org.junit.Assert.assertThrows(UnsupportedBleProtocolException::class.java) {
+            BleQueueProtocol.decodeCommand(byteArrayOf(1, 11))
+        }
+    }
+
+    @Test fun `ssid normalization fingerprint and session keys are stable`() {
+        val key = ByteArray(32) { it.toByte() }
+        assertArrayEquals(
+            TransferNetworkSecurity.ssidFingerprint(key, "\"Cafe WiFi\""),
+            TransferNetworkSecurity.ssidFingerprint(key, "Cafe WiFi")
+        )
+        assertNull(TransferNetworkSecurity.ssidFingerprint(key, "<unknown ssid>"))
+        val id = UUID.randomUUID()
+        val nonce = ByteArray(16) { 7 }
+        val probe = TransferNetworkSecurity.sessionKey(key, id, nonce, "probe")
+        val file = TransferNetworkSecurity.sessionKey(key, id, nonce, "file")
+        org.junit.Assert.assertFalse(probe.contentEquals(file))
+    }
+
+    @Test fun `route selector requires matching ssid and orders lan before wifi direct`() {
+        val wifi = HighBandwidthEndpoint("12:34:56:78:9a:bc", "192.168.49.1", "DIRECT-BH", "password")
+        val local = DeviceCapabilities(
+            modes = TransferModes.ALL, lanEndpoint = NetworkEndpoint("192.168.1.20"),
+            ssidFingerprint = ByteArray(8) { 1 }
+        )
+        val remote = DeviceCapabilities(
+            modes = TransferModes.ALL, lanEndpoint = NetworkEndpoint("192.168.1.21"),
+            ssidFingerprint = ByteArray(8) { 1 }, wifiDirectEndpoint = wifi
+        )
+        assertEquals(
+            listOf(TransferMode.LAN, TransferMode.WIFI_DIRECT),
+            TransferRouteSelector.candidates(local, CapabilityNegotiation(remote, SsidMatch.MATCH))
+        )
+        assertEquals(
+            listOf(TransferMode.WIFI_DIRECT),
+            TransferRouteSelector.candidates(local, CapabilityNegotiation(remote, SsidMatch.UNKNOWN))
+        )
+    }
+
+    @Test fun `endpoint and capability validation reject unsafe values`() {
+        org.junit.Assert.assertThrows(IllegalArgumentException::class.java) { NetworkEndpoint("0.0.0.0").validated() }
+        org.junit.Assert.assertThrows(IllegalArgumentException::class.java) { NetworkEndpoint("224.0.0.1").validated() }
+        org.junit.Assert.assertThrows(IllegalArgumentException::class.java) { NetworkEndpoint("192.168.1.255").validated() }
+        org.junit.Assert.assertThrows(IllegalArgumentException::class.java) { TransferModes.requireValid(4) }
+        org.junit.Assert.assertThrows(IllegalArgumentException::class.java) { NetworkEndpoint("192.168.1.2", 0) }
+    }
+
+    @Test fun `progress meter reports speed average and eta`() {
+        var now = 1_000L
+        val meter = TransferProgressMeter(now) { now }
+        now += 1_000L
+        val sample = meter.sample(2_000L, 10_000L)
+        assertEquals(2_000L, sample.bytesPerSecond)
+        assertEquals(2_000L, sample.averageBytesPerSecond)
+        assertEquals(4_000L, sample.etaMillis)
+    }
+
+    @Test fun `event log is structured bounded and replayable`() {
+        var now = 10L
+        val log = TransferEventLog(capacity = 2) { now++ }
+        val id = UUID.randomUUID()
+        log.record(TransferEvent.PhaseChanged(id, TransferPhase.IDLE, TransferPhase.DISCOVERING))
+        log.record(TransferEvent.CapabilityNegotiated(TransferModes.ALL, TransferModes.LAN, SsidMatch.MATCH))
+        log.record(TransferEvent.TransportSelected(id, TransferMode.LAN, NetworkEndpoint("192.168.1.8")))
+
+        assertEquals(2, log.entries.value.size)
+        assertEquals("capabilities", log.entries.value.first().category)
+        assertEquals(TransferLogLevel.INFO, log.entries.value.last().level)
+        org.junit.Assert.assertTrue(log.entries.value.last().detail.contains("192.168.1.8:39817"))
+        assertEquals("LAN+WIFI_DIRECT", TransferModes.describe(TransferModes.ALL))
+    }
+
+    @Test fun `only in-flight phases are active`() {
+        TransferPhase.entries.forEach { phase ->
+            assertEquals(
+                phase !in setOf(TransferPhase.IDLE, TransferPhase.COMPLETE, TransferPhase.FAILED),
+                phase.isActiveTransferPhase
+            )
+        }
     }
 
     private fun item(kind: ContentKind, position: Long) = QueueItem(

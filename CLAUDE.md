@@ -33,6 +33,12 @@ There is no CI config in this repo; `./gradlew test` and `./gradlew assembleDebu
 
 - `:app` — the application module (`com.betterhv.note`), namespace/applicationId `com.betterhv.note`, `minSdk 28`/`targetSdk 34`, `arm64-v8a` only.
 - `:framework-stubs` — a `java-library` module providing **compile-only** stubs for the ROM's custom framework classes (`android.os.HvPenDrawManager`, `android.os.HvPenDrawListener`). These exist purely so the app compiles; the real implementations are baked into the device ROM's `framework.jar` and are never packaged into the APK (see `compileOnly(project(":framework-stubs"))` in `app/build.gradle.kts`). Method bodies in the stubs just `throw new RuntimeException("stub")` — they are never actually invoked, only linked against.
+- `:phone-app` — the Android NoteLink sender/receiver application. Its `src/commonMain` tree is also consumed by the desktop build.
+- `:phone-desktop` — the Compose Desktop NoteLink build wrapper. Desktop implementation and resources live in `phone-app/src/desktopMain`; this module owns desktop dependencies, SQLDelight generation, and packaging.
+- `:transfer-core` — platform-neutral transfer protocol, cryptography, observability, and shared file-transfer orchestration.
+- `:transfer-android` — Android BLE, LAN, and Wi-Fi Direct discovery/session integration used by the tablet and phone apps.
+- `:transfer-windows` — Windows Kotlin/JNA transport plus the native Wi-Fi Direct and firewall helpers used by desktop NoteLink.
+- `icon-assets/` — versioned icon sources and the generation script for app icons.
 - `tools/elfsyms.py` — standalone ELF64 dynamic-symbol dumper (no deps) for inspecting the vendor `.so` files under `app/src/main/jniLibs/arm64-v8a/` when porting JNI bindings, to confirm exact exported symbol names before writing a Java/Kotlin wrapper.
 - `hvNote/` — decompiled reference material from the original vendor app (smali, extracted `.so`s, APK) used as the porting source. Read-only reference, not part of the build (excluded via `.gitignore`).
 
@@ -114,7 +120,7 @@ The export functionality (Phase 7) follows the architecture principle: **strokes
 
 **NoteLink integration:**
 - BLE capability negotiation and push commands extend the existing protocol without renumbering Phone→Note commands.
-- NoteLink remains discoverable after pairing, receives PDF/PNG over the encrypted Wi-Fi Direct file channel, and keeps a persistent inbox.
+- NoteLink remains discoverable after pairing, receives PDF/PNG over the encrypted v2 file channel (LAN first, Android Wi-Fi Direct fallback), and keeps a persistent inbox.
 - Artifact IDs make retry idempotent; the receiver validates declared length and SHA-256 before committing a file.
 
 **Known limitations:**

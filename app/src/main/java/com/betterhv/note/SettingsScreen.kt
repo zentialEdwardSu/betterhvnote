@@ -6,6 +6,8 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -16,6 +18,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
@@ -34,6 +37,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.betterhv.note.storage.StartupBehavior
 import com.betterhv.transfer.core.PairedDevice
+import com.betterhv.transfer.core.TransferPhase
+import com.betterhv.transfer.core.TransferLogEntry
+import com.betterhv.transfer.core.TransferLogLevel
+import com.betterhv.transfer.core.TransferModes
+import com.betterhv.transfer.core.TransferSnapshot
 import java.text.DateFormat
 import java.util.Date
 
@@ -45,20 +53,27 @@ fun SettingsScreen(
     onlineClients: List<PhoneTransferClient.AvailableNoteLink>,
     pairingCandidates: List<PhoneTransferClient.PairingCandidate>,
     pairingScanActive: Boolean,
+    pairingInProgress: Boolean,
     transferStatus: String,
+    transferSnapshot: TransferSnapshot,
+    transferEvents: List<TransferLogEntry>,
+    transferEndpointName: String?,
     transferPermissionsGranted: Boolean,
     skipSourceSelectionWhenQueueAvailable: Boolean,
     autoCreatePageOnNextAtEnd: Boolean,
+    showRecentTransferEvents: Boolean,
     onDebugModeChange: (Boolean) -> Unit,
     onStartupBehaviorChange: (StartupBehavior) -> Unit,
     onSkipSourceSelectionChange: (Boolean) -> Unit,
     onAutoCreatePageOnNextAtEndChange: (Boolean) -> Unit,
+    onShowRecentTransferEventsChange: (Boolean) -> Unit,
     onScanClients: () -> Unit,
     onPairClient: (PhoneTransferClient.PairingCandidate, String) -> Unit,
     onRenameClient: (String, String) -> Unit,
     onUnpairClient: (String) -> Unit,
     onTransferPermissions: () -> Unit,
     onRefreshTransferStatus: () -> Unit,
+    onCancelTransfer: () -> Unit,
     onClose: () -> Unit
 ) {
     var pairingCode by remember { mutableStateOf("") }
@@ -98,6 +113,21 @@ fun SettingsScreen(
 
             Text("NoteLink 客户端", modifier = Modifier.padding(top = 24.dp, bottom = 8.dp))
             Text(transferStatus, modifier = Modifier.padding(bottom = 8.dp))
+            SettingRow("显示最近传输事件", onClick = {
+                onShowRecentTransferEventsChange(!showRecentTransferEvents)
+            }) {
+                Switch(
+                    checked = showRecentTransferEvents,
+                    onCheckedChange = onShowRecentTransferEventsChange
+                )
+            }
+            TransferDiagnostics(
+                transferSnapshot,
+                transferEvents,
+                transferEndpointName,
+                showRecentTransferEvents,
+                onCancelTransfer
+            )
             if (pairedClients.isEmpty()) Text("尚未配对")
             pairedClients.forEach { client ->
                 val online = onlineClients.firstOrNull { it.client.id == client.id }
@@ -136,7 +166,7 @@ fun SettingsScreen(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Button(onClick = onScanClients, enabled = !pairingScanActive) {
+                Button(onClick = onScanClients, enabled = !pairingScanActive && !pairingInProgress) {
                     Text(if (pairingScanActive) "正在扫描" else "扫描新客户端")
                 }
                 if (!transferPermissionsGranted) {
@@ -164,12 +194,10 @@ fun SettingsScreen(
                 Button(
                     onClick = {
                         selectedCandidate?.let { onPairClient(it, pairingCode) }
-                        pairingCode = ""
-                        selectedCandidateId = null
                     },
-                    enabled = selectedCandidate != null && pairingCode.length == 6,
+                    enabled = selectedCandidate != null && pairingCode.length == 6 && !pairingInProgress,
                     modifier = Modifier.padding(top = 8.dp)
-                ) { Text("完成配对") }
+                ) { Text(if (pairingInProgress) "正在配对" else "完成配对") }
             }
 
             Text("重新进入应用时", modifier = Modifier.padding(top = 24.dp, bottom = 8.dp))
@@ -185,6 +213,12 @@ fun SettingsScreen(
                     )
                 }
             }
+            BuildInfoRow("Build version", "${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})")
+            BuildInfoRow(
+                "Build time",
+                DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.MEDIUM)
+                    .format(Date(BuildConfig.BUILD_TIME_EPOCH_MILLIS))
+            )
         }
     }
 
@@ -215,6 +249,102 @@ fun SettingsScreen(
 }
 
 @Composable
+private fun TransferDiagnostics(
+    snapshot: TransferSnapshot,
+    events: List<TransferLogEntry>,
+    endpointName: String?,
+    showRecentEvents: Boolean,
+    onCancel: () -> Unit
+) {
+    if (snapshot.phase == TransferPhase.IDLE && (!showRecentEvents || events.isEmpty())) return
+    Column(
+        Modifier.fillMaxWidth().padding(vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        Text(
+            listOfNotNull("BLE", snapshot.phase.name.replace('_', ' '), snapshot.mode?.name, "SSID ${snapshot.ssidMatch.name}")
+                .joinToString(" · ")
+        )
+        Text(
+            "本端 ${TransferModes.describe(snapshot.localModes)} · 对端 ${TransferModes.describe(snapshot.remoteModes)}" +
+                " · 尝试 ${snapshot.attempt} · fallback ${snapshot.fallbackCount}",
+            fontSize = 12.sp,
+            color = Color.DarkGray
+        )
+        snapshot.endpoint?.let {
+            Text(
+                "端点 ${endpointName ?: snapshot.deviceId ?: "未知设备"} · ${it.host}:${it.port}",
+                fontSize = 12.sp,
+                color = Color.DarkGray
+            )
+        }
+        Text(
+            "Wi-Fi Direct 组 ${if (snapshot.wifiDirectGroupReady) "已就绪" else "未就绪"}" +
+                listOfNotNull(snapshot.deviceId?.let { " · 设备 $it" }, snapshot.operationId?.let { " · 操作 ${it.toString().take(8)}" })
+                    .joinToString(""),
+            fontSize = 12.sp,
+            color = Color.DarkGray
+        )
+        if (snapshot.totalBytes > 0) {
+            LinearProgressIndicator(
+                progress = { (snapshot.bytesTransferred.toFloat() / snapshot.totalBytes).coerceIn(0f, 1f) },
+                modifier = Modifier.fillMaxWidth()
+            )
+            Text(
+                "${noteFormatBytes(snapshot.bytesTransferred)} / ${noteFormatBytes(snapshot.totalBytes)}" +
+                    " · 当前 ${noteFormatBytes(snapshot.bytesPerSecond)}/s" +
+                    " · 平均 ${noteFormatBytes(snapshot.averageBytesPerSecond)}/s" +
+                    (snapshot.etaMillis?.let { " · ETA ${noteFormatDuration(it)}" } ?: ""),
+                fontSize = 12.sp,
+                color = Color.DarkGray
+            )
+        }
+        snapshot.fallbackReason?.let {
+            Text("fallback ${it.code}: ${it.message}", fontSize = 12.sp, color = Color(0xFF6A4A00))
+        }
+        snapshot.lastFailure?.let {
+            Text(
+                "${it.code}: ${it.message} · ${if (it.recoverable) "可重试" else "不可重试"}",
+                fontSize = 12.sp,
+                color = Color(0xFF8A1C1C)
+            )
+        }
+        if (snapshot.canCancel) OutlinedButton(onClick = onCancel) { Text("取消传输") }
+        if (showRecentEvents && events.isNotEmpty()) {
+            Text("最近传输事件", modifier = Modifier.padding(top = 4.dp))
+            Column(
+                Modifier.fillMaxWidth().heightIn(max = 100.dp).verticalScroll(rememberScrollState())
+            ) {
+                events.asReversed().forEach { entry ->
+                    Text(
+                        "${DateFormat.getTimeInstance(DateFormat.MEDIUM).format(Date(entry.timestampMillis))} " +
+                            "${entry.category} ${entry.detail}",
+                        modifier = Modifier.fillMaxWidth().height(20.dp),
+                        maxLines = 1,
+                        fontSize = 11.sp,
+                        color = if (entry.level == TransferLogLevel.ERROR) Color(0xFF8A1C1C) else Color.DarkGray
+                    )
+                }
+            }
+
+            HorizontalDivider(Modifier.padding(top = 24.dp, bottom = 8.dp))
+        }
+    }
+}
+
+private fun noteFormatBytes(bytes: Long): String = when {
+    bytes >= 1_073_741_824 -> "%.1f GiB".format(bytes / 1_073_741_824.0)
+    bytes >= 1_048_576 -> "%.1f MiB".format(bytes / 1_048_576.0)
+    bytes >= 1_024 -> "%.1f KiB".format(bytes / 1_024.0)
+    else -> "$bytes B"
+}
+
+private fun noteFormatDuration(millis: Long): String {
+    val seconds = (millis / 1_000).coerceAtLeast(0)
+    return if (seconds < 60) "${seconds}s" else "${seconds / 60}m ${seconds % 60}s"
+}
+
+@Composable
 private fun SettingRow(
     label: String,
     onClick: () -> Unit,
@@ -227,5 +357,17 @@ private fun SettingRow(
     ) {
         Text(label, modifier = Modifier.weight(1f), fontSize = 18.sp)
         control()
+    }
+}
+
+@Composable
+private fun BuildInfoRow(label: String, value: String) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        Text(label, modifier = Modifier.weight(1f), fontSize = 16.sp)
+        Text(value, fontSize = 14.sp, color = Color.DarkGray)
     }
 }

@@ -22,7 +22,9 @@ import javax.crypto.spec.GCMParameterSpec
 class AndroidPairingController(context: Context) : PairingController {
     private val appContext = context.applicationContext
     private val prefs = appContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-    private val database = PairingDatabase(appContext)
+    private val database = PairingDatabase(appContext).apply {
+        setWriteAheadLoggingEnabled(true)
+    }
     private var pendingKeyPair: KeyPair? = null
     private var pendingOffer: PairingOffer? = null
 
@@ -242,10 +244,6 @@ class AndroidPairingController(context: Context) : PairingController {
     }
 
     private class PairingDatabase(context: Context) : SQLiteOpenHelper(context, DATABASE, null, 1) {
-        override fun onConfigure(db: SQLiteDatabase) {
-            db.enableWriteAheadLogging()
-        }
-
         override fun onCreate(db: SQLiteDatabase) {
             db.execSQL("""CREATE TABLE $TABLE(
                 device_id TEXT PRIMARY KEY,

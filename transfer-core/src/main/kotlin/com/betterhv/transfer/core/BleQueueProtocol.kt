@@ -13,11 +13,19 @@ sealed interface BleCommand {
     data class Heartbeat(val itemId: UUID) : BleCommand
     data class Commit(val itemId: UUID) : BleCommand
     data class Release(val itemId: UUID) : BleCommand
-    data class WifiSend(val itemId: UUID, val ownerDeviceAddress: String, val ownerDeviceName: String, val ownerIp: String) : BleCommand
-    data class WifiHost(val itemId: UUID) : BleCommand
-    data class WifiHostStatus(val itemId: UUID) : BleCommand
-    data class WifiSendTo(val itemId: UUID, val receiverIp: String) : BleCommand
-    data object Capabilities : BleCommand
+    data class PrepareFileTransfer(
+        val itemId: UUID,
+        val selectedMode: TransferMode,
+        val receiverEndpoint: NetworkEndpoint,
+        val sessionNonce: ByteArray
+    ) : BleCommand {
+        init { require(sessionNonce.size == TransferNetworkSecurity.SESSION_NONCE_BYTES) }
+        override fun equals(other: Any?): Boolean = other is PrepareFileTransfer && itemId == other.itemId &&
+            selectedMode == other.selectedMode && receiverEndpoint == other.receiverEndpoint &&
+            sessionNonce.contentEquals(other.sessionNonce)
+        override fun hashCode(): Int = 31 * itemId.hashCode() + sessionNonce.contentHashCode()
+    }
+    data class Capabilities(val localCapabilities: DeviceCapabilities) : BleCommand
     data class PushOffer(val offer: ExportTransferOffer) : BleCommand
     data class PushStatus(val artifactId: UUID) : BleCommand
     data class PushCancel(val artifactId: UUID) : BleCommand
@@ -35,17 +43,19 @@ sealed interface BleResponse {
     data object Ok : BleResponse
     data class Error(val message: String) : BleResponse
     data object Pending : BleResponse
-    data class WifiOwnerInfo(
-        val deviceAddress: String, val deviceName: String, val ownerIp: String,
-        val networkName: String, val passphrase: String
-    ) : BleResponse
-    data class Capabilities(val flags: Int) : BleResponse
+    data class Prepared(val itemId: UUID, val mode: TransferMode, val receiverEndpoint: NetworkEndpoint) : BleResponse
+    data class Capabilities(val negotiation: CapabilityNegotiation) : BleResponse
     data class PushComplete(val artifactId: UUID) : BleResponse
     data class AlreadyReceived(val artifactId: UUID) : BleResponse
+    data class Failure(val failure: TransferFailure) : BleResponse
 }
 
+class UnsupportedBleProtocolException(val receivedVersion: Int) : IllegalArgumentException(
+    "Unsupported BLE protocol version $receivedVersion; version ${BleQueueProtocol.VERSION} is required"
+)
+
 object BleQueueProtocol {
-    const val VERSION = 1
+    const val VERSION = 2
     const val TEXT_CHUNK_BYTES = 160
     const val CAPABILITY_EXPORT_PUSH = 1
     private const val MAX_STRING = 512
@@ -59,14 +69,11 @@ object BleQueueProtocol {
             is BleCommand.Heartbeat -> { out.writeByte(4); out.uuid(command.itemId) }
             is BleCommand.Commit -> { out.writeByte(5); out.uuid(command.itemId) }
             is BleCommand.Release -> { out.writeByte(6); out.uuid(command.itemId) }
-            is BleCommand.WifiSend -> {
-                out.writeByte(7); out.uuid(command.itemId); out.safeUtf(command.ownerDeviceAddress)
-                out.safeUtf(command.ownerDeviceName); out.safeUtf(command.ownerIp)
+            is BleCommand.PrepareFileTransfer -> {
+                out.writeByte(7); out.uuid(command.itemId); out.writeByte(command.selectedMode.ordinal)
+                out.endpoint(command.receiverEndpoint); out.write(command.sessionNonce)
             }
-            is BleCommand.WifiHost -> { out.writeByte(8); out.uuid(command.itemId) }
-            is BleCommand.WifiHostStatus -> { out.writeByte(9); out.uuid(command.itemId) }
-            is BleCommand.WifiSendTo -> { out.writeByte(10); out.uuid(command.itemId); out.safeUtf(command.receiverIp) }
-            BleCommand.Capabilities -> out.writeByte(11)
+            is BleCommand.Capabilities -> { out.writeByte(11); out.capabilities(command.localCapabilities) }
             is BleCommand.PushOffer -> {
                 out.writeByte(12); out.uuid(command.offer.artifactId); out.safeUtf(command.offer.displayName)
                 out.safeUtf(command.offer.mimeType); out.writeLong(command.offer.byteLength); out.write(command.offer.sha256)
@@ -77,7 +84,7 @@ object BleQueueProtocol {
     }
 
     fun decodeCommand(bytes: ByteArray): BleCommand = input(bytes) { value ->
-        require(value.readUnsignedByte() == VERSION) { "Unsupported BLE command version" }
+        requireVersion(value.readUnsignedByte())
         when (value.readUnsignedByte()) {
             1 -> BleCommand.Counts
             2 -> BleCommand.Lease(ContentKind.entries[value.readUnsignedByte()], value.safeUtf())
@@ -85,17 +92,17 @@ object BleQueueProtocol {
             4 -> BleCommand.Heartbeat(value.uuid())
             5 -> BleCommand.Commit(value.uuid())
             6 -> BleCommand.Release(value.uuid())
-            7 -> BleCommand.WifiSend(value.uuid(), value.safeUtf(), value.safeUtf(), value.safeUtf())
-            8 -> BleCommand.WifiHost(value.uuid())
-            9 -> BleCommand.WifiHostStatus(value.uuid())
-            10 -> BleCommand.WifiSendTo(value.uuid(), value.safeUtf())
-            11 -> BleCommand.Capabilities
+            7 -> BleCommand.PrepareFileTransfer(
+                value.uuid(), TransferMode.entries[value.readUnsignedByte()], value.endpoint(),
+                ByteArray(TransferNetworkSecurity.SESSION_NONCE_BYTES).also(value::readFully)
+            )
+            11 -> BleCommand.Capabilities(value.capabilities())
             12 -> BleCommand.PushOffer(ExportTransferOffer(
                 value.uuid(), value.safeUtf(), value.safeUtf(), value.readLong(), ByteArray(32).also(value::readFully)
             ))
             13 -> BleCommand.PushStatus(value.uuid())
             14 -> BleCommand.PushCancel(value.uuid())
-            else -> error("Unknown BLE command")
+            else -> error("Unknown BLE v2 command")
         }
     }
 
@@ -115,18 +122,23 @@ object BleQueueProtocol {
             BleResponse.Ok -> out.writeByte(5)
             is BleResponse.Error -> { out.writeByte(6); out.safeUtf(response.message.take(MAX_STRING)) }
             BleResponse.Pending -> out.writeByte(7)
-            is BleResponse.WifiOwnerInfo -> {
-                out.writeByte(8); out.safeUtf(response.deviceAddress); out.safeUtf(response.deviceName)
-                out.safeUtf(response.ownerIp); out.safeUtf(response.networkName); out.safeUtf(response.passphrase)
+            is BleResponse.Prepared -> {
+                out.writeByte(8); out.uuid(response.itemId); out.writeByte(response.mode.ordinal); out.endpoint(response.receiverEndpoint)
             }
-            is BleResponse.Capabilities -> { out.writeByte(9); out.writeInt(response.flags) }
+            is BleResponse.Capabilities -> {
+                out.writeByte(9); out.capabilities(response.negotiation.remote); out.writeByte(response.negotiation.ssidMatch.ordinal)
+            }
             is BleResponse.PushComplete -> { out.writeByte(10); out.uuid(response.artifactId) }
             is BleResponse.AlreadyReceived -> { out.writeByte(11); out.uuid(response.artifactId) }
+            is BleResponse.Failure -> {
+                out.writeByte(12); out.writeByte(response.failure.code.ordinal); out.safeUtf(response.failure.message.take(MAX_STRING))
+                out.writeBoolean(response.failure.recoverable); out.writeByte(response.failure.causeMode?.ordinal?.plus(1) ?: 0)
+            }
         }
     }
 
     fun decodeResponse(bytes: ByteArray): BleResponse = input(bytes) { value ->
-        require(value.readUnsignedByte() == VERSION) { "Unsupported BLE response version" }
+        requireVersion(value.readUnsignedByte())
         when (value.readUnsignedByte()) {
             1 -> BleResponse.Counts(value.readUnsignedShort(), value.readUnsignedShort())
             2 -> BleResponse.Offer(QueueItem(
@@ -140,14 +152,54 @@ object BleQueueProtocol {
             5 -> BleResponse.Ok
             6 -> BleResponse.Error(value.safeUtf())
             7 -> BleResponse.Pending
-            8 -> BleResponse.WifiOwnerInfo(value.safeUtf(), value.safeUtf(), value.safeUtf(), value.safeUtf(), value.safeUtf())
-            9 -> BleResponse.Capabilities(value.readInt())
+            8 -> BleResponse.Prepared(value.uuid(), TransferMode.entries[value.readUnsignedByte()], value.endpoint())
+            9 -> BleResponse.Capabilities(CapabilityNegotiation(value.capabilities(), SsidMatch.entries[value.readUnsignedByte()]))
             10 -> BleResponse.PushComplete(value.uuid())
             11 -> BleResponse.AlreadyReceived(value.uuid())
-            else -> error("Unknown BLE response")
+            12 -> {
+                val code = TransferErrorCode.entries[value.readUnsignedByte()]
+                val message = value.safeUtf()
+                val recoverable = value.readBoolean()
+                val mode = value.readUnsignedByte().let { if (it == 0) null else TransferMode.entries[it - 1] }
+                BleResponse.Failure(TransferFailure(code, message, recoverable, mode))
+            }
+            else -> error("Unknown BLE v2 response")
         }
     }
 
+    private fun requireVersion(version: Int) {
+        if (version != VERSION) throw UnsupportedBleProtocolException(version)
+    }
+
+    private fun DataOutputStream.capabilities(value: DeviceCapabilities) {
+        writeByte(value.protocolVersion)
+        writeInt(TransferModes.requireValid(value.modes))
+        writeBoolean(value.lanEndpoint != null); value.lanEndpoint?.let { endpoint(it) }
+        writeBoolean(value.ssidFingerprint != null); value.ssidFingerprint?.let(::write)
+        writeBoolean(value.wifiDirectEndpoint != null)
+        value.wifiDirectEndpoint?.let {
+            safeUtf(it.deviceAddress); safeUtf(it.ownerIp); safeUtf(it.networkName); safeUtf(it.passphrase); writeShort(it.port)
+        }
+        writeInt(value.extensions)
+    }
+
+    private fun DataInputStream.capabilities(): DeviceCapabilities {
+        val version = readUnsignedByte()
+        val modes = TransferModes.requireValid(readInt())
+        val lan = if (readBoolean()) endpoint() else null
+        val fingerprint = if (readBoolean()) ByteArray(DeviceCapabilities.SSID_FINGERPRINT_BYTES).also(::readFully) else null
+        val wifi = if (readBoolean()) HighBandwidthEndpoint(
+            safeUtf(), safeUtf(), safeUtf(), safeUtf(), readUnsignedShort()
+        ) else null
+        return DeviceCapabilities(version, modes, lan, fingerprint, wifi, readInt())
+    }
+
+    private fun DataOutputStream.endpoint(value: NetworkEndpoint) {
+        val safe = value.validated()
+        safeUtf(safe.host); writeShort(safe.port)
+    }
+
+    private fun DataInputStream.endpoint(): NetworkEndpoint = NetworkEndpoint(safeUtf(), readUnsignedShort()).validated()
     private fun bytes(block: (DataOutputStream) -> Unit): ByteArray = ByteArrayOutputStream().let { output ->
         DataOutputStream(output).use(block); output.toByteArray()
     }

@@ -5,20 +5,19 @@ import com.betterhv.transfer.core.PairedDevice
 import com.betterhv.transfer.core.QueueItem
 import com.betterhv.transfer.core.RemotePayload
 import com.betterhv.transfer.core.TransferLease
-import com.betterhv.transfer.core.TransferState
+import com.betterhv.transfer.core.TransferObservable
 import java.io.File
 import java.util.UUID
-import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
-interface SenderEndpoint : AutoCloseable {
-    val state: StateFlow<TransferState>
+interface SenderEndpoint : AutoCloseable, TransferObservable {
     fun start()
     fun stop()
     override fun close() = stop()
 }
 
-interface ReceiverEndpoint : AutoCloseable {
-    val state: StateFlow<TransferState>
+interface ReceiverEndpoint : AutoCloseable, TransferObservable {
     suspend fun discover(timeoutMillis: Long = 20_000L): List<DiscoveredSender>
     suspend fun requestNext(kind: ContentKind, stagingDirectory: File): ReceivedLease?
     override fun close()
@@ -37,6 +36,11 @@ data class DiscoveredSender(
 
 interface ReceivedLease : TransferLease {
     val payload: RemotePayload
+
+    /** Network-backed lease operations must never be awaited by an Android UI thread. */
+    suspend fun heartbeatAndAwait() = withContext(Dispatchers.IO) { heartbeat() }
+    suspend fun commitAndAwait() = withContext(Dispatchers.IO) { commit() }
+    suspend fun releaseAndAwait() = withContext(Dispatchers.IO) { release() }
 }
 
 interface SenderContentProvider {

@@ -74,6 +74,10 @@ class DesktopSettings(private val paths: DesktopPaths, private val native: Windo
         get() = synchronized(lock) { values.getProperty(KEY_RECEIVE, "true").toBooleanStrictOrNull() ?: true }
         set(value) = synchronized(lock) { values.setProperty(KEY_RECEIVE, value.toString()); persist() }
 
+    var showRecentTransferEvents: Boolean
+        get() = synchronized(lock) { values.getProperty(KEY_SHOW_RECENT_EVENTS, "true").toBooleanStrictOrNull() ?: true }
+        set(value) = synchronized(lock) { values.setProperty(KEY_SHOW_RECENT_EVENTS, value.toString()); persist() }
+
     val pairing: DesktopPairing? get() = synchronized(lock) {
         val id = values.getProperty(KEY_PEER_ID) ?: return@synchronized null
         val encoded = values.getProperty(KEY_SECRET) ?: return@synchronized null
@@ -155,6 +159,7 @@ class DesktopSettings(private val paths: DesktopPaths, private val native: Windo
         const val KEY_LOCAL_ID = "localDeviceId"
         const val KEY_DISPLAY_NAME = "displayName"
         const val KEY_RECEIVE = "receiveEnabled"
+        const val KEY_SHOW_RECENT_EVENTS = "showRecentTransferEvents"
         const val KEY_PEER_ID = "peerDeviceId"
         const val KEY_PEER_NAME = "peerDeviceName"
         const val KEY_SECRET = "protectedSharedKey"

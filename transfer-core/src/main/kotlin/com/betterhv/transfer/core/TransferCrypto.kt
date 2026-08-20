@@ -35,12 +35,12 @@ object TransferCrypto {
 
     fun hkdfSha256(secret: ByteArray, salt: ByteArray, info: ByteArray, length: Int): ByteArray {
         require(length in 1..(255 * 32))
-        val extract = hmac(if (salt.isEmpty()) ByteArray(32) else salt, secret)
+        val extract = hmacSha256(if (salt.isEmpty()) ByteArray(32) else salt, secret)
         val out = ByteArrayOutputStream(length)
         var previous = ByteArray(0)
         var counter = 1
         while (out.size() < length) {
-            previous = hmac(extract, previous + info + counter.toByte())
+            previous = hmacSha256(extract, previous + info + counter.toByte())
             out.write(previous)
             counter++
         }
@@ -48,7 +48,7 @@ object TransferCrypto {
     }
 
     fun verificationCode(sharedSecret: ByteArray, transcript: ByteArray): String {
-        val value = ByteBuffer.wrap(hmac(sharedSecret, transcript), 0, 4).int.toLong() and 0xffffffffL
+        val value = ByteBuffer.wrap(hmacSha256(sharedSecret, transcript), 0, 4).int.toLong() and 0xffffffffL
         return (value % 1_000_000L).toString().padStart(6, '0')
     }
 
@@ -73,7 +73,7 @@ object TransferCrypto {
 
     fun randomBytes(size: Int): ByteArray = ByteArray(size).also(random::nextBytes)
 
-    private fun hmac(key: ByteArray, input: ByteArray): ByteArray = Mac.getInstance("HmacSHA256").run {
+    fun hmacSha256(key: ByteArray, input: ByteArray): ByteArray = Mac.getInstance("HmacSHA256").run {
         init(SecretKeySpec(key, "HmacSHA256"))
         doFinal(input)
     }

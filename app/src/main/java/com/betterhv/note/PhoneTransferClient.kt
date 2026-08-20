@@ -1,10 +1,11 @@
 package com.betterhv.note
 
 import android.content.Context
-import android.os.Build
+import android.os.Looper
 import android.os.SystemClock
 import android.util.Log
 import com.betterhv.transfer.android.AndroidPairingController
+import com.betterhv.transfer.android.AndroidNetworkInfoProvider
 import com.betterhv.transfer.android.BleGattSession
 import com.betterhv.transfer.android.BleIdentity
 import com.betterhv.transfer.android.BleReceiverScanner
@@ -23,6 +24,23 @@ import com.betterhv.transfer.core.RemotePayload
 import com.betterhv.transfer.core.TransferCrypto
 import com.betterhv.transfer.core.TransferOffer
 import com.betterhv.transfer.core.TransferState
+import com.betterhv.transfer.core.CapabilityNegotiation
+import com.betterhv.transfer.core.DeviceCapabilities
+import com.betterhv.transfer.core.NetworkEndpoint
+import com.betterhv.transfer.core.SsidMatch
+import com.betterhv.transfer.core.TransferChannelException
+import com.betterhv.transfer.core.TransferErrorCode
+import com.betterhv.transfer.core.TransferEvent
+import com.betterhv.transfer.core.TransferEventLog
+import com.betterhv.transfer.core.TransferFailure
+import com.betterhv.transfer.core.TransferLogEntry
+import com.betterhv.transfer.core.TransferMode
+import com.betterhv.transfer.core.TransferModes
+import com.betterhv.transfer.core.TransferNetworkSecurity
+import com.betterhv.transfer.core.TransferObservable
+import com.betterhv.transfer.core.TransferPhase
+import com.betterhv.transfer.core.TransferProgressMeter
+import com.betterhv.transfer.core.TransferSnapshot
 import com.betterhv.transfer.core.PairedDevice
 import com.betterhv.note.export.ExportArtifact
 import java.io.File
@@ -31,20 +49,40 @@ import java.util.Collections
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
+import java.net.ServerSocket
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 
-class PhoneTransferClient(context: Context) : AutoCloseable {
+class PhoneTransferClient(context: Context) : AutoCloseable, TransferObservable {
     private val appContext = context.applicationContext
     val pairing = AndroidPairingController(appContext)
     private val mutableState = MutableStateFlow<TransferState>(TransferState.Idle)
+    private val mutableSnapshot = MutableStateFlow(TransferSnapshot())
+    private val mutableEvents = MutableSharedFlow<TransferEvent>(extraBufferCapacity = 64)
+    private val eventLog = TransferEventLog()
+    override val snapshot: StateFlow<TransferSnapshot> = mutableSnapshot.asStateFlow()
+    override val events: SharedFlow<TransferEvent> = mutableEvents.asSharedFlow()
+    val eventHistory: StateFlow<List<TransferLogEntry>> = eventLog.entries
+    private val network = AndroidNetworkInfoProvider(appContext)
+    private val wifiDirect = WifiDirectController(appContext)
+    @Volatile private var activeOperationJob: Job? = null
+    @Volatile private var activeListeningSocket: ServerSocket? = null
     @Volatile private var inboundReplay = BleReplayCache()
     private val operationActive = AtomicBoolean(false)
     private val activeBleSessions = Collections.synchronizedSet(mutableSetOf<BleGattSession>())
@@ -137,7 +175,8 @@ class PhoneTransferClient(context: Context) : AutoCloseable {
                         AndroidPairingController.identityHash(identity.deviceId)
                             .equals(candidate.identityHash, ignoreCase = true)
                     ) { "NoteLink 广播身份与完整身份不一致" }
-                    require(exchange(session, paired.id, BleCommand.Capabilities) is BleResponse.Capabilities) {
+                    val key = requireNotNull(pairing.sharedKey(paired.id)) { "配对密钥不可用" }
+                    require(exchange(session, paired.id, BleCommand.Capabilities(localCapabilities(key))) is BleResponse.Capabilities) {
                         "NoteLink 未确认配对"
                     }
                 }
@@ -159,14 +198,30 @@ class PhoneTransferClient(context: Context) : AutoCloseable {
         return requestNext(paired.id, kind)
     }
 
+    /** Authenticates a paired NoteLink and performs a v2 capability round trip without leasing queue content. */
+    suspend fun verifyConnection(clientId: String): CapabilityNegotiation = withContext(Dispatchers.IO) {
+        val paired = pairing.pairedClient(clientId) ?: error("配对的 NoteLink 不存在")
+        val sender = findSender(paired, null, 8_000L)
+            ?: error("未发现 ${paired.name}；请确认 NoteLink 正在运行")
+        withBleSession(sender.bluetoothAddress) { session ->
+            val identity = verifyIdentity(session, sender, paired)
+            var authenticatedId = paired.id
+            if (paired.legacy) authenticatedId = pairing.resolveLegacyIdentity(paired.id, identity).id
+            val key = requireNotNull(pairing.sharedKey(authenticatedId)) { "配对密钥不可用" }
+            negotiate(session, authenticatedId, key).also { pairing.markLastUsed(authenticatedId) }
+        }
+    }
+
     suspend fun requestNext(clientId: String, kind: ContentKind): ReceivedLease? = withContext(Dispatchers.IO) {
         check(operationActive.compareAndSet(false, true)) { "已有 NoteLink 传输正在进行" }
+        activeOperationJob = currentCoroutineContext()[Job]
         var keepActive = false
         val paired = pairing.pairedClient(clientId) ?: run {
             operationActive.set(false)
             error("配对的 NoteLink 不存在")
         }
         mutableState.value = TransferState.Scanning
+        startOperation(UUID.randomUUID(), null, paired.id, 0, TransferPhase.DISCOVERING)
         val startedAt = SystemClock.elapsedRealtime()
         val sender = findSender(paired, kind, 5_000L) ?: run {
             operationActive.set(false)
@@ -181,7 +236,8 @@ class PhoneTransferClient(context: Context) : AutoCloseable {
             val activeSession = openBleSession(sender.bluetoothAddress).also { session = it }
             Log.i(TAG, "GATT ready after ${elapsed(startedAt)} ms")
             val identity = verifyIdentity(activeSession, sender, paired)
-            exchange(activeSession, authenticatedId, BleCommand.Capabilities)
+            val key = requireNotNull(pairing.sharedKey(authenticatedId)) { "配对密钥不可用" }
+            val negotiation = negotiate(activeSession, authenticatedId, key)
             if (paired.legacy) {
                 authenticatedId = pairing.resolveLegacyIdentity(paired.id, identity).id
             }
@@ -195,15 +251,18 @@ class PhoneTransferClient(context: Context) : AutoCloseable {
                     return@withContext null
                 } else error("手机返回了无效队列响应")
             leasedItemId = offer.id
+            mutableSnapshot.value = mutableSnapshot.value.copy(itemId = offer.id, totalBytes = offer.byteLength)
             val payload = when (kind) {
                 ContentKind.TEXT -> receiveText(activeSession, authenticatedId, offer)
-                ContentKind.IMAGE -> receiveImage(activeSession, offer, authenticatedId)
+                ContentKind.IMAGE -> receiveImage(activeSession, offer, authenticatedId, negotiation, key)
             }
             Log.i(TAG, "${kind.name.lowercase()} payload ready after ${elapsed(startedAt)} ms")
             mutableState.value = TransferState.AwaitingPlacement(offer.id)
+            phase(TransferPhase.AWAITING_COMMIT)
             keepActive = true
             NoteReceivedLease(activeSession, authenticatedId, TransferOffer(offer), payload) {
                 mutableState.value = TransferState.Idle
+                activeOperationJob = null
                 operationActive.set(false)
             }
         } catch (t: Throwable) {
@@ -213,9 +272,13 @@ class PhoneTransferClient(context: Context) : AutoCloseable {
             }
             failedSession?.let(::closeBleSession)
             mutableState.value = TransferState.Error(t.message ?: "手机传输失败")
+            fail(t)
             throw t
         } finally {
-            if (!keepActive) operationActive.set(false)
+            if (!keepActive) {
+                activeOperationJob = null
+                operationActive.set(false)
+            }
         }
     }
 
@@ -233,6 +296,7 @@ class PhoneTransferClient(context: Context) : AutoCloseable {
         progress: (Long, Long) -> Unit = { _, _ -> }
     ) = withContext(Dispatchers.IO) {
         check(operationActive.compareAndSet(false, true)) { "已有 NoteLink 传输正在进行" }
+        activeOperationJob = currentCoroutineContext()[Job]
         val paired = pairing.pairedClient(clientId) ?: run {
             operationActive.set(false)
             error("配对的 NoteLink 不存在")
@@ -241,77 +305,58 @@ class PhoneTransferClient(context: Context) : AutoCloseable {
             "导出文件超过 512 MiB"
         }
         mutableState.value = TransferState.Scanning
+        startOperation(artifact.id, artifact.id, paired.id, artifact.byteLength, TransferPhase.DISCOVERING)
         try {
-        val sender = findSender(paired, null, 8_000L)
-            ?: error("未发现 ${paired.name}；请确认 NoteLink 正在运行")
-        withBleSession(sender.bluetoothAddress) { session ->
-            val identity = verifyIdentity(session, sender, paired)
-            var authenticatedId = paired.id
-            val capabilities = exchange(session, authenticatedId, BleCommand.Capabilities) as? BleResponse.Capabilities
-                ?: error("NoteLink 版本过旧，请升级后重试")
-            if (paired.legacy) authenticatedId = pairing.resolveLegacyIdentity(paired.id, identity).id
-            pairing.markLastUsed(authenticatedId)
-            rememberAuthenticatedSenderName(authenticatedId, identity.deviceName)
-            require(capabilities.flags and BleQueueProtocol.CAPABILITY_EXPORT_PUSH != 0) {
-                "NoteLink 版本不支持接收导出"
-            }
-            val offer = ExportTransferOffer(
-                artifact.id, artifact.displayName, artifact.mimeType, artifact.byteLength, artifact.sha256
-            )
-            when (val response = exchange(session, authenticatedId, BleCommand.PushOffer(offer))) {
-                is BleResponse.AlreadyReceived -> {
-                    mutableState.value = TransferState.Idle
-                    return@withBleSession
+            val sender = findSender(paired, null, 8_000L)
+                ?: error("未发现 ${paired.name}；请确认 NoteLink 正在运行")
+            withBleSession(sender.bluetoothAddress) { session ->
+                phase(TransferPhase.AUTHENTICATING)
+                val identity = verifyIdentity(session, sender, paired)
+                var authenticatedId = paired.id
+                if (paired.legacy) authenticatedId = pairing.resolveLegacyIdentity(paired.id, identity).id
+                val key = requireNotNull(pairing.sharedKey(authenticatedId)) { "配对密钥不可用" }
+                val negotiation = negotiate(session, authenticatedId, key)
+                pairing.markLastUsed(authenticatedId)
+                rememberAuthenticatedSenderName(authenticatedId, identity.deviceName)
+                require(negotiation.remote.extensions and BleQueueProtocol.CAPABILITY_EXPORT_PUSH != 0) {
+                    "NoteLink 版本不支持接收导出"
                 }
-                BleResponse.Ok -> Unit
-                is BleResponse.Error -> error(response.message)
-                else -> error("NoteLink 未接受导出文件")
-            }
-            try {
-                val owner = withTimeout(45_000L) {
-                    while (true) {
-                        when (val response = exchange(session, authenticatedId, BleCommand.PushStatus(artifact.id))) {
-                            is BleResponse.WifiOwnerInfo -> return@withTimeout response
-                            is BleResponse.AlreadyReceived, is BleResponse.PushComplete -> return@withTimeout null
-                            BleResponse.Pending -> delay(250L)
-                            is BleResponse.Error -> error(response.message)
-                            else -> error("NoteLink 返回了无效接收状态")
-                        }
-                    }
-                    error("unreachable")
+                val offer = ExportTransferOffer(
+                    artifact.id, artifact.displayName, artifact.mimeType, artifact.byteLength, artifact.sha256
+                )
+                when (val response = exchange(session, authenticatedId, BleCommand.PushOffer(offer))) {
+                    is BleResponse.AlreadyReceived -> { complete(artifact.id); return@withBleSession }
+                    BleResponse.Ok -> Unit
+                    is BleResponse.Failure -> throw TransferChannelException(response.failure)
+                    is BleResponse.Error -> error(response.message)
+                    else -> error("NoteLink 未接受导出文件")
                 }
-                if (owner != null) {
-                    val key = requireNotNull(pairing.sharedKey(authenticatedId)) { "配对密钥不可用" }
-                    WifiDirectController(appContext).use { wifi ->
-                        try {
-                            wifi.connect(owner.deviceAddress, owner.deviceName, owner.networkName, owner.passphrase)
-                            EncryptedFileTransfer.send(owner.ownerIp, artifact.id, artifact.file, key) { done, total ->
-                                mutableState.value = TransferState.Transferring(artifact.id, done, total)
-                                progress(done, total)
-                            }
-                        } finally {
-                            wifi.removeGroup()
-                        }
-                    }
+                try {
+                    sendExportWithSelection(session, authenticatedId, artifact, negotiation, key, progress)
                     withTimeout(30_000L) {
                         while (true) {
                             when (val response = exchange(session, authenticatedId, BleCommand.PushStatus(artifact.id))) {
                                 is BleResponse.PushComplete, is BleResponse.AlreadyReceived -> return@withTimeout
-                                BleResponse.Pending, is BleResponse.WifiOwnerInfo -> delay(250L)
+                                BleResponse.Pending -> delay(250L)
+                                is BleResponse.Failure -> throw TransferChannelException(response.failure)
                                 is BleResponse.Error -> error(response.message)
                                 else -> error("NoteLink 未确认导出文件")
                             }
                         }
                     }
+                    complete(artifact.id)
+                    mutableState.value = TransferState.Idle
+                } catch (t: Throwable) {
+                    runCatching { exchange(session, authenticatedId, BleCommand.PushCancel(artifact.id)) }
+                    throw t
                 }
-                mutableState.value = TransferState.Idle
-            } catch (t: Throwable) {
-                runCatching { exchange(session, authenticatedId, BleCommand.PushCancel(artifact.id)) }
-                mutableState.value = TransferState.Error(t.message ?: "发送导出失败")
-                throw t
             }
-        }
+        } catch (error: Throwable) {
+            fail(error)
+            mutableState.value = TransferState.Error(error.message ?: "发送导出失败")
+            throw error
         } finally {
+            activeOperationJob = null
             operationActive.set(false)
         }
     }
@@ -337,114 +382,152 @@ class PhoneTransferClient(context: Context) : AutoCloseable {
     private suspend fun receiveImage(
         session: BleGattSession,
         item: com.betterhv.transfer.core.QueueItem,
-        pairedPhoneId: String
+        pairedPhoneId: String,
+        negotiation: CapabilityNegotiation,
+        key: ByteArray
     ): RemotePayload.Image = coroutineScope {
-        val key = requireNotNull(pairing.sharedKey(pairedPhoneId)) { "配对密钥不可用" }
         val incoming = File(appContext.filesDir, "documents/incoming/remote-${item.id}.part")
-        if (Build.MODEL.equals("N10Pro", ignoreCase = true)) {
-            return@coroutineScope receiveImageFromPhoneOwner(session, pairedPhoneId, item, key, incoming)
+        val local = localCapabilities(key)
+        val lanEndpoint = local.lanEndpoint
+        val canLan = negotiation.ssidMatch == SsidMatch.MATCH && lanEndpoint != null &&
+            TransferModes.contains(local.modes, TransferMode.LAN) &&
+            TransferModes.contains(negotiation.remote.modes, TransferMode.LAN)
+        val firstFailure = if (canLan) runCatching {
+            receiveImageAttempt(session, pairedPhoneId, item, incoming, key, TransferMode.LAN, lanEndpoint)
+        }.fold({ return@coroutineScope it }, { it }) else null
+        val wifiEndpoint = negotiation.remote.wifiDirectEndpoint
+        if (wifiEndpoint != null && TransferModes.contains(negotiation.remote.modes, TransferMode.WIFI_DIRECT)) {
+            firstFailure?.let { fallback(item.id, it) }
+            phase(TransferPhase.JOINING_WIFI_DIRECT)
+            val joined = wifiDirect.joinHostedGroup(
+                wifiEndpoint.deviceAddress, "NoteLink", wifiEndpoint.networkName, wifiEndpoint.passphrase
+            )
+            val receiverEndpoint = NetworkEndpoint(requireNotNull(joined.localIpAddress) {
+                "无法读取 Note 的 Wi-Fi Direct 地址"
+            })
+            return@coroutineScope receiveImageAttempt(
+                session, pairedPhoneId, item, incoming, key, TransferMode.WIFI_DIRECT, receiverEndpoint
+            )
         }
-        WifiDirectController(appContext).use { wifi ->
-            try {
-                val p2p = wifi.createGroup()
-                val ownerMac = requireNotNull(p2p.localDeviceAddress) { "无法读取 Note 的 Wi-Fi Direct 地址" }
-                val ownerName = requireNotNull(p2p.ownerDeviceName) { "无法读取 Note 的 Wi-Fi Direct 名称" }
-                val receiver = async(Dispatchers.IO) {
-                    EncryptedFileTransfer.receive(incoming, item.id, key) { done, total ->
-                        mutableState.value = TransferState.Transferring(item.id, done, total)
-                    }
-                }
-                val response = exchange(
-                    session,
-                    pairedPhoneId,
-                    BleCommand.WifiSend(item.id, ownerMac, ownerName, p2p.groupOwnerAddress)
-                )
-                require(response == BleResponse.Ok) { (response as? BleResponse.Error)?.message ?: "手机未接受图片传输" }
-                val received = receiver.await()
-                require(received.byteLength == item.byteLength && received.sha256.contentEquals(item.sha256)) {
-                    "图片长度或校验值不一致"
-                }
-                RemotePayload.Image(item, incoming)
-            } finally {
-                wifi.removeGroup()
-            }
-        }
+        throw firstFailure ?: TransferChannelException(TransferFailure(
+            TransferErrorCode.UNSUPPORTED_MODE, "没有可用的大文件通道", false
+        ))
     }
 
-    private suspend fun receiveImageFromPhoneOwner(
-        bleSession: BleGattSession,
+    private suspend fun kotlinx.coroutines.CoroutineScope.receiveImageAttempt(
+        session: BleGattSession,
         clientId: String,
         item: com.betterhv.transfer.core.QueueItem,
-        key: ByteArray,
-        incoming: File
-    ): RemotePayload.Image = coroutineScope {
-        val wifiStartedAt = SystemClock.elapsedRealtime()
-        require(exchange(bleSession, clientId, BleCommand.WifiHost(item.id)) == BleResponse.Ok) {
-            "手机未接受 Wi-Fi Direct 建组请求"
-        }
-        val owner = withTimeout(30_000L) {
-            while (true) {
-                when (val response = exchange(bleSession, clientId, BleCommand.WifiHostStatus(item.id))) {
-                    is BleResponse.WifiOwnerInfo -> return@withTimeout response
-                    BleResponse.Pending -> delay(250L)
-                    is BleResponse.Error -> error(response.message)
-                    else -> error("手机返回了无效建组状态")
-                }
-            }
-            error("unreachable")
-        }
-        Log.i(TAG, "Wi-Fi Direct owner ready after ${elapsed(wifiStartedAt)} ms")
-        // N10Pro's vendor Wi-Fi P2P driver reports a successful setup but
-        // fails to create the p2p interface (ioctl ENODEV). The tablet and
-        // Windows host are already on the same WLAN, so use that interface as
-        // a transport fallback instead of waiting for P2P discovery forever.
-        if (Build.MODEL.equals("N10Pro", ignoreCase = true)) {
-            val receiverIp = localWifiIpv4Address()
-                ?: error("无法读取 N10 Pro 的 Wi-Fi 地址")
-            val receiver = async(Dispatchers.IO) {
-                EncryptedFileTransfer.receive(incoming, item.id, key) { done, total ->
-                    mutableState.value = TransferState.Transferring(item.id, done, total)
-                }
-            }
-            val response = exchange(bleSession, clientId, BleCommand.WifiSendTo(item.id, receiverIp))
-            require(response == BleResponse.Ok) {
-                (response as? BleResponse.Error)?.message ?: "手机未接受图片传输"
-            }
-            val received = receiver.await()
-            Log.i(TAG, "LAN image TCP transfer finished after ${elapsed(wifiStartedAt)} ms")
-            require(received.byteLength == item.byteLength && received.sha256.contentEquals(item.sha256)) {
-                "图片长度或校验值不一致"
-            }
-            return@coroutineScope RemotePayload.Image(item, incoming)
-        }
-        WifiDirectController(appContext).use { wifi ->
+        incoming: File,
+        pairingKey: ByteArray,
+        mode: TransferMode,
+        receiverEndpoint: NetworkEndpoint
+    ): RemotePayload.Image {
+        val nonce = TransferCrypto.randomBytes(TransferNetworkSecurity.SESSION_NONCE_BYTES)
+        val fileKey = TransferNetworkSecurity.sessionKey(pairingKey, item.id, nonce, "file")
+        val probeKey = TransferNetworkSecurity.sessionKey(pairingKey, item.id, nonce, "probe")
+        val meter = TransferProgressMeter(System.currentTimeMillis())
+        selectTransport(item.id, mode, receiverEndpoint)
+        val receiver = async(Dispatchers.IO) {
             try {
-                val p2p = wifi.connect(
-                    owner.deviceAddress,
-                    owner.deviceName,
-                    owner.networkName,
-                    owner.passphrase
+                EncryptedFileTransfer.receive(
+                    incoming, item.id, fileKey,
+                    probeKey = if (mode == TransferMode.LAN) probeKey else null,
+                    progress = { done, total -> updateProgress(item.id, done, total, meter) },
+                    onListening = { activeListeningSocket = it }
                 )
-                Log.i(TAG, "Wi-Fi Direct joined after ${elapsed(wifiStartedAt)} ms")
-                val receiverIp = requireNotNull(p2p.localIpAddress) { "无法读取 Note 的 Wi-Fi Direct 地址" }
-                val receiver = async(Dispatchers.IO) {
-                    EncryptedFileTransfer.receive(incoming, item.id, key) { done, total ->
-                        mutableState.value = TransferState.Transferring(item.id, done, total)
-                    }
-                }
-                val response = exchange(bleSession, clientId, BleCommand.WifiSendTo(item.id, receiverIp))
-                require(response == BleResponse.Ok) {
-                    (response as? BleResponse.Error)?.message ?: "手机未接受图片传输"
-                }
-                val received = receiver.await()
-                Log.i(TAG, "image TCP transfer finished after ${elapsed(wifiStartedAt)} ms")
-                require(received.byteLength == item.byteLength && received.sha256.contentEquals(item.sha256)) {
-                    "图片长度或校验值不一致"
-                }
-                RemotePayload.Image(item, incoming)
             } finally {
-                wifi.removeGroup()
+                activeListeningSocket = null
             }
+        }
+        val response = try {
+            exchange(
+                session, clientId,
+                BleCommand.PrepareFileTransfer(item.id, mode, receiverEndpoint, nonce)
+            )
+        } catch (error: Throwable) {
+            activeListeningSocket?.close()
+            receiver.cancel()
+            throw error
+        }
+        if (response !is BleResponse.Prepared) {
+            activeListeningSocket?.close()
+            receiver.cancel()
+            if (response is BleResponse.Failure) throw TransferChannelException(response.failure)
+            error((response as? BleResponse.Error)?.message ?: "NoteLink 未准备文件传输")
+        }
+        val received = receiver.await()
+        activeListeningSocket = null
+        phase(TransferPhase.VERIFYING)
+        require(received.byteLength == item.byteLength && received.sha256.contentEquals(item.sha256)) {
+            "图片长度或校验值不一致"
+        }
+        return RemotePayload.Image(item, incoming)
+    }
+
+    private suspend fun sendExportWithSelection(
+        session: BleGattSession,
+        clientId: String,
+        artifact: ExportArtifact,
+        negotiation: CapabilityNegotiation,
+        pairingKey: ByteArray,
+        progressCallback: (Long, Long) -> Unit
+    ) {
+        val local = localCapabilities(pairingKey)
+        val remoteLan = negotiation.remote.lanEndpoint
+        val canLan = negotiation.ssidMatch == SsidMatch.MATCH && remoteLan != null &&
+            TransferModes.contains(local.modes, TransferMode.LAN) &&
+            TransferModes.contains(negotiation.remote.modes, TransferMode.LAN)
+        val firstFailure = if (canLan) runCatching {
+            sendExportAttempt(session, clientId, artifact, pairingKey, TransferMode.LAN, remoteLan, progressCallback)
+        }.exceptionOrNull() else null
+        if (canLan && firstFailure == null) return
+        val wifi = negotiation.remote.wifiDirectEndpoint
+        if (wifi != null && TransferModes.contains(negotiation.remote.modes, TransferMode.WIFI_DIRECT)) {
+            firstFailure?.let { fallback(artifact.id, it) }
+            phase(TransferPhase.JOINING_WIFI_DIRECT)
+            val joined = wifiDirect.joinHostedGroup(wifi.deviceAddress, "NoteLink", wifi.networkName, wifi.passphrase)
+            sendExportAttempt(
+                session, clientId, artifact, pairingKey, TransferMode.WIFI_DIRECT,
+                NetworkEndpoint(joined.groupOwnerAddress, wifi.port), progressCallback
+            )
+            return
+        }
+        throw firstFailure ?: TransferChannelException(TransferFailure(
+            TransferErrorCode.UNSUPPORTED_MODE, "没有可用的大文件通道", false
+        ))
+    }
+
+    private suspend fun sendExportAttempt(
+        session: BleGattSession,
+        clientId: String,
+        artifact: ExportArtifact,
+        pairingKey: ByteArray,
+        mode: TransferMode,
+        receiverEndpoint: NetworkEndpoint,
+        progressCallback: (Long, Long) -> Unit
+    ) {
+        val nonce = TransferCrypto.randomBytes(TransferNetworkSecurity.SESSION_NONCE_BYTES)
+        val fileKey = TransferNetworkSecurity.sessionKey(pairingKey, artifact.id, nonce, "file")
+        val probeKey = TransferNetworkSecurity.sessionKey(pairingKey, artifact.id, nonce, "probe")
+        selectTransport(artifact.id, mode, receiverEndpoint)
+        when (val response = exchange(
+            session, clientId,
+            BleCommand.PrepareFileTransfer(artifact.id, mode, receiverEndpoint, nonce)
+        )) {
+            is BleResponse.Prepared -> Unit
+            is BleResponse.Failure -> throw TransferChannelException(response.failure)
+            is BleResponse.Error -> error(response.message)
+            else -> error("NoteLink 未准备接收文件")
+        }
+        if (mode == TransferMode.LAN) {
+            phase(TransferPhase.PROBING_LAN)
+            EncryptedFileTransfer.probe(receiverEndpoint.host, artifact.id, probeKey)
+        }
+        val meter = TransferProgressMeter(System.currentTimeMillis())
+        EncryptedFileTransfer.send(receiverEndpoint.host, artifact.id, artifact.file, fileKey) { done, total ->
+            updateProgress(artifact.id, done, total, meter)
+            progressCallback(done, total)
         }
     }
 
@@ -453,6 +536,114 @@ class PhoneTransferClient(context: Context) : AutoCloseable {
         val sealed = BleSecureEnvelope.seal(key, BleQueueProtocol.encode(command))
         val response = session.exchange(sealed)
         return BleQueueProtocol.decodeResponse(BleSecureEnvelope.open(key, response, inboundReplay))
+    }
+
+    private fun localCapabilities(key: ByteArray): DeviceCapabilities {
+        val base = network.capabilities(key)
+        return base.copy(modes = base.modes or TransferModes.WIFI_DIRECT)
+    }
+
+    private suspend fun negotiate(
+        session: BleGattSession,
+        clientId: String,
+        key: ByteArray
+    ): CapabilityNegotiation {
+        phase(TransferPhase.NEGOTIATING_CAPABILITIES)
+        val local = localCapabilities(key)
+        val response = exchange(session, clientId, BleCommand.Capabilities(local))
+        val negotiation = (response as? BleResponse.Capabilities)?.negotiation
+            ?: if (response is BleResponse.Failure) throw TransferChannelException(response.failure)
+            else error("NoteLink 版本过旧，请升级后重试")
+        mutableSnapshot.value = mutableSnapshot.value.copy(
+            localModes = local.modes,
+            remoteModes = negotiation.remote.modes,
+            ssidMatch = negotiation.ssidMatch,
+            wifiDirectGroupReady = negotiation.remote.wifiDirectEndpoint != null
+        )
+        emitEvent(TransferEvent.CapabilityNegotiated(local.modes, negotiation.remote.modes, negotiation.ssidMatch))
+        return negotiation
+    }
+
+    private fun startOperation(
+        operationId: UUID,
+        itemId: UUID?,
+        deviceId: String,
+        total: Long,
+        initialPhase: TransferPhase
+    ) {
+        val now = System.currentTimeMillis()
+        mutableSnapshot.value = TransferSnapshot(
+            operationId = operationId, itemId = itemId, deviceId = deviceId, phase = initialPhase,
+            totalBytes = total, startedAtMillis = now, phaseStartedAtMillis = now, canCancel = true
+        )
+    }
+
+    private fun phase(next: TransferPhase) {
+        val current = mutableSnapshot.value
+        mutableSnapshot.value = current.copy(
+            phase = next, phaseStartedAtMillis = System.currentTimeMillis(),
+            canCancel = next !in setOf(TransferPhase.IDLE, TransferPhase.COMPLETE, TransferPhase.FAILED)
+        )
+        emitEvent(TransferEvent.PhaseChanged(current.operationId, current.phase, next))
+    }
+
+    private fun selectTransport(itemId: UUID, mode: TransferMode, endpoint: NetworkEndpoint) {
+        mutableSnapshot.value = mutableSnapshot.value.copy(
+            itemId = itemId, mode = mode, endpoint = endpoint,
+            attempt = mutableSnapshot.value.attempt + 1,
+            phase = TransferPhase.WAITING_FOR_PEER
+        )
+        mutableSnapshot.value.operationId?.let { emitEvent(TransferEvent.TransportSelected(it, mode, endpoint)) }
+    }
+
+    private fun updateProgress(itemId: UUID, done: Long, total: Long, meter: TransferProgressMeter) {
+        val sample = meter.sample(done, total)
+        mutableState.value = TransferState.Transferring(itemId, done, total)
+        mutableSnapshot.value = mutableSnapshot.value.copy(
+            phase = TransferPhase.TRANSFERRING, bytesTransferred = done, totalBytes = total,
+            bytesPerSecond = sample.bytesPerSecond, averageBytesPerSecond = sample.averageBytesPerSecond,
+            etaMillis = sample.etaMillis
+        )
+        mutableSnapshot.value.operationId?.let {
+            emitEvent(TransferEvent.Progress(it, done, total, sample.bytesPerSecond, sample.etaMillis))
+        }
+    }
+
+    private fun fallback(itemId: UUID, error: Throwable) {
+        val reason = (error as? TransferChannelException)?.failure ?: TransferFailure(
+            TransferErrorCode.INTERNAL, error.message ?: "LAN 失败", true, TransferMode.LAN
+        )
+        val operationId = mutableSnapshot.value.operationId ?: itemId
+        mutableSnapshot.value = mutableSnapshot.value.copy(
+            phase = TransferPhase.FALLING_BACK, fallbackCount = 1, fallbackReason = reason,
+            phaseStartedAtMillis = System.currentTimeMillis()
+        )
+        emitEvent(TransferEvent.Fallback(operationId, TransferMode.LAN, TransferMode.WIFI_DIRECT, reason))
+    }
+
+    private fun complete(itemId: UUID) {
+        phase(TransferPhase.COMPLETE)
+        mutableSnapshot.value.operationId?.let { emitEvent(TransferEvent.Completed(it, itemId)) }
+    }
+
+    private fun fail(error: Throwable) {
+        val failure = when (error) {
+            is TransferChannelException -> error.failure
+            is TimeoutCancellationException -> TransferFailure(
+                TransferErrorCode.CONNECTION_TIMEOUT,
+                error.message ?: "连接超时",
+                true,
+                mutableSnapshot.value.mode
+            )
+            else -> TransferFailure(
+                TransferErrorCode.INTERNAL, error.message ?: "传输失败", true, mutableSnapshot.value.mode
+            )
+        }
+        mutableSnapshot.value = mutableSnapshot.value.copy(
+            phase = TransferPhase.FAILED, lastFailure = failure,
+            canRetry = failure.recoverable, canCancel = false
+        )
+        emitEvent(TransferEvent.Failed(mutableSnapshot.value.operationId, failure))
     }
 
     private suspend fun findSender(
@@ -526,12 +717,13 @@ class PhoneTransferClient(context: Context) : AutoCloseable {
     suspend fun recoverAfterWake() = withContext(Dispatchers.IO) {
         val sessions = synchronized(activeBleSessions) { activeBleSessions.toList() }
         sessions.forEach(::closeBleSession)
-        runCatching {
-            WifiDirectController(appContext).use { wifi -> wifi.removeGroup() }
-        }
+        runCatching { wifiDirect.disconnectJoinedGroup() }
         inboundReplay = BleReplayCache()
+        activeOperationJob?.cancel(); activeOperationJob = null
+        activeListeningSocket?.close(); activeListeningSocket = null
         operationActive.set(false)
         mutableState.value = TransferState.Idle
+        mutableSnapshot.value = TransferSnapshot()
     }
 
     private fun newScanner() = BleReceiverScanner(appContext)
@@ -573,11 +765,35 @@ class PhoneTransferClient(context: Context) : AutoCloseable {
         }
     }
 
+    override fun cancel() {
+        activeListeningSocket?.close(); activeListeningSocket = null
+        activeOperationJob?.cancel()
+        activeOperationJob = null
+        wifiDirect.requestCloseGroup()
+        operationActive.set(false)
+        val failure = TransferFailure(TransferErrorCode.CANCELLED, "传输已取消", true, mutableSnapshot.value.mode)
+        mutableSnapshot.value = mutableSnapshot.value.copy(
+            phase = TransferPhase.FAILED, lastFailure = failure, canRetry = true, canCancel = false
+        )
+        emitEvent(TransferEvent.Failed(mutableSnapshot.value.operationId, failure))
+    }
+
     override fun close() {
         val sessions = synchronized(activeBleSessions) { activeBleSessions.toList() }
         sessions.forEach(::closeBleSession)
+        activeOperationJob?.cancel(); activeOperationJob = null
+        activeListeningSocket?.close(); activeListeningSocket = null
+        wifiDirect.requestCloseGroup()
+        wifiDirect.close()
         mutableState.value = TransferState.Idle
+        mutableSnapshot.value = TransferSnapshot()
         operationActive.set(false)
+    }
+
+    private fun emitEvent(event: TransferEvent) {
+        if (!mutableEvents.tryEmit(event)) Log.w(TAG, "Transfer event buffer full: ${event.javaClass.simpleName}")
+        val entry = eventLog.record(event)
+        EventLog.log(TAG, "${entry.category} ${entry.detail}")
     }
 
     private inner class NoteReceivedLease(
@@ -587,20 +803,43 @@ class PhoneTransferClient(context: Context) : AutoCloseable {
         override val payload: RemotePayload,
         private val finish: () -> Unit
     ) : ReceivedLease {
-        private var finished = false
-        override fun heartbeat() { if (!finished) blocking(BleCommand.Heartbeat(offer.item.id)) }
+        @Volatile private var finished = false
+        private val finishMutex = Mutex()
+        override fun heartbeat() {
+            if (!finished) blockingExchange(BleCommand.Heartbeat(offer.item.id))
+        }
         override fun markTransferring() = Unit
         override fun markAwaitingCommit() = Unit
         override fun commit() = finishWith(BleCommand.Commit(offer.item.id))
         override fun release() = finishWith(BleCommand.Release(offer.item.id))
-        private fun blocking(command: BleCommand) = runBlocking(Dispatchers.IO) {
+        override suspend fun heartbeatAndAwait() {
+            if (!finished) exchangeAndRequireOk(BleCommand.Heartbeat(offer.item.id))
+        }
+        override suspend fun commitAndAwait() = finishWithAwait(BleCommand.Commit(offer.item.id))
+        override suspend fun releaseAndAwait() = finishWithAwait(BleCommand.Release(offer.item.id))
+        private suspend fun exchangeAndRequireOk(command: BleCommand) {
             val response = exchange(session, clientId, command)
             require(response == BleResponse.Ok) { (response as? BleResponse.Error)?.message ?: "手机拒绝操作" }
         }
+        private fun blockingExchange(command: BleCommand) {
+            requireWorkerThread()
+            runBlocking(Dispatchers.IO) { exchangeAndRequireOk(command) }
+        }
         private fun finishWith(command: BleCommand) {
-            if (finished) return
+            requireWorkerThread()
+            runBlocking(Dispatchers.IO) { finishWithAwait(command) }
+        }
+        private fun requireWorkerThread() = check(Looper.myLooper() != Looper.getMainLooper()) {
+            "ReceivedLease must be finalized asynchronously"
+        }
+        private suspend fun finishWithAwait(command: BleCommand) = finishMutex.withLock {
+            if (finished) return@withLock
             try {
-                blocking(command)
+                exchangeAndRequireOk(command)
+                if (command is BleCommand.Commit) complete(offer.item.id)
+            } catch (error: Throwable) {
+                if (command is BleCommand.Commit) fail(error)
+                throw error
             } finally {
                 finished = true
                 closeSession()

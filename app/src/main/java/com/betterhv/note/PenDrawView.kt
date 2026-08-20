@@ -61,6 +61,7 @@ import com.betterhv.note.storage.ThumbnailKey
 import com.betterhv.note.storage.TransferReceipt
 import java.io.File
 import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.Dispatchers
@@ -129,6 +130,8 @@ class PenDrawView @JvmOverloads constructor(
     /** Cache of committed strokes. Regenerable from [page] at any time. */
     private var foreBitmap: Bitmap? = null
     private var bitmapCanvas: Canvas? = null
+    private var renderedPageId: UUID? = null
+    private var renderedContentRevision: Long = Long.MIN_VALUE
 
     /** Authoritative multi-page document plus asynchronous persistence (spec §46-56). */
     @Volatile private var persistenceAvailable = true
@@ -181,12 +184,40 @@ class PenDrawView @JvmOverloads constructor(
         }
     }
 
-    private val renderer = InkRenderer()
-    private val imageCache = object : android.util.LruCache<String, Bitmap>(24 * 1024 * 1024) {
+    private class RenderContext {
+        val renderer = InkRenderer()
+        val objectMatrix = Matrix()
+        val imagePaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+        val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = android.graphics.Color.BLACK }
+        val placeholderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = 0xAA000000.toInt()
+            style = Paint.Style.STROKE
+            strokeWidth = 2f
+        }
+    }
+
+    private data class PageRenderKey(
+        val notebookId: UUID,
+        val pageId: UUID,
+        val contentRevision: Long,
+        val width: Int,
+        val height: Int
+    )
+
+    private val viewRenderContext = RenderContext()
+    private val imageCache = object : android.util.LruCache<String, Bitmap>(IMAGE_CACHE_BYTES) {
         override fun sizeOf(key: String, value: Bitmap): Int = value.byteCount
     }
-    private val imagePaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
-    private val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = android.graphics.Color.BLACK }
+    private val pageBitmapCache = object : android.util.LruCache<PageRenderKey, Bitmap>(PAGE_BITMAP_CACHE_BYTES) {
+        override fun sizeOf(key: PageRenderKey, value: Bitmap): Int = value.byteCount
+    }
+    private val pagePreRenderExecutor = Executors.newSingleThreadExecutor { runnable ->
+        Thread(runnable, "inknote-page-prerender").apply { isDaemon = true }
+    }
+    private val pagePreRenderInFlight = ConcurrentHashMap.newKeySet<PageRenderKey>()
+    @Volatile private var desiredWarmPageIds: Set<UUID> = emptySet()
+    @Volatile private var desiredWarmNotebookId: UUID? = notebook.id
+    @Volatile private var pagePreRenderClosed = false
     private var penStyle = PenStyle(baseWidth = DEFAULT_PEN_WIDTH)
 
     private val eraserWidth = DEFAULT_ERASER_WIDTH
@@ -237,9 +268,10 @@ class PenDrawView @JvmOverloads constructor(
         onNotice?.invoke(message)
     }
 
-    fun importImage(uri: Uri): ImportedImage = imageAssets.import(uri)
+    fun importImage(uri: Uri): ImportedImage = imageAssets.commit(imageAssets.import(uri)).also(::warmImageCache)
 
-    fun stageRemoteImage(file: File, mimeType: String): ImportedImage = imageAssets.stageFile(file, mimeType)
+    fun stageRemoteImage(file: File, mimeType: String): ImportedImage =
+        imageAssets.commit(imageAssets.stageFile(file, mimeType)).also(::warmImageCache)
 
     fun discardImportedImage(image: ImportedImage) {
         imageAssets.discard(image)
@@ -420,7 +452,7 @@ class PenDrawView @JvmOverloads constructor(
         val rotate = obj is ImageObject && distanceTo(x, y, rotationHandle(obj)) <= HANDLE_TOUCH_RADIUS * 1.35f
         richGestureMode = when {
             rotate -> RichGestureMode.ROTATE
-            obj is ImageObject && handle >= 0 -> RichGestureMode.SCALE
+            (obj is ImageObject || obj is TextObject) && handle >= 0 -> RichGestureMode.SCALE
             pointInsideObject(obj, x, y) -> RichGestureMode.MOVE
             else -> return false
         }
@@ -532,17 +564,18 @@ class PenDrawView @JvmOverloads constructor(
         distance(x, y, point[0], point[1])
 
     private fun measureTextBounds(text: String, family: TextFontFamily, size: Float): Bounds {
-        configureTextPaint(family, size)
+        val paint = viewRenderContext.textPaint
+        configureTextPaint(paint, family, size)
         val lines = text.split('\n').ifEmpty { listOf("") }
-        val metrics = textPaint.fontMetrics
-        val width = lines.maxOfOrNull(textPaint::measureText)?.coerceAtLeast(1f) ?: 1f
+        val metrics = paint.fontMetrics
+        val width = lines.maxOfOrNull(paint::measureText)?.coerceAtLeast(1f) ?: 1f
         val height = (metrics.descent - metrics.ascent) * lines.size
         return Bounds(0f, 0f, width, height.coerceAtLeast(1f))
     }
 
-    private fun configureTextPaint(family: TextFontFamily, size: Float) {
-        textPaint.typeface = Typeface.create(family.androidName, Typeface.NORMAL)
-        textPaint.textSize = size
+    private fun configureTextPaint(paint: Paint, family: TextFontFamily, size: Float) {
+        paint.typeface = Typeface.create(family.androidName, Typeface.NORMAL)
+        paint.textSize = size
     }
 
     init {
@@ -628,6 +661,7 @@ class PenDrawView @JvmOverloads constructor(
             createBitmap(w, h)
             initPenDraw()
             scheduleSave(DocumentChange.fullPage(notebook, page, "page:size"))
+            warmAdjacentPages(currentPageIndex())
         }
     }
 
@@ -725,6 +759,10 @@ class PenDrawView @JvmOverloads constructor(
         val first = target.pageAt(0) ?: error("笔记本没有页面")
         notebook = target
         pageCache.clear()
+        pageBitmapCache.evictAll()
+        pagePreRenderInFlight.clear()
+        desiredWarmPageIds = emptySet()
+        desiredWarmNotebookId = target.id
         page = first
         pageCache.put(first)
         commandStack.clear()
@@ -767,6 +805,7 @@ class PenDrawView @JvmOverloads constructor(
         if (index == currentPageIndex()) return true
         materialize()
         requestThumbnail(page)
+        cacheCurrentPageBitmap()
         activatePage(index)
         return true
     }
@@ -791,14 +830,25 @@ class PenDrawView @JvmOverloads constructor(
     fun addPage(): UUID = addPageAfter(page.id, activate = true)
 
     fun addPageAfter(afterPageId: UUID, activate: Boolean): UUID {
-        if (gestureOpen) finishGesture()
+        if (activate) {
+            materialize()
+            requestThumbnail(page)
+            cacheCurrentPageBitmap()
+        } else if (gestureOpen) {
+            finishGesture()
+        }
         val afterIndex = notebook.pageOrder.indexOf(afterPageId).takeIf { it >= 0 }
             ?: currentPageIndex()
         val insertAt = afterIndex + 1
         val newPage = Page(width = width.toFloat(), height = height.toFloat())
         commandStack.execute(AddPageCommand(notebook, newPage, insertAt))
         pageCache.put(newPage)
-        if (activate) activatePage(insertAt) else onDocChanged?.invoke()
+        if (activate) {
+            activatePage(insertAt)
+        } else {
+            warmAdjacentPages(currentPageIndex())
+            onDocChanged?.invoke()
+        }
         return newPage.id
     }
 
@@ -818,6 +868,7 @@ class PenDrawView @JvmOverloads constructor(
         if (deletingCurrent) {
             activatePage(oldIndex.coerceAtMost(notebook.pageOrder.lastIndex))
         } else {
+            warmAdjacentPages(currentPageIndex())
             onDocChanged?.invoke()
         }
         return true
@@ -835,6 +886,7 @@ class PenDrawView @JvmOverloads constructor(
         val target = targetIndex.coerceIn(0, notebook.pageOrder.lastIndex)
         if (target == from) return true
         commandStack.execute(MovePageCommand(notebook, pageId, target))
+        warmAdjacentPages(currentPageIndex())
         onDocChanged?.invoke()
         return true
     }
@@ -883,8 +935,8 @@ class PenDrawView @JvmOverloads constructor(
             thumbnails.invalidate(page.id, page.contentRevision)
         }
         rebuildTools()
+        showPageBitmap(target)
         warmAdjacentPages(index)
-        redrawAll()
         clearOverlayInk()
         requestThumbnail(page)
         onDocChanged?.invoke()
@@ -902,23 +954,101 @@ class PenDrawView @JvmOverloads constructor(
         }
     }
 
-    /** Keeps only the current/previous/next Scene window resident. */
+    /** Keeps the current/previous/next Scene window resident and rasterizes neighbors off-thread. */
     private fun warmAdjacentPages(index: Int) {
         val desired = (index - 1..index + 1)
             .filter { it in notebook.pageOrder.indices }
             .map { notebook.pageOrder[it] }
             .toSet()
+        desiredWarmNotebookId = notebook.id
+        desiredWarmPageIds = desired
         pageCache.retain(desired).forEach { evicted ->
             if (evicted.id != page.id) notebook.detachPage(evicted.id)
         }
         for (id in desired) {
-            val loaded = notebook.getPage(id) ?: repository.loadPage(id)?.also(notebook::attachPage)
-            if (loaded != null) {
-                pageCache.put(loaded)?.let { evicted ->
-                    if (evicted.id != page.id) notebook.detachPage(evicted.id)
+            if (id != page.id) schedulePagePreRender(id)
+        }
+    }
+
+    private fun schedulePagePreRender(id: UUID) {
+        val metadata = notebook.metadata(id) ?: return
+        val renderWidth = width
+        val renderHeight = height
+        if (renderWidth <= 0 || renderHeight <= 0) return
+        val notebookId = notebook.id
+        val key = PageRenderKey(notebookId, id, metadata.contentRevision, renderWidth, renderHeight)
+        if (pageBitmapCache.get(key) != null || !pagePreRenderInFlight.add(key)) return
+        val residentSnapshot = (notebook.getPage(id) ?: pageCache.get(id))?.let(PageSnapshot::capture)
+        pagePreRenderExecutor.execute {
+            try {
+                if (pagePreRenderClosed || desiredWarmNotebookId != notebookId || id !in desiredWarmPageIds) {
+                    return@execute
                 }
+                val loaded = if (residentSnapshot == null) repository.loadPage(id) else null
+                val snapshot = residentSnapshot ?: loaded?.let(PageSnapshot::capture) ?: return@execute
+                if (pagePreRenderClosed || desiredWarmNotebookId != notebookId ||
+                    snapshot.metadata.contentRevision != key.contentRevision || id !in desiredWarmPageIds
+                ) {
+                    return@execute
+                }
+                val rendered = renderPageBitmap(snapshot, renderWidth, renderHeight)
+                post {
+                    val currentMetadata = if (notebook.id == notebookId) notebook.metadata(id) else null
+                    if (!pagePreRenderClosed && desiredWarmNotebookId == notebookId &&
+                        currentMetadata?.contentRevision == key.contentRevision && id in desiredWarmPageIds
+                    ) {
+                        if (loaded != null && notebook.getPage(id) == null) {
+                            notebook.attachPage(loaded)
+                            pageCache.put(loaded)?.let { evicted ->
+                                if (evicted.id != page.id) notebook.detachPage(evicted.id)
+                            }
+                        }
+                        pageBitmapCache.put(key, rendered)
+                    }
+                }
+            } finally {
+                pagePreRenderInFlight.remove(key)
             }
         }
+    }
+
+    private fun currentPageRenderKey(target: Page = page): PageRenderKey? =
+        if (width > 0 && height > 0) {
+            PageRenderKey(notebook.id, target.id, target.contentRevision, width, height)
+        } else {
+            null
+        }
+
+    private fun cacheCurrentPageBitmap() {
+        val key = currentPageRenderKey() ?: return
+        val bitmap = foreBitmap ?: return
+        if (!bitmap.isRecycled && bitmap.width == key.width && bitmap.height == key.height) {
+            pageBitmapCache.put(key, bitmap)
+        }
+    }
+
+    private fun showPageBitmap(target: Page) {
+        val key = currentPageRenderKey(target)
+        val prepared = key?.let(pageBitmapCache::remove)?.takeUnless(Bitmap::isRecycled)
+        val bitmap = prepared ?: Bitmap.createBitmap(
+            width.coerceAtLeast(1), height.coerceAtLeast(1), Bitmap.Config.ARGB_8888
+        )
+        foreBitmap = bitmap
+        bitmapCanvas = Canvas(bitmap)
+        if (prepared == null) {
+            redrawAll()
+        } else {
+            markCurrentPageRendered()
+            postInvalidate()
+        }
+    }
+
+    private fun renderPageBitmap(snapshot: PageSnapshot, renderWidth: Int, renderHeight: Int): Bitmap {
+        val bitmap = Bitmap.createBitmap(renderWidth, renderHeight, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(bitmap)
+        val renderContext = RenderContext()
+        snapshot.objects.forEach { drawObject(canvas, it, renderContext) }
+        return bitmap
     }
 
     private fun requestThumbnail(target: Page) {
@@ -1330,29 +1460,28 @@ class PenDrawView @JvmOverloads constructor(
         canvas.clipRect(dirty)
         canvas.drawColor(0, android.graphics.PorterDuff.Mode.CLEAR)
         for (obj in page.scene.all()) {
-            if (obj.pageBounds.intersects(testBounds)) drawObject(canvas, obj)
+            if (obj.pageBounds.intersects(testBounds)) drawObject(canvas, obj, viewRenderContext)
         }
         canvas.restoreToCount(save)
+        markCurrentPageRendered()
         postInvalidate(dirty.left, dirty.top, dirty.right, dirty.bottom)
     }
 
-    private val objectMatrix = Matrix()
-
     /** Draws one [PageObject] with its [Transform2D] applied (spec §10, §38-39). */
-    private fun drawObject(canvas: Canvas, obj: PageObject) {
+    private fun drawObject(canvas: Canvas, obj: PageObject, renderContext: RenderContext) {
         val t = obj.transform
-        objectMatrix.setValues(floatArrayOf(t.a, t.c, t.tx, t.b, t.d, t.ty, 0f, 0f, 1f))
+        renderContext.objectMatrix.setValues(floatArrayOf(t.a, t.c, t.tx, t.b, t.d, t.ty, 0f, 0f, 1f))
         val save = canvas.save()
-        canvas.concat(objectMatrix)
+        canvas.concat(renderContext.objectMatrix)
         when (obj) {
-            is StrokeObject -> renderer.drawStroke(canvas, obj.stroke)
-            is ImageObject -> drawImageObject(canvas, obj)
-            is TextObject -> drawTextObject(canvas, obj)
+            is StrokeObject -> renderContext.renderer.drawStroke(canvas, obj.stroke)
+            is ImageObject -> drawImageObject(canvas, obj, renderContext)
+            is TextObject -> drawTextObject(canvas, obj, renderContext)
         }
         canvas.restoreToCount(save)
     }
 
-    private fun drawImageObject(canvas: Canvas, obj: ImageObject) {
+    private fun drawImageObject(canvas: Canvas, obj: ImageObject, renderContext: RenderContext) {
         val bitmap = imageCache.get(obj.assetPath) ?: decodeImage(obj)?.also {
             imageCache.put(obj.assetPath, it)
         }
@@ -1363,12 +1492,18 @@ class PenDrawView @JvmOverloads constructor(
         if (bitmap != null) {
             val save = canvas.save()
             canvas.concat(exifMatrix(obj))
-            canvas.drawBitmap(bitmap, null, rawTarget, imagePaint)
+            canvas.drawBitmap(bitmap, null, rawTarget, renderContext.imagePaint)
             canvas.restoreToCount(save)
         } else {
-            canvas.drawRect(displayTarget, marqueePaint)
-            canvas.drawLine(displayTarget.left, displayTarget.top, displayTarget.right, displayTarget.bottom, marqueePaint)
-            canvas.drawLine(displayTarget.right, displayTarget.top, displayTarget.left, displayTarget.bottom, marqueePaint)
+            canvas.drawRect(displayTarget, renderContext.placeholderPaint)
+            canvas.drawLine(
+                displayTarget.left, displayTarget.top, displayTarget.right, displayTarget.bottom,
+                renderContext.placeholderPaint
+            )
+            canvas.drawLine(
+                displayTarget.right, displayTarget.top, displayTarget.left, displayTarget.bottom,
+                renderContext.placeholderPaint
+            )
         }
     }
 
@@ -1389,26 +1524,48 @@ class PenDrawView @JvmOverloads constructor(
     }
 
     private fun decodeImage(obj: ImageObject): Bitmap? {
-        val file = imageAssets.resolve(obj.assetPath) ?: return null
-        val maxDimension = maxOf(obj.pixelWidth, obj.pixelHeight)
+        return decodeImage(obj.assetPath, obj.pixelWidth, obj.pixelHeight, obj.mimeType)
+    }
+
+    /** Called by the import IO path so the first placement never decodes on the UI thread. */
+    private fun warmImageCache(image: ImportedImage) {
+        if (imageCache.get(image.relativePath) != null) return
+        decodeImage(image.relativePath, image.pixelWidth, image.pixelHeight, image.mimeType)?.let {
+            imageCache.put(image.relativePath, it)
+        }
+    }
+
+    private fun decodeImage(
+        assetPath: String,
+        pixelWidth: Int,
+        pixelHeight: Int,
+        mimeType: String
+    ): Bitmap? {
+        val file = imageAssets.resolve(assetPath) ?: return null
+        val maxDimension = maxOf(pixelWidth, pixelHeight)
         var sample = 1
         while (maxDimension / sample > MAX_DECODE_DIMENSION) sample *= 2
         return BitmapFactory.decodeFile(
             file.absolutePath,
             BitmapFactory.Options().apply {
                 inSampleSize = sample
-                inPreferredConfig = Bitmap.Config.ARGB_8888
+                inPreferredConfig = if (mimeType == "image/jpeg" || mimeType == "image/jpg") {
+                    Bitmap.Config.RGB_565
+                } else {
+                    Bitmap.Config.ARGB_8888
+                }
             }
         )
     }
 
-    private fun drawTextObject(canvas: Canvas, obj: TextObject) {
-        configureTextPaint(obj.fontFamily, obj.fontSize)
-        val metrics = textPaint.fontMetrics
+    private fun drawTextObject(canvas: Canvas, obj: TextObject, renderContext: RenderContext) {
+        val paint = renderContext.textPaint
+        configureTextPaint(paint, obj.fontFamily, obj.fontSize)
+        val metrics = paint.fontMetrics
         val lineHeight = metrics.descent - metrics.ascent
         var baseline = -metrics.ascent
         obj.text.split('\n').forEach { line ->
-            canvas.drawText(line, 0f, baseline, textPaint)
+            canvas.drawText(line, 0f, baseline, paint)
             baseline += lineHeight
         }
     }
@@ -1591,10 +1748,12 @@ class PenDrawView @JvmOverloads constructor(
             overlayPath.lineTo(corners[2][0], corners[2][1])
             overlayPath.close()
             c.drawPath(overlayPath, marqueePaint)
-            if (obj is ImageObject) {
+            if (obj is ImageObject || obj is TextObject) {
                 corners.forEach { point ->
                     c.drawCircle(point[0], point[1], HANDLE_TOUCH_RADIUS, handlePaint)
                 }
+            }
+            if (obj is ImageObject) {
                 val b = obj.localBounds
                 val top = obj.transform.mapPoint((b.left + b.right) / 2f, b.top)
                 val rotate = rotationHandle(obj)
@@ -1618,9 +1777,18 @@ class PenDrawView @JvmOverloads constructor(
     private fun redrawAll() {
         val canvas = bitmapCanvas ?: return
         foreBitmap?.eraseColor(0)
-        for (obj in page.scene.all()) drawObject(canvas, obj)
+        for (obj in page.scene.all()) drawObject(canvas, obj, viewRenderContext)
+        markCurrentPageRendered()
         postInvalidate()
     }
+
+    private fun markCurrentPageRendered() {
+        renderedPageId = page.id
+        renderedContentRevision = page.contentRevision
+    }
+
+    private fun isCurrentPageRendered(): Boolean =
+        renderedPageId == page.id && renderedContentRevision == page.contentRevision
 
     /**
      * Materialize the document into our bitmap and drop the ROM's overlay ink.
@@ -1635,7 +1803,7 @@ class PenDrawView @JvmOverloads constructor(
     private fun materialize() {
         // Close any in-flight gesture so its points are in the model first.
         if (gestureOpen) finishGesture()
-        redrawAll()
+        if (!isCurrentPageRendered()) redrawAll()
         clearOverlayInk()
     }
 
@@ -1686,6 +1854,7 @@ class PenDrawView @JvmOverloads constructor(
         commandStack.clear()
         scheduleSave(DocumentChange.fullPage(notebook, page, "page:clear"))
         foreBitmap?.eraseColor(0)
+        markCurrentPageRendered()
         clearOverlayInk()
         postInvalidate()
         onDocChanged?.invoke()
@@ -1694,6 +1863,7 @@ class PenDrawView @JvmOverloads constructor(
 
     fun teardown() {
         handler.removeCallbacks(finishRunnable)
+        pagePreRenderClosed = true
         if (gestureOpen) finishGesture()
         requestThumbnail(page)
         scheduleSave(DocumentChange.fullPage(notebook, page, "lifecycle:teardown"))
@@ -1709,6 +1879,7 @@ class PenDrawView @JvmOverloads constructor(
         initPenService = false
         notebookOperations.shutdown()
         notebookOperations.awaitTermination(10, TimeUnit.SECONDS)
+        pagePreRenderExecutor.shutdownNow()
         autosave.close()
         thumbnails.close()
     }
@@ -1746,7 +1917,9 @@ class PenDrawView @JvmOverloads constructor(
         /** Touch radius for the selection tool's corner scale handles, in view px. */
         private const val HANDLE_TOUCH_RADIUS = 24.0f
         private const val ROTATE_HANDLE_OFFSET = 56.0f
-        private const val MAX_DECODE_DIMENSION = 2048
+        private const val MAX_DECODE_DIMENSION = 1024
+        private const val IMAGE_CACHE_BYTES = 32 * 1024 * 1024
+        private const val PAGE_BITMAP_CACHE_BYTES = 24 * 1024 * 1024
 
         /**
          * Observed raw pressure range on-device: batch logs consistently show

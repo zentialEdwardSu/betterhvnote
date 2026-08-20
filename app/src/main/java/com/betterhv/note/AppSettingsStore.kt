@@ -14,9 +14,14 @@ class AppSettingsStore(context: Context) {
         get() = preferences.getBoolean(KEY_AUTO_CREATE_PAGE, false)
         set(value) = preferences.edit().putBoolean(KEY_AUTO_CREATE_PAGE, value).apply()
 
+    var showRecentTransferEvents: Boolean
+        get() = preferences.getBoolean(KEY_SHOW_RECENT_TRANSFER_EVENTS, true)
+        set(value) = preferences.edit().putBoolean(KEY_SHOW_RECENT_TRANSFER_EVENTS, value).apply()
+
     companion object {
         private const val NAME = "app_settings"
         private const val KEY_SKIP_SOURCE_SELECTION = "skip_source_selection_when_queue_available"
         private const val KEY_AUTO_CREATE_PAGE = "auto_create_page_on_next_at_end"
+        private const val KEY_SHOW_RECENT_TRANSFER_EVENTS = "show_recent_transfer_events"
     }
 }

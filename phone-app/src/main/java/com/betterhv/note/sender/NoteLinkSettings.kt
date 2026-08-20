@@ -11,11 +11,16 @@ class NoteLinkSettings(context: Context) {
             preferences.edit().putString(KEY_DISPLAY_NAME, validateDisplayName(value)).apply()
         }
 
+    var showRecentTransferEvents: Boolean
+        get() = preferences.getBoolean(KEY_SHOW_RECENT_TRANSFER_EVENTS, true)
+        set(value) = preferences.edit().putBoolean(KEY_SHOW_RECENT_TRANSFER_EVENTS, value).apply()
+
     companion object {
         const val DEFAULT_DISPLAY_NAME = "NoteLink"
         const val MAX_DISPLAY_NAME_BYTES = 18
         private const val PREFERENCES = "notelink_settings"
         private const val KEY_DISPLAY_NAME = "display_name"
+        private const val KEY_SHOW_RECENT_TRANSFER_EVENTS = "show_recent_transfer_events"
 
         fun validateDisplayName(value: String): String {
             val normalized = value.trim()

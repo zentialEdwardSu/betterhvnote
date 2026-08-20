@@ -8,14 +8,15 @@ import java.util.UUID
 
 enum class MessageType(val wire: Int) {
     HELLO(1), HEARTBEAT(2), OFFER_REQUEST(3), OFFER(4), ACCEPT(5), RELEASE(6),
-    COMMIT(7), ALREADY_COMMITTED(8), WIFI_READY(9), GET(10), CHUNK(11), EOF(12), ERROR(13)
+    COMMIT(7), ALREADY_COMMITTED(8), WIFI_READY(9), GET(10), CHUNK(11), EOF(12), ERROR(13),
+    PROBE(14), PROBE_ACK(15)
 }
 
 data class ProtocolFrame(val type: MessageType, val requestId: UUID, val counter: Long, val payload: ByteArray)
 
 object ProtocolCodec {
-    const val VERSION = 1
-    private const val MAGIC = 0x42484E31 // BHN1
+    const val VERSION = 2
+    private const val MAGIC = 0x42484E32 // BHN2
     private const val MAX_FRAME = 1024 * 1024
 
     fun write(output: OutputStream, frame: ProtocolFrame) {

@@ -90,6 +90,15 @@ class RichObjectUiTest {
             assertEquals("automatedtext", text.text)
             assertEquals(TextFontFamily.SERIF, text.fontFamily)
             assertEquals(32f, text.fontSize)
+
+            val initialBounds = text.pageBounds
+            assertTrue(pen.beginRichObjectGesture(initialBounds.right, initialBounds.bottom))
+            pen.updateRichObjectGesture(initialBounds.right + 80f, initialBounds.bottom + 50f)
+            pen.endRichObjectGesture(cancelled = false)
+            val resized = pen.selectedRichObject() as TextObject
+            assertNotEquals(text.transform, resized.transform)
+            assertTrue(resized.pageBounds.width > initialBounds.width)
+            assertTrue(resized.pageBounds.height > initialBounds.height)
         }
     }
 

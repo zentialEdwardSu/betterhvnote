@@ -9,13 +9,17 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.AddPhotoAlternate
 import androidx.compose.material.icons.filled.ContentPaste
+import androidx.compose.material.icons.filled.Cancel
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.FolderOpen
@@ -32,10 +36,12 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
@@ -49,6 +55,14 @@ import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.betterhv.transfer.core.TransferPhase
+import com.betterhv.transfer.core.isActiveTransferPhase
+import com.betterhv.transfer.core.TransferLogEntry
+import com.betterhv.transfer.core.TransferLogLevel
+import com.betterhv.transfer.core.TransferModes
+import com.betterhv.transfer.core.TransferSnapshot
+import java.text.DateFormat
+import java.util.Date
 
 enum class DashboardItemState { PENDING, TRANSFERRING, FAILED, COMPLETE }
 
@@ -69,6 +83,9 @@ data class DashboardState(
     val pairingCode: String? = null,
     val queue: List<DashboardItem> = emptyList(),
     val inbox: List<DashboardItem> = emptyList(),
+    val transfer: TransferSnapshot = TransferSnapshot(),
+    val transferLog: List<TransferLogEntry> = emptyList(),
+    val showRecentTransferEvents: Boolean = true,
     val notice: String? = null
 )
 
@@ -85,6 +102,8 @@ data class DashboardActions(
     val beginPairing: () -> Unit,
     val unpair: () -> Unit,
     val refreshStatus: () -> Unit,
+    val cancelTransfer: () -> Unit,
+    val setShowRecentTransferEvents: (Boolean) -> Unit,
     val dragInboxItem: @Composable (String) -> Modifier = { Modifier }
 )
 
@@ -167,6 +186,13 @@ private fun StatusBand(state: DashboardState, actions: DashboardActions) {
             if (state.statusDetail.isNotBlank()) {
                 Text(state.statusDetail, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
+            TransferStatus(
+                state.transfer,
+                state.transferLog,
+                state.pairedDeviceName,
+                state.showRecentTransferEvents,
+                actions.cancelTransfer
+            )
             if (state.pairedDeviceName == null) {
                 Text("在 N10Pro 的“设置 → 手机传输”中输入此六位配对码", color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Text(state.pairingCode ?: "------", style = MaterialTheme.typography.displaySmall, fontWeight = FontWeight.Bold)
@@ -194,6 +220,103 @@ private fun StatusBand(state: DashboardState, actions: DashboardActions) {
             }
         }
     }
+}
+
+@Composable
+private fun TransferStatus(
+    snapshot: TransferSnapshot,
+    log: List<TransferLogEntry>,
+    endpointName: String?,
+    showRecentEvents: Boolean,
+    onCancel: () -> Unit
+) {
+    if (!snapshot.phase.isActiveTransferPhase && (!showRecentEvents || log.isEmpty())) return
+    Text("传输状态", style = MaterialTheme.typography.titleSmall)
+    Text(
+        listOfNotNull("BLE", snapshot.phase.name.replace('_', ' '), snapshot.mode?.name, "SSID ${snapshot.ssidMatch.name}")
+            .joinToString(" · "),
+        style = MaterialTheme.typography.bodyMedium
+    )
+    Text(
+        "本端 ${TransferModes.describe(snapshot.localModes)} · 对端 ${TransferModes.describe(snapshot.remoteModes)}" +
+            " · 尝试 ${snapshot.attempt} · fallback ${snapshot.fallbackCount}",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant
+    )
+    snapshot.endpoint?.let {
+        Text(
+            "端点 ${endpointName ?: snapshot.deviceId ?: "未知设备"} · ${it.host}:${it.port}",
+            style = MaterialTheme.typography.bodySmall
+        )
+    }
+    Text(
+        "Wi-Fi Direct 组 ${if (snapshot.wifiDirectGroupReady) "已就绪" else "未就绪"}" +
+            listOfNotNull(snapshot.deviceId?.let { " · 设备 $it" }, snapshot.operationId?.let { " · 操作 ${it.toString().take(8)}" }).joinToString(""),
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant
+    )
+    if (snapshot.totalBytes > 0) {
+        LinearProgressIndicator(
+            progress = { (snapshot.bytesTransferred.toFloat() / snapshot.totalBytes).coerceIn(0f, 1f) },
+            modifier = Modifier.fillMaxWidth()
+        )
+        Text(
+            "${formatBytes(snapshot.bytesTransferred)} / ${formatBytes(snapshot.totalBytes)}" +
+                " · 当前 ${formatRate(snapshot.bytesPerSecond)} · 平均 ${formatRate(snapshot.averageBytesPerSecond)}" +
+                (snapshot.etaMillis?.let { " · ETA ${formatDuration(it)}" } ?: ""),
+            style = MaterialTheme.typography.bodySmall
+        )
+    }
+    snapshot.fallbackReason?.let {
+        Text("fallback ${it.code}: ${it.message}", color = MaterialTheme.colorScheme.tertiary)
+    }
+    snapshot.lastFailure?.let {
+        Text(
+            "${it.code}: ${it.message} · ${if (it.recoverable) "可重试" else "不可重试"}",
+            color = MaterialTheme.colorScheme.error
+        )
+    }
+    if (snapshot.canCancel) {
+        OutlinedButton(onClick = onCancel) {
+            Icon(Icons.Default.Cancel, null)
+            Text("取消传输", modifier = Modifier.padding(start = 6.dp))
+        }
+    }
+    if (showRecentEvents && log.isNotEmpty()) {
+        Text("最近事件", style = MaterialTheme.typography.labelLarge)
+        Column(
+            Modifier.fillMaxWidth().heightIn(max = 100.dp).verticalScroll(rememberScrollState())
+        ) {
+            log.asReversed().forEach { entry ->
+                Text(
+                    "${formatTime(entry.timestampMillis)} ${entry.category} ${entry.detail}",
+                    modifier = Modifier.fillMaxWidth().height(20.dp),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = if (entry.level == TransferLogLevel.ERROR) MaterialTheme.colorScheme.error
+                    else MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+    }
+}
+
+private fun formatTime(timestampMillis: Long): String =
+    DateFormat.getTimeInstance(DateFormat.MEDIUM).format(Date(timestampMillis))
+
+private fun formatRate(bytesPerSecond: Long): String = "${formatBytes(bytesPerSecond)}/s"
+
+private fun formatBytes(bytes: Long): String = when {
+    bytes >= 1_073_741_824 -> "%.1f GiB".format(bytes / 1_073_741_824.0)
+    bytes >= 1_048_576 -> "%.1f MiB".format(bytes / 1_048_576.0)
+    bytes >= 1_024 -> "%.1f KiB".format(bytes / 1_024.0)
+    else -> "$bytes B"
+}
+
+private fun formatDuration(millis: Long): String {
+    val seconds = (millis / 1_000).coerceAtLeast(0)
+    return if (seconds < 60) "${seconds}s" else "${seconds / 60}m ${seconds % 60}s"
 }
 
 @Composable
@@ -300,6 +423,18 @@ private fun SettingsPage(state: DashboardState, actions: DashboardActions) {
             OutlinedTextField(name, { name = it }, label = { Text("显示名称") }, singleLine = true, modifier = Modifier.fillMaxWidth())
             Spacer(Modifier.height(8.dp))
             Button(onClick = { actions.saveDisplayName(name) }) { Text("保存名称") }
+        }
+        item { HorizontalDivider() }
+        item {
+            ListItem(
+                headlineContent = { Text("显示最近传输事件") },
+                trailingContent = {
+                    Switch(
+                        checked = state.showRecentTransferEvents,
+                        onCheckedChange = actions.setShowRecentTransferEvents
+                    )
+                }
+            )
         }
         item { HorizontalDivider() }
         item {

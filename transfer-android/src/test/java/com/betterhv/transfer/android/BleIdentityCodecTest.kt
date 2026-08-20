@@ -10,7 +10,7 @@ class BleIdentityCodecTest {
         val id = "00112233-4455-6677-8899-aabbccddeeff"
         val encoded = BleIdentityCodec.encode(id, "NoteLink", 2, 3)
         assertEquals(100, encoded.size)
-        assertArrayEquals(byteArrayOf(1, 2, 3, 36), encoded.copyOfRange(0, 4))
+        assertArrayEquals(byteArrayOf(2, 2, 3, 36), encoded.copyOfRange(0, 4))
         val decoded = BleIdentityCodec.decode(encoded)
         assertEquals(id, decoded.deviceId)
         assertEquals("NoteLink", decoded.deviceName)

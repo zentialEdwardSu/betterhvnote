@@ -17,6 +17,9 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
@@ -39,12 +42,18 @@ class WifiDirectController(context: Context) : AutoCloseable {
     private var peerWaiter: CompletableDeferred<WifiP2pDevice>? = null
     private var expectedPeerAddress: String? = null
     private var activeNetworkId: Int? = null
+    @Volatile private var currentSession: WifiDirectSession? = null
+    private val mutableSession = MutableStateFlow<WifiDirectSession?>(null)
+    val session: StateFlow<WifiDirectSession?> = mutableSession.asStateFlow()
     private val receiver = object : BroadcastReceiver() {
         @SuppressLint("MissingPermission")
         override fun onReceive(context: Context, intent: Intent) {
             if (intent.action == WifiP2pManager.WIFI_P2P_CONNECTION_CHANGED_ACTION) {
                 manager.requestConnectionInfo(channel) { info ->
-                    if (info.groupFormed) connectionWaiter?.complete(info)
+                    if (info.groupFormed) connectionWaiter?.complete(info) else {
+                        currentSession = null
+                        mutableSession.value = null
+                    }
                 }
             } else if (intent.action == WifiP2pManager.WIFI_P2P_PEERS_CHANGED_ACTION) {
                 requestExpectedPeer()
@@ -63,10 +72,11 @@ class WifiDirectController(context: Context) : AutoCloseable {
     }
 
     @SuppressLint("MissingPermission")
-    suspend fun createGroup(
+    suspend fun ensureHostedGroup(
         timeoutMillis: Long = 30_000L,
         preferTemporaryConfig: Boolean = true
     ): WifiDirectSession {
+        currentSession?.takeIf(WifiDirectSession::isGroupOwner)?.let { return it }
         prepareForOperation()
         connectionWaiter = CompletableDeferred()
         val configured = if (
@@ -97,25 +107,22 @@ class WifiDirectController(context: Context) : AutoCloseable {
             info.groupOwnerAddress?.hostAddress,
             group?.networkName,
             group?.passphrase
-        )
+        ).also { currentSession = it; mutableSession.value = it }
     }
 
     @SuppressLint("MissingPermission")
-    suspend fun connect(
+    suspend fun joinHostedGroup(
         ownerDeviceAddress: String,
         ownerDeviceName: String,
         networkName: String? = null,
         passphrase: String? = null,
         timeoutMillis: Long = 30_000L
     ): WifiDirectSession {
+        currentSession?.takeIf { !it.isGroupOwner &&
+            (ownerDeviceAddress.isBlank() || it.ownerDeviceName == ownerDeviceName)
+        }?.let { return it }
         prepareForOperation()
-        // N10Pro's Wi-Fi P2P implementation reports success for the
-        // credential-only API but never creates the underlying interface
-        // ("No such device" in WifiP2pService). Discovering the Windows peer
-        // first and connecting by its P2P address uses the legacy path that
-        // works on this firmware.
         val canJoinWithCredentials = Build.VERSION.SDK_INT >= 29 &&
-            !Build.MODEL.equals("N10Pro", ignoreCase = true) &&
             !networkName.isNullOrBlank() && !passphrase.isNullOrBlank()
         val owner = if (canJoinWithCredentials) null else {
             discoverPeer(ownerDeviceAddress, ownerDeviceName, (timeoutMillis / 2).coerceAtLeast(5_000L))
@@ -155,7 +162,7 @@ class WifiDirectController(context: Context) : AutoCloseable {
             localIpv4Address(group?.`interface`),
             group?.networkName,
             null
-        )
+        ).also { currentSession = it; mutableSession.value = it }
     }
 
     @SuppressLint("MissingPermission")
@@ -230,9 +237,29 @@ class WifiDirectController(context: Context) : AutoCloseable {
     }
 
     @SuppressLint("MissingPermission")
-    suspend fun removeGroup() {
+    suspend fun closeHostedGroup() {
         runCatching { action { listener -> manager.removeGroup(channel, listener) } }
+        clearSession()
+    }
+
+    suspend fun disconnectJoinedGroup() = closeHostedGroup()
+
+    /** Dispatches group removal without waiting for vendor callbacks on an Android main thread. */
+    @SuppressLint("MissingPermission")
+    fun requestCloseGroup() {
+        runCatching {
+            manager.removeGroup(channel, object : WifiP2pManager.ActionListener {
+                override fun onSuccess() { Log.i(TAG, "Wi-Fi Direct group removal completed") }
+                override fun onFailure(reason: Int) { Log.w(TAG, "Wi-Fi Direct group removal failed: $reason") }
+            })
+        }.onFailure { Log.w(TAG, "Unable to request Wi-Fi Direct group removal", it) }
+        clearSession()
+    }
+
+    private fun clearSession() {
         activeNetworkId = null
+        currentSession = null
+        mutableSession.value = null
     }
 
     @SuppressLint("MissingPermission")

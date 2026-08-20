@@ -9,8 +9,7 @@ interface WindowsNativeApi : AutoCloseable {
     fun pollBleCommand(timeoutMillis: Int): ByteArray?
     fun respondBle(value: ByteArray)
     fun stopBle()
-    fun startWifiDirect(networkName: String, passphrase: String): String
-    fun stopWifiDirect()
+    fun lanInfo(): WindowsLanInfo
     fun protect(value: ByteArray): ByteArray
     fun unprotect(value: ByteArray): ByteArray
     override fun close()
@@ -18,10 +17,12 @@ interface WindowsNativeApi : AutoCloseable {
 
 data class WindowsCapabilities(
     val blePeripheral: Boolean,
-    val wifiDirect: Boolean,
+    val lan: Boolean,
     val dataProtection: Boolean
 ) {
-    val ready: Boolean get() = blePeripheral && wifiDirect && dataProtection
+    val ready: Boolean get() = blePeripheral && lan && dataProtection
 }
+
+data class WindowsLanInfo(val ipv4: String, val ssid: String)
 
 class WindowsNativeException(message: String) : IllegalStateException(message)

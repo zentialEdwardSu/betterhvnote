@@ -6,9 +6,13 @@ import com.betterhv.transfer.android.ReceivedLease
 import com.betterhv.transfer.core.ContentKind
 import com.betterhv.transfer.core.RemotePayload
 import java.util.UUID
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 sealed interface InsertionState {
@@ -35,6 +39,7 @@ sealed interface InsertionState {
 /** Owns insertion resources so Compose recreation cannot leak a staged file or remote lease. */
 class InsertionCoordinator(private val phone: PhoneTransferClient) : AutoCloseable {
     private val mutableState = MutableStateFlow<InsertionState>(InsertionState.Idle)
+    private val leaseScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     val state: StateFlow<InsertionState> = mutableState
     private var penView: PenDrawView? = null
     private var requestGeneration = 0L
@@ -95,7 +100,7 @@ class InsertionCoordinator(private val phone: PhoneTransferClient) : AutoCloseab
                 try {
                     if (generation != requestGeneration) {
                         (lease?.payload as? RemotePayload.Image)?.stagedFile?.delete()
-                        lease?.let { runCatching(it::release) }
+                        lease?.let { finishLease(it, commit = false) }
                         return@onSuccess
                     }
                     if (lease == null) {
@@ -113,14 +118,14 @@ class InsertionCoordinator(private val phone: PhoneTransferClient) : AutoCloseab
                             }
                             else {
                                 penView?.discardImportedImage(staged)
-                                runCatching(lease::release)
+                                finishLease(lease, commit = false)
                             }
                         }
                         is RemotePayload.Text -> mutableState.value = InsertionState.TextReady(payload.text, lease, clientId)
                     }
                 } catch (error: Throwable) {
                     (lease?.payload as? RemotePayload.Image)?.stagedFile?.delete()
-                    lease?.let { runCatching(it::release) }
+                    lease?.let { finishLease(it, commit = false) }
                     if (generation == requestGeneration) {
                         mutableState.value = InsertionState.Error(error.message ?: "手机传输失败")
                     }
@@ -140,7 +145,7 @@ class InsertionCoordinator(private val phone: PhoneTransferClient) : AutoCloseab
         } else {
             val item = ready.lease.offer.item
             view.placeTransferredImage(ready.image, x, y, requireNotNull(ready.sourceDeviceId), item.id)
-                .onSuccess { ready.lease.commit() }
+                .onSuccess { finishLease(ready.lease, commit = true) }
         }
         if (result.isSuccess) mutableState.value = InsertionState.Idle
         return result.map { }
@@ -156,7 +161,7 @@ class InsertionCoordinator(private val phone: PhoneTransferClient) : AutoCloseab
             view.placeTransferredText(
                 text, x, y, requireNotNull(ready.sourceDeviceId), ready.lease.offer.item.id
             )
-                .onSuccess { ready.lease.commit() }
+                .onSuccess { finishLease(ready.lease, commit = true) }
         }
         if (result.isSuccess) mutableState.value = InsertionState.Idle
         return result.map { }
@@ -169,15 +174,38 @@ class InsertionCoordinator(private val phone: PhoneTransferClient) : AutoCloseab
         when (val current = mutableState.value) {
             is InsertionState.ImageReady -> {
                 penView?.discardImportedImage(current.image)
-                current.lease?.release()
+                current.lease?.let { finishLease(it, commit = false) }
             }
-            is InsertionState.TextReady -> current.lease?.release()
+            is InsertionState.TextReady -> current.lease?.let { finishLease(it, commit = false) }
             else -> Unit
         }
         mutableState.value = InsertionState.Idle
     }
 
-    override fun close() { cancel(); phone.close() }
+    private fun finishLease(lease: ReceivedLease, commit: Boolean) {
+        leaseScope.launch {
+            runCatching {
+                if (commit) lease.commitAndAwait() else lease.releaseAndAwait()
+            }.onFailure { error ->
+                EventLog.log(
+                    "NoteLinkTransfer",
+                    "lease ${if (commit) "commit" else "release"} failed " +
+                        "itemId=${lease.offer.item.id} error=${error.message ?: error.javaClass.simpleName}"
+                )
+            }
+        }
+    }
+
+    override fun close() {
+        requestGeneration++
+        when (val current = mutableState.value) {
+            is InsertionState.ImageReady -> penView?.discardImportedImage(current.image)
+            else -> Unit
+        }
+        mutableState.value = InsertionState.Idle
+        leaseScope.cancel()
+        phone.close()
+    }
 
     companion object { const val PHONE_DEVICE_ID = "betterhv-phone" }
 }

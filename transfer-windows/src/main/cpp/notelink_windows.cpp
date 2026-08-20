@@ -1,15 +1,17 @@
 #include "notelink_windows.h"
 
+#include <winsock2.h>
+#include <ws2tcpip.h>
 #include <windows.h>
 #include <objbase.h>
 #include <wincrypt.h>
+#include <wlanapi.h>
+#include <iphlpapi.h>
 #include <winrt/Windows.Devices.Bluetooth.h>
 #include <winrt/Windows.Devices.Bluetooth.Advertisement.h>
 #include <winrt/Windows.Devices.Bluetooth.GenericAttributeProfile.h>
-#include <winrt/Windows.Devices.WiFiDirect.h>
 #include <winrt/Windows.Foundation.h>
 #include <winrt/Windows.Foundation.Collections.h>
-#include <winrt/Windows.Security.Credentials.h>
 #include <winrt/Windows.Storage.Streams.h>
 #include <algorithm>
 #include <chrono>
@@ -26,8 +28,6 @@ using namespace winrt;
 using namespace Windows::Devices::Bluetooth;
 using namespace Windows::Devices::Bluetooth::Advertisement;
 using namespace Windows::Devices::Bluetooth::GenericAttributeProfile;
-using namespace Windows::Devices::WiFiDirect;
-using namespace Windows::Security::Credentials;
 using namespace Windows::Storage::Streams;
 
 namespace {
@@ -49,7 +49,6 @@ GattLocalCharacteristic g_identity{nullptr};
 GattLocalCharacteristic g_command{nullptr};
 GattLocalCharacteristic g_response{nullptr};
 BluetoothLEAdvertisementPublisher g_advertisement{nullptr};
-WiFiDirectAdvertisementPublisher g_wifi_publisher{nullptr};
 
 void trace(std::string const& message) noexcept {
     auto line = std::string("[NoteLink native] ") + message + "\n";
@@ -140,11 +139,15 @@ void wait_for_gatt_advertisement_start() {
             return;
         }
         if (status == GattServiceProviderAdvertisementStatus::Aborted) {
-            throw std::runtime_error("Windows GATT advertisement was aborted");
+            // Some desktop adapters report Aborted while the provider remains
+            // discoverable and continues serving reads/writes. Keep the GATT
+            // objects alive and let the command path prove availability.
+            trace("GATT advertising reported aborted; continuing in degraded mode");
+            return;
         }
         Sleep(25);
     }
-    throw std::runtime_error("Windows GATT advertisement did not start");
+    trace("GATT advertising status did not settle; continuing in degraded mode");
 }
 
 void wait_for_advertisement_start() {
@@ -159,6 +162,28 @@ void wait_for_advertisement_start() {
     throw std::runtime_error("Windows BLE advertisement did not start");
 }
 
+void start_optional_summary_advertisement() noexcept {
+    try {
+        g_advertisement = BluetoothLEAdvertisementPublisher();
+        BluetoothLEManufacturerData manufacturer;
+        manufacturer.CompanyId(kManufacturerId);
+        manufacturer.Data(buffer_from(advertisement_bytes()));
+        g_advertisement.Advertisement().ManufacturerData().Append(manufacturer);
+        g_advertisement.Start();
+        wait_for_advertisement_start();
+    } catch (std::exception const& error) {
+        // The connectable GATT provider remains usable on adapters that reject
+        // a second publisher. Android can read identity and queue counts from it.
+        trace(std::string("BLE summary advertisement unavailable: ") + error.what());
+        try { if (g_advertisement) g_advertisement.Stop(); } catch (...) {}
+        g_advertisement = nullptr;
+    } catch (...) {
+        trace("BLE summary advertisement unavailable: unknown error");
+        try { if (g_advertisement) g_advertisement.Stop(); } catch (...) {}
+        g_advertisement = nullptr;
+    }
+}
+
 void start_gatt_advertising() {
     GattServiceProviderAdvertisingParameters advertising;
     advertising.IsConnectable(true);
@@ -168,13 +193,7 @@ void start_gatt_advertising() {
     // Windows 10 IoT does not support GattServiceProvider service data on all
     // adapters. Keep the queue summary in a scan response while the provider
     // owns the connectable service advertisement.
-    g_advertisement = BluetoothLEAdvertisementPublisher();
-    BluetoothLEManufacturerData manufacturer;
-    manufacturer.CompanyId(kManufacturerId);
-    manufacturer.Data(buffer_from(advertisement_bytes()));
-    g_advertisement.Advertisement().ManufacturerData().Append(manufacturer);
-    g_advertisement.Start();
-    wait_for_advertisement_start();
+    start_optional_summary_advertisement();
 }
 
 void set_error(std::string value) {
@@ -238,12 +257,17 @@ int32_t nl_initialize() {
 }
 
 int32_t nl_capabilities() {
-    int result = NL_CAP_DPAPI | NL_CAP_WIFI_DIRECT;
+    int result = NL_CAP_DPAPI;
     try {
         ensure_apartment();
         auto adapter = BluetoothAdapter::GetDefaultAsync().get();
         if (adapter && adapter.IsPeripheralRoleSupported()) result |= NL_CAP_BLE_PERIPHERAL;
     } catch (...) {
+    }
+    char address[64]{};
+    uint8_t ssid[DOT11_SSID_MAX_LENGTH]{};
+    if (nl_lan_info(address, static_cast<int32_t>(sizeof(address)), ssid, static_cast<int32_t>(sizeof(ssid))) >= 0) {
+        result |= NL_CAP_LAN;
     }
     return result;
 }
@@ -324,20 +348,28 @@ int32_t nl_ble_start(const uint8_t* identity, int32_t identity_length, const uin
     });
 }
 
-int32_t nl_ble_update(const uint8_t* advertisement, int32_t advertisement_length) {
+int32_t nl_ble_update(
+    const uint8_t* identity,
+    int32_t identity_length,
+    const uint8_t* advertisement,
+    int32_t advertisement_length
+) {
     return guarded([&] {
         {
             std::lock_guard lock(g_mutex);
-            if (advertisement == nullptr || advertisement_length <= 0) {
-                throw std::runtime_error("Invalid encoded BLE advertisement");
+            if (identity == nullptr || identity_length <= 0 || advertisement == nullptr || advertisement_length <= 0) {
+                throw std::runtime_error("Invalid encoded BLE payload");
             }
+            g_identity_payload.assign(identity, identity + identity_length);
             g_advertisement_payload.assign(advertisement, advertisement + advertisement_length);
         }
-        if (g_service_provider) {
-            g_service_provider.StopAdvertising();
-            if (g_advertisement) g_advertisement.Stop();
-            start_gatt_advertising();
+        // Identity reads use the shared payload above, so the connectable GATT
+        // service does not need to be rebuilt when queue counts change.
+        if (g_advertisement) {
+            g_advertisement.Stop();
+            g_advertisement = nullptr;
         }
+        start_optional_summary_advertisement();
     });
 }
 
@@ -385,53 +417,75 @@ void nl_ble_stop() {
     trace("BLE stopped");
 }
 
-int32_t nl_wifi_start(const char* network_name, const char* passphrase, char* owner_ip, int32_t owner_ip_capacity) {
-    return guarded([&] {
-        ensure_apartment();
-        trace("Wi-Fi Direct start requested");
-        nl_wifi_stop();
-        g_wifi_publisher = WiFiDirectAdvertisementPublisher();
-        g_wifi_publisher.Advertisement().IsAutonomousGroupOwnerEnabled(true);
-        // Android's WifiP2pManager discovers Windows groups through the
-        // listen-state advertisement. Without this flag Windows can report a
-        // started autonomous group while remaining invisible to peer scans.
-        g_wifi_publisher.Advertisement().ListenStateDiscoverability(
-            WiFiDirectAdvertisementListenStateDiscoverability::Normal
-        );
-        auto legacy = g_wifi_publisher.Advertisement().LegacySettings();
-        legacy.IsEnabled(true);
-        legacy.Ssid(network_name ? widen(network_name) : L"DIRECT-BH-NoteLink");
-        PasswordCredential credential;
-        credential.Password(passphrase ? widen(passphrase) : L"BetterHv-NoteLink");
-        legacy.Passphrase(credential);
-        g_wifi_publisher.Start();
-        for (int attempt = 0; attempt < 100; ++attempt) {
-            auto status = g_wifi_publisher.Status();
-            if (status == WiFiDirectAdvertisementPublisherStatus::Started) break;
-            if (status == WiFiDirectAdvertisementPublisherStatus::Aborted) {
-                throw std::runtime_error("Wi-Fi Direct failed; disable Mobile Hotspot and verify the adapter driver");
-            }
-            std::this_thread::sleep_for(std::chrono::milliseconds(100));
-        }
-        if (g_wifi_publisher.Status() != WiFiDirectAdvertisementPublisherStatus::Started) {
-            throw std::runtime_error("Timed out starting Wi-Fi Direct group owner");
-        }
-        constexpr char kOwnerIp[] = "192.168.137.1";
-        if (owner_ip == nullptr || owner_ip_capacity < static_cast<int>(sizeof(kOwnerIp))) {
-            throw std::runtime_error("Owner IP output buffer is too small");
-        }
-        std::memcpy(owner_ip, kOwnerIp, sizeof(kOwnerIp));
-        trace(std::string("Wi-Fi Direct group started ownerIp=") + kOwnerIp);
-    });
-}
-
-void nl_wifi_stop() {
-    try {
-        if (g_wifi_publisher) g_wifi_publisher.Stop();
-    } catch (...) {
+int32_t nl_lan_info(char* ipv4, int32_t ipv4_capacity, uint8_t* ssid, int32_t ssid_capacity) {
+    if (ipv4 == nullptr || ipv4_capacity < INET_ADDRSTRLEN || ssid == nullptr || ssid_capacity < DOT11_SSID_MAX_LENGTH) {
+        set_error("LAN info output buffer is too small");
+        return -1;
     }
-    g_wifi_publisher = nullptr;
-    trace("Wi-Fi Direct stopped");
+    HANDLE client = nullptr;
+    DWORD negotiated = 0;
+    PWLAN_INTERFACE_INFO_LIST interfaces = nullptr;
+    PVOID connection_data = nullptr;
+    DWORD connection_size = 0;
+    WLAN_OPCODE_VALUE_TYPE opcode = wlan_opcode_value_type_invalid;
+    ULONG adapter_size = 16 * 1024;
+    std::vector<uint8_t> adapter_buffer(adapter_size);
+    try {
+        if (WlanOpenHandle(2, nullptr, &negotiated, &client) != ERROR_SUCCESS) {
+            throw std::runtime_error("Unable to open Windows WLAN service");
+        }
+        if (WlanEnumInterfaces(client, nullptr, &interfaces) != ERROR_SUCCESS || interfaces->dwNumberOfItems == 0) {
+            throw std::runtime_error("No WLAN interface is available");
+        }
+        WLAN_CONNECTION_ATTRIBUTES* connection = nullptr;
+        for (DWORD index = 0; index < interfaces->dwNumberOfItems; ++index) {
+            auto& item = interfaces->InterfaceInfo[index];
+            if (item.isState != wlan_interface_state_connected) continue;
+            if (WlanQueryInterface(client, &item.InterfaceGuid, wlan_intf_opcode_current_connection, nullptr,
+                    &connection_size, &connection_data, &opcode) == ERROR_SUCCESS) {
+                connection = static_cast<WLAN_CONNECTION_ATTRIBUTES*>(connection_data);
+                break;
+            }
+        }
+        if (connection == nullptr || connection->wlanAssociationAttributes.dot11Ssid.uSSIDLength == 0) {
+            throw std::runtime_error("The active WLAN SSID is unavailable");
+        }
+        auto ssid_length = static_cast<int32_t>(connection->wlanAssociationAttributes.dot11Ssid.uSSIDLength);
+        if (ssid_length > ssid_capacity) throw std::runtime_error("SSID output buffer is too small");
+        std::memcpy(ssid, connection->wlanAssociationAttributes.dot11Ssid.ucSSID, ssid_length);
+
+        auto adapters = reinterpret_cast<IP_ADAPTER_ADDRESSES*>(adapter_buffer.data());
+        DWORD adapter_result = GetAdaptersAddresses(AF_INET, GAA_FLAG_SKIP_ANYCAST | GAA_FLAG_SKIP_MULTICAST |
+            GAA_FLAG_SKIP_DNS_SERVER, nullptr, adapters, &adapter_size);
+        if (adapter_result == ERROR_BUFFER_OVERFLOW) {
+            adapter_buffer.resize(adapter_size);
+            adapters = reinterpret_cast<IP_ADAPTER_ADDRESSES*>(adapter_buffer.data());
+            adapter_result = GetAdaptersAddresses(AF_INET, GAA_FLAG_SKIP_ANYCAST | GAA_FLAG_SKIP_MULTICAST |
+                GAA_FLAG_SKIP_DNS_SERVER, nullptr, adapters, &adapter_size);
+        }
+        if (adapter_result != NO_ERROR) throw std::runtime_error("Unable to enumerate LAN addresses");
+        bool found = false;
+        for (auto adapter = adapters; adapter != nullptr && !found; adapter = adapter->Next) {
+            if (adapter->OperStatus != IfOperStatusUp || adapter->IfType != IF_TYPE_IEEE80211) continue;
+            for (auto address = adapter->FirstUnicastAddress; address != nullptr; address = address->Next) {
+                if (address->Address.lpSockaddr->sa_family != AF_INET) continue;
+                auto value = reinterpret_cast<sockaddr_in*>(address->Address.lpSockaddr);
+                found = InetNtopA(AF_INET, &value->sin_addr, ipv4, ipv4_capacity) != nullptr;
+                if (found) break;
+            }
+        }
+        if (!found) throw std::runtime_error("The active WLAN IPv4 address is unavailable");
+        if (connection_data) WlanFreeMemory(connection_data);
+        if (interfaces) WlanFreeMemory(interfaces);
+        if (client) WlanCloseHandle(client, nullptr);
+        return ssid_length;
+    } catch (std::exception const& error) {
+        if (connection_data) WlanFreeMemory(connection_data);
+        if (interfaces) WlanFreeMemory(interfaces);
+        if (client) WlanCloseHandle(client, nullptr);
+        set_error(error.what());
+        return -1;
+    }
 }
 
 int32_t nl_protect(const uint8_t* input, int32_t input_length, uint8_t* output, int32_t output_capacity) {
@@ -474,6 +528,5 @@ int32_t nl_last_error(char* output, int32_t capacity) {
 }
 
 void nl_shutdown() {
-    nl_wifi_stop();
     nl_ble_stop();
 }

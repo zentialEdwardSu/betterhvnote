@@ -17,6 +17,7 @@ extensions.configure<ApplicationExtension> {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         versionCode = 1
         versionName = "0.1-phase6"
+        buildConfigField("long", "BUILD_TIME_EPOCH_MILLIS", "${System.currentTimeMillis()}L")
         ndk { abiFilters += "arm64-v8a" }
         externalNativeBuild {
             cmake {
@@ -49,7 +50,10 @@ extensions.configure<ApplicationExtension> {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
-    buildFeatures { compose = true }
+    buildFeatures {
+        compose = true
+        buildConfig = true
+    }
     packaging {
         jniLibs { useLegacyPackaging = false }
     }

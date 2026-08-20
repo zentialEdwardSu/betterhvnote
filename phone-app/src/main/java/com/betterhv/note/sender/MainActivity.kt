@@ -20,15 +20,19 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.AddPhotoAlternate
 import androidx.compose.material.icons.filled.CameraAlt
+import androidx.compose.material.icons.filled.Cancel
 import androidx.compose.material.icons.filled.ContentPaste
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DeleteSweep
@@ -49,11 +53,13 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.ListItem
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
@@ -82,8 +88,16 @@ import com.betterhv.transfer.android.TransferPermissions
 import com.betterhv.transfer.core.ContentKind
 import com.betterhv.transfer.core.QueueItem
 import com.betterhv.transfer.core.QueueState
+import com.betterhv.transfer.core.TransferPhase
+import com.betterhv.transfer.core.isActiveTransferPhase
+import com.betterhv.transfer.core.TransferLogEntry
+import com.betterhv.transfer.core.TransferLogLevel
+import com.betterhv.transfer.core.TransferModes
+import com.betterhv.transfer.core.TransferSnapshot
 import java.io.File
 import java.security.SecureRandom
+import java.text.DateFormat
+import java.util.Date
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -155,6 +169,8 @@ private fun BetterHvSendApp(
 ) {
     val items by queue.itemFlow.collectAsState()
     val inboxItems by inbox.items.collectAsState()
+    val transfer by NoteLinkTransferRuntime.snapshot.collectAsState()
+    val transferLog by NoteLinkTransferRuntime.eventHistory.collectAsState()
     val scope = rememberCoroutineScope()
     var textDialog by remember { mutableStateOf<String?>(null) }
     var pairingCode by remember { mutableStateOf<String?>(null) }
@@ -164,6 +180,7 @@ private fun BetterHvSendApp(
     val context = LocalContext.current
     val settings = remember(context) { NoteLinkSettings(context) }
     var appDisplayName by remember { mutableStateOf(settings.displayName) }
+    var showRecentTransferEvents by remember { mutableStateOf(settings.showRecentTransferEvents) }
     var showSettings by remember { mutableStateOf(false) }
     var settingsMessage by remember { mutableStateOf<String?>(null) }
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -225,6 +242,10 @@ private fun BetterHvSendApp(
                     it.state == QueueState.PENDING || it.state == QueueState.FAILED
                 },
                 receivedCacheCount = inboxItems.count { it.state != InboxExportState.RECEIVING },
+                transfer = transfer,
+                transferLog = transferLog,
+                endpointName = pairing.pairedDevice?.name,
+                showRecentTransferEvents = showRecentTransferEvents,
                 message = settingsMessage,
                 onBack = { showSettings = false; settingsMessage = null },
                 onSaveName = { requestedName ->
@@ -237,6 +258,10 @@ private fun BetterHvSendApp(
                     }.onFailure {
                         settingsMessage = it.message ?: "保存失败"
                     }
+                },
+                onShowRecentTransferEventsChange = {
+                    settings.showRecentTransferEvents = it
+                    showRecentTransferEvents = it
                 },
                 onClearSent = {
                     scope.launch {
@@ -317,10 +342,16 @@ private fun BetterHvSendApp(
                             pairingCode = code
                         },
                         onUnpair = {
-                            pairing.unpair(); ShareShortcutPublisher.update(queueContext(queue), null)
-                            TransferForegroundService.sync(context, queue.items().isNotEmpty())
-                            statusRevision++
-                            showNotice("已取消配对；队列内容保留")
+                            scope.launch {
+                                runCatching { withContext(Dispatchers.IO) { pairing.unpair() } }
+                                    .onSuccess {
+                                        ShareShortcutPublisher.update(queueContext(queue), null)
+                                        TransferForegroundService.sync(context, queue.items().isNotEmpty())
+                                        statusRevision++
+                                        showNotice("已取消配对；队列内容保留")
+                                    }
+                                    .onFailure { showNotice("取消配对失败：${it.message}") }
+                            }
                         },
                         onPermissions = {
                             permissionLauncher.launch(TransferPermissions.missingPhonePermissions(context))
@@ -341,6 +372,17 @@ private fun BetterHvSendApp(
                             statusRevision++
                         }
                     )
+                }
+                if (transfer.phase.isActiveTransferPhase || showRecentTransferEvents && transferLog.isNotEmpty()) {
+                    item {
+                        PhoneTransferStatus(
+                            transfer,
+                            transferLog,
+                            pairing.pairedDevice?.name,
+                            showRecentTransferEvents,
+                            NoteLinkTransferRuntime::cancel
+                        )
+                    }
                 }
                 initialNotice?.let { item { Text(it, color = MaterialTheme.colorScheme.primary) } }
                 item {
@@ -416,6 +458,102 @@ private fun BetterHvSendApp(
     }
 }
 
+@Composable
+private fun PhoneTransferStatus(
+    snapshot: TransferSnapshot,
+    log: List<TransferLogEntry>,
+    endpointName: String?,
+    showRecentEvents: Boolean,
+    onCancel: () -> Unit
+) {
+    if (!snapshot.phase.isActiveTransferPhase && (!showRecentEvents || log.isEmpty())) return
+    Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(8.dp)) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text("传输状态", style = MaterialTheme.typography.titleMedium)
+            Text(
+                listOfNotNull("BLE", snapshot.phase.name.replace('_', ' '), snapshot.mode?.name, "SSID ${snapshot.ssidMatch.name}")
+                    .joinToString(" · ")
+            )
+            Text(
+                "本端 ${TransferModes.describe(snapshot.localModes)} · 对端 ${TransferModes.describe(snapshot.remoteModes)}" +
+                    " · 尝试 ${snapshot.attempt} · fallback ${snapshot.fallbackCount}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            snapshot.endpoint?.let {
+                Text(
+                    "端点 ${endpointName ?: snapshot.deviceId ?: "未知设备"} · ${it.host}:${it.port}",
+                    style = MaterialTheme.typography.bodySmall
+                )
+            }
+            Text(
+                "Wi-Fi Direct 组 ${if (snapshot.wifiDirectGroupReady) "已就绪" else "未就绪"}" +
+                    (snapshot.operationId?.let { " · 操作 ${it.toString().take(8)}" } ?: ""),
+                style = MaterialTheme.typography.bodySmall
+            )
+            if (snapshot.totalBytes > 0) {
+                LinearProgressIndicator(
+                    progress = { (snapshot.bytesTransferred.toFloat() / snapshot.totalBytes).coerceIn(0f, 1f) },
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Text(
+                    "${phoneFormatBytes(snapshot.bytesTransferred)} / ${phoneFormatBytes(snapshot.totalBytes)}" +
+                        " · 当前 ${phoneFormatBytes(snapshot.bytesPerSecond)}/s" +
+                        " · 平均 ${phoneFormatBytes(snapshot.averageBytesPerSecond)}/s" +
+                        (snapshot.etaMillis?.let { " · ETA ${phoneFormatDuration(it)}" } ?: ""),
+                    style = MaterialTheme.typography.bodySmall
+                )
+            }
+            snapshot.fallbackReason?.let {
+                Text("fallback ${it.code}: ${it.message}", color = MaterialTheme.colorScheme.tertiary)
+            }
+            snapshot.lastFailure?.let {
+                Text(
+                    "${it.code}: ${it.message} · ${if (it.recoverable) "可重试" else "不可重试"}",
+                    color = MaterialTheme.colorScheme.error
+                )
+            }
+            if (snapshot.canCancel) {
+                OutlinedButton(onClick = onCancel) {
+                    Icon(Icons.Default.Cancel, null)
+                    Text("取消传输", Modifier.padding(start = 6.dp))
+                }
+            }
+            if (showRecentEvents && log.isNotEmpty()) {
+                Text("最近事件", style = MaterialTheme.typography.labelLarge)
+                Column(
+                    Modifier.fillMaxWidth().heightIn(max = 100.dp).verticalScroll(rememberScrollState())
+                ) {
+                    log.asReversed().forEach { entry ->
+                        Text(
+                            "${DateFormat.getTimeInstance(DateFormat.MEDIUM).format(Date(entry.timestampMillis))} " +
+                                "${entry.category} ${entry.detail}",
+                            modifier = Modifier.fillMaxWidth().height(20.dp),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = if (entry.level == TransferLogLevel.ERROR) MaterialTheme.colorScheme.error
+                            else MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+private fun phoneFormatBytes(bytes: Long): String = when {
+    bytes >= 1_073_741_824 -> "%.1f GiB".format(bytes / 1_073_741_824.0)
+    bytes >= 1_048_576 -> "%.1f MiB".format(bytes / 1_048_576.0)
+    bytes >= 1_024 -> "%.1f KiB".format(bytes / 1_024.0)
+    else -> "$bytes B"
+}
+
+private fun phoneFormatDuration(millis: Long): String {
+    val seconds = (millis / 1_000).coerceAtLeast(0)
+    return if (seconds < 60) "${seconds}s" else "${seconds / 60}m ${seconds % 60}s"
+}
+
 private enum class CacheToClear { SENT, RECEIVED }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -424,9 +562,14 @@ private fun SettingsScreen(
     displayName: String,
     sentCacheCount: Int,
     receivedCacheCount: Int,
+    transfer: TransferSnapshot,
+    transferLog: List<TransferLogEntry>,
+    endpointName: String?,
+    showRecentTransferEvents: Boolean,
     message: String?,
     onBack: () -> Unit,
     onSaveName: (String) -> Unit,
+    onShowRecentTransferEventsChange: (Boolean) -> Unit,
     onClearSent: () -> Unit,
     onClearReceived: () -> Unit
 ) {
@@ -451,6 +594,28 @@ private fun SettingsScreen(
             Modifier.fillMaxSize().padding(padding),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
+            item {
+                PhoneTransferStatus(
+                    transfer,
+                    transferLog,
+                    endpointName,
+                    showRecentTransferEvents,
+                    NoteLinkTransferRuntime::cancel
+                )
+            }
+            item { HorizontalDivider(Modifier.padding(horizontal = 20.dp)) }
+            item {
+                ListItem(
+                    headlineContent = { Text("显示最近传输事件") },
+                    trailingContent = {
+                        Switch(
+                            checked = showRecentTransferEvents,
+                            onCheckedChange = onShowRecentTransferEventsChange
+                        )
+                    }
+                )
+            }
+            item { HorizontalDivider(Modifier.padding(horizontal = 20.dp)) }
             item {
                 Column(
                     Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp),

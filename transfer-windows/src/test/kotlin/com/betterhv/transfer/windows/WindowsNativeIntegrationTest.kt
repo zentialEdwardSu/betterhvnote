@@ -12,7 +12,13 @@ class WindowsNativeIntegrationTest {
             val protected = api.protect(source)
             assertTrue(protected.isNotEmpty())
             assertContentEquals(source, api.unprotect(protected))
-            assertTrue(api.capabilities().dataProtection)
+            val capabilities = api.capabilities()
+            assertTrue(capabilities.dataProtection)
+            if (capabilities.lan) {
+                val lan = api.lanInfo()
+                assertTrue(lan.ipv4.isNotBlank())
+                assertTrue(lan.ssid.isNotBlank())
+            }
         }
     }
 }

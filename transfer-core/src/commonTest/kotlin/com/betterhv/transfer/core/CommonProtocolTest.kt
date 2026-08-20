@@ -32,7 +32,7 @@ class CommonProtocolTest {
 
         assertContentEquals(
             byteArrayOf(
-                1, 2, 3, 0x10, 0x20, 0x30, 0x40, 0x50,
+                2, 2, 3, 0x10, 0x20, 0x30, 0x40, 0x50,
                 0x4e, 0x6f, 0x74, 0x65, 0x4c, 0x69, 0x6e, 0x6b
             ),
             encoded
@@ -57,7 +57,7 @@ class CommonProtocolTest {
             NoteLinkAdvertisementCodec.encode(byteArrayOf(1, 2, 3, 4), "NoteLink", 0, 0)
         }
         assertFailsWith<IllegalArgumentException> {
-            NoteLinkAdvertisementCodec.decode(encoded.copyOf().also { it[0] = 2 })
+            NoteLinkAdvertisementCodec.decode(encoded.copyOf().also { it[0] = 1 })
         }
     }
 

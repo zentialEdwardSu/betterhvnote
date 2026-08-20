@@ -128,6 +128,8 @@ fun main() {
             beginPairing = controller::beginPairing,
             unpair = controller::unpair,
             refreshStatus = controller::refreshStatus,
+            cancelTransfer = controller::cancelTransfer,
+            setShowRecentTransferEvents = controller::setShowRecentTransferEvents,
             dragInboxItem = { id -> desktopInboxDragModifier(controller.inboxFile(id)) }
         ))
     }
@@ -154,6 +156,9 @@ private class DesktopAppController(private val native: JnaWindowsNativeApi) : Au
                     displayName = settings.displayName,
                     status = status.summary,
                     statusDetail = status.detail,
+                    transfer = status.transfer,
+                    transferLog = status.transferLog,
+                    showRecentTransferEvents = settings.showRecentTransferEvents,
                     receiveEnabled = settings.receiveEnabled,
                     pairedDeviceName = pairing?.deviceName,
                     pairingCode = if (pairing == null) settings.ownerPairingCode else null,
@@ -297,6 +302,13 @@ private class DesktopAppController(private val native: JnaWindowsNativeApi) : Au
     fun refreshStatus() {
         pairingRevision.value++
         if (settings.receiveEnabled && !transfer.status.value.running) transfer.start()
+    }
+
+    fun cancelTransfer() = transfer.cancel()
+
+    fun setShowRecentTransferEvents(show: Boolean) {
+        settings.showRecentTransferEvents = show
+        pairingRevision.value++
     }
 
     override fun close() {

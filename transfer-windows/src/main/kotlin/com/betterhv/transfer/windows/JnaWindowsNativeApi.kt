@@ -19,12 +19,16 @@ internal interface NoteLinkNativeLibrary : Library {
     fun nl_initialize(): Int
     fun nl_capabilities(): Int
     fun nl_ble_start(identity: Pointer?, identityLength: Int, advertisement: Pointer?, advertisementLength: Int): Int
-    fun nl_ble_update(advertisement: Pointer?, advertisementLength: Int): Int
+    fun nl_ble_update(
+        identity: Pointer?,
+        identityLength: Int,
+        advertisement: Pointer?,
+        advertisementLength: Int
+    ): Int
     fun nl_ble_poll(output: Pointer?, capacity: Int, timeoutMillis: Int): Int
     fun nl_ble_respond(value: Pointer?, length: Int): Int
     fun nl_ble_stop()
-    fun nl_wifi_start(networkName: String, passphrase: String, ownerIp: Pointer?, ownerIpCapacity: Int): Int
-    fun nl_wifi_stop()
+    fun nl_lan_info(ipv4: Pointer?, ipv4Capacity: Int, ssid: Pointer?, ssidCapacity: Int): Int
     fun nl_protect(input: Pointer?, inputLength: Int, output: Pointer?, outputCapacity: Int): Int
     fun nl_unprotect(input: Pointer?, inputLength: Int, output: Pointer?, outputCapacity: Int): Int
     fun nl_last_error(output: Pointer?, capacity: Int): Int
@@ -36,7 +40,6 @@ class JnaWindowsNativeApi private constructor(
 ) : WindowsNativeApi {
     private val initialized = AtomicBoolean(false)
     private val bleRunning = AtomicBoolean(false)
-    private val wifiRunning = AtomicBoolean(false)
     private var bleDeviceId = ""
     private var bleDeviceName = "NoteLink"
     private val commandReassembler = BleTransportReassembler()
@@ -56,7 +59,7 @@ class JnaWindowsNativeApi private constructor(
         val flags = library.nl_capabilities()
         return WindowsCapabilities(
             blePeripheral = flags and CAP_BLE_PERIPHERAL != 0,
-            wifiDirect = flags and CAP_WIFI_DIRECT != 0,
+            lan = flags and CAP_LAN != 0,
             dataProtection = flags and CAP_DPAPI != 0
         )
     }
@@ -76,8 +79,17 @@ class JnaWindowsNativeApi private constructor(
 
     override fun updateBleCounts(imageCount: Int, textCount: Int) {
         check(bleRunning.get()) { "BLE is not running" }
+        val identity = NoteLinkIdentityCodec.encode(
+            DeviceId(bleDeviceId), bleDeviceName, imageCount, textCount
+        )
         val advertisement = advertisement(imageCount, textCount)
-        checkCall(library.nl_ble_update(advertisement.memory(), advertisement.size), "Unable to update BLE queue counts")
+        checkCall(
+            library.nl_ble_update(
+                identity.memory(), identity.size,
+                advertisement.memory(), advertisement.size
+            ),
+            "Unable to update BLE queue counts"
+        )
     }
 
     override fun pollBleCommand(timeoutMillis: Int): ByteArray? {
@@ -95,9 +107,12 @@ class JnaWindowsNativeApi private constructor(
             }
             val complete = try {
                 commandReassembler.add(packet)
-            } catch (error: Throwable) {
+            } catch (_: IllegalArgumentException) {
+                // A stopped GATT service can still deliver tail writes from its old connection.
+                // Discard that abandoned message and wait for the next complete first frame.
                 commandReassembler.reset()
-                throw error
+                if (System.nanoTime() >= deadlineNanos) return null
+                continue
             }
             if (complete != null) {
                 lastCommandWasFramed = true
@@ -126,19 +141,16 @@ class JnaWindowsNativeApi private constructor(
         lastCommandWasFramed = true
     }
 
-    @Synchronized
-    override fun startWifiDirect(networkName: String, passphrase: String): String {
+    override fun lanInfo(): WindowsLanInfo {
         initialize()
-        if (wifiRunning.get()) stopWifiDirect()
-        val output = Memory(64)
-        checkCall(library.nl_wifi_start(networkName, passphrase, output, 64), "Unable to start Wi-Fi Direct")
-        wifiRunning.set(true)
-        return output.getString(0, Charsets.UTF_8.name())
-    }
-
-    @Synchronized
-    override fun stopWifiDirect() {
-        if (wifiRunning.getAndSet(false)) library.nl_wifi_stop()
+        val address = Memory(LAN_ADDRESS_BYTES.toLong())
+        val ssid = Memory(SSID_BYTES.toLong())
+        val ssidLength = library.nl_lan_info(address, LAN_ADDRESS_BYTES, ssid, SSID_BYTES)
+        if (ssidLength < 0) throw failure("Unable to read the active LAN")
+        return WindowsLanInfo(
+            address.getString(0, Charsets.UTF_8.name()),
+            ssid.getByteArray(0, ssidLength).decodeToString()
+        )
     }
 
     override fun protect(value: ByteArray): ByteArray = transform(value, library::nl_protect)
@@ -146,7 +158,6 @@ class JnaWindowsNativeApi private constructor(
 
     @Synchronized
     override fun close() {
-        stopWifiDirect()
         stopBle()
         if (initialized.getAndSet(false)) library.nl_shutdown()
     }
@@ -196,10 +207,12 @@ class JnaWindowsNativeApi private constructor(
     companion object {
         private val NEXT_MESSAGE_ID = AtomicInteger(1)
         private const val CAP_BLE_PERIPHERAL = 1
-        private const val CAP_WIFI_DIRECT = 2
+        private const val CAP_LAN = 2
         private const val CAP_DPAPI = 4
         private const val MAX_CONTROL_BYTES = 64 * 1024
         private const val MAX_PROTECTED_BYTES = 1024 * 1024
+        private const val LAN_ADDRESS_BYTES = 64
+        private const val SSID_BYTES = 32
         private const val BUNDLED_LIBRARY_RESOURCE = "/win32-x86-64/notelink_windows.dll"
 
         fun load(): JnaWindowsNativeApi {

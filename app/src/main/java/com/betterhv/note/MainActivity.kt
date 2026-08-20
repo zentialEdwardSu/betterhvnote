@@ -35,6 +35,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -43,6 +44,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Cancel
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Composable
@@ -81,6 +83,9 @@ import com.betterhv.note.doc.TextObject
 import com.betterhv.note.storage.ImportedImage
 import com.betterhv.transfer.android.TransferPermissions
 import com.betterhv.transfer.core.ContentKind
+import com.betterhv.transfer.core.TransferPhase
+import com.betterhv.transfer.core.TransferSnapshot
+import com.betterhv.transfer.core.isActiveTransferPhase
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -170,6 +175,8 @@ private fun AppRoot(
     val snackbarHostState = remember { SnackbarHostState() }
     val snackbarScope = rememberCoroutineScope()
     val phoneTransfer = remember(context) { PhoneTransferClient(context) }
+    val transferSnapshot by phoneTransfer.snapshot.collectAsState()
+    val transferEvents by phoneTransfer.eventHistory.collectAsState()
     val insertion = remember(phoneTransfer) { InsertionCoordinator(phoneTransfer) }
     val insertionState by insertion.state.collectAsState()
     DisposableEffect(insertion) { onDispose { insertion.close() } }
@@ -237,6 +244,9 @@ private fun AppRoot(
         var autoCreatePageOnNextAtEnd by remember {
             mutableStateOf(appSettingsStore.autoCreatePageOnNextAtEnd)
         }
+        var showRecentTransferEvents by remember {
+            mutableStateOf(appSettingsStore.showRecentTransferEvents)
+        }
         var pairedClients by remember { mutableStateOf(phoneTransfer.pairing.pairedClients) }
         var onlineNoteLinks by remember {
             mutableStateOf<List<PhoneTransferClient.AvailableNoteLink>>(emptyList())
@@ -245,6 +255,8 @@ private fun AppRoot(
             mutableStateOf<List<PhoneTransferClient.PairingCandidate>>(emptyList())
         }
         var pairingScanActive by remember { mutableStateOf(false) }
+        var pairingInProgress by remember { mutableStateOf(false) }
+        var suppressNextOnlineDiscovery by remember { mutableStateOf(false) }
         var transferStatusRevision by remember { mutableIntStateOf(0) }
         val lifecycleOwner = LocalLifecycleOwner.current
         DisposableEffect(lifecycleOwner) {
@@ -278,6 +290,11 @@ private fun AppRoot(
             noteTransferStatus(context, pairedClients.isNotEmpty(), missingTransferPermissions.isEmpty())
         }
         LaunchedEffect(transferStatusRevision, pairedClients) {
+            if (suppressNextOnlineDiscovery) {
+                suppressNextOnlineDiscovery = false
+                onlineNoteLinks = emptyList()
+                return@LaunchedEffect
+            }
             onlineNoteLinks = if (missingTransferPermissions.isEmpty() && pairedClients.isNotEmpty()) {
                 runCatching {
                     phoneTransfer.discoverAvailable(timeoutMillis = 3_000L) { onlineNoteLinks = it }
@@ -872,10 +889,15 @@ private fun AppRoot(
                 onlineClients = onlineNoteLinks,
                 pairingCandidates = pairingCandidates,
                 pairingScanActive = pairingScanActive,
+                pairingInProgress = pairingInProgress,
                 transferStatus = transferStatus,
+                transferSnapshot = transferSnapshot,
+                transferEvents = transferEvents,
+                transferEndpointName = pairedClients.firstOrNull { it.id == transferSnapshot.deviceId }?.name,
                 transferPermissionsGranted = missingTransferPermissions.isEmpty(),
                 skipSourceSelectionWhenQueueAvailable = skipSourceSelectionWhenQueueAvailable,
                 autoCreatePageOnNextAtEnd = autoCreatePageOnNextAtEnd,
+                showRecentTransferEvents = showRecentTransferEvents,
                 onDebugModeChange = { debugMode = it },
                 onStartupBehaviorChange = { behavior ->
                     runCatching { penView?.setStartupBehavior(behavior) }
@@ -893,6 +915,10 @@ private fun AppRoot(
                     autoCreatePageOnNextAtEnd = it
                     appSettingsStore.autoCreatePageOnNextAtEnd = it
                     penView?.autoCreatePageOnNextAtEnd = it
+                },
+                onShowRecentTransferEventsChange = {
+                    showRecentTransferEvents = it
+                    appSettingsStore.showRecentTransferEvents = it
                 },
                 onScanClients = {
                     if (missingTransferPermissions.isNotEmpty()) {
@@ -912,17 +938,23 @@ private fun AppRoot(
                 },
                 onPairClient = { candidate, code ->
                     snackbarScope.launch {
-                        pairingScanActive = true
+                        pairingInProgress = true
+                        EventLog.log("NoteLinkPairing", "start device=${candidate.deviceId} address=${candidate.bluetoothAddress}")
                         runCatching { phoneTransfer.pair(candidate, code) }
                             .onSuccess {
+                                suppressNextOnlineDiscovery = true
                                 pairedClients = phoneTransfer.pairing.pairedClients
                                 pairingCandidates = pairingCandidates.filterNot { value -> value.deviceId == it.id }
-                                onlineNoteLinks = phoneTransfer.discoverAvailable(timeoutMillis = 2_000L)
+                                onlineNoteLinks = emptyList()
                                 transferStatusRevision++
+                                EventLog.log("NoteLinkPairing", "complete device=${it.id}")
                                 showNotice("${it.name} 配对完成")
                             }
-                            .onFailure { showNotice("配对失败：${it.message}") }
-                        pairingScanActive = false
+                            .onFailure {
+                                EventLog.log("NoteLinkPairing", "failed device=${candidate.deviceId} error=${it.message}")
+                                showNotice("配对失败：${it.message}")
+                            }
+                        pairingInProgress = false
                     }
                 },
                 onRenameClient = { id, name ->
@@ -948,6 +980,7 @@ private fun AppRoot(
                     transferStatusRevision++
                     showNotice("连接状态已刷新")
                 },
+                onCancelTransfer = phoneTransfer::cancel,
                 onClose = { settingsOpen = false }
             )
         }
@@ -1002,11 +1035,75 @@ private fun AppRoot(
             )
         }
 
+        if (
+            !settingsOpen &&
+            transferSnapshot.phase.isActiveTransferPhase &&
+            transferSnapshot.phase != TransferPhase.AWAITING_COMMIT
+        ) {
+            ActiveTransferOverlay(
+                snapshot = transferSnapshot,
+                endpointName = pairedClients.firstOrNull { it.id == transferSnapshot.deviceId }?.name,
+                onCancel = phoneTransfer::cancel,
+                modifier = Modifier.align(Alignment.TopCenter).padding(top = 72.dp).width(460.dp)
+            )
+        }
+
         SnackbarHost(
             hostState = snackbarHostState,
             modifier = Modifier.align(Alignment.BottomCenter).padding(16.dp)
                 .penInputGuard { snackbarInteractionBlocked = it }
         )
+    }
+}
+
+@Composable
+private fun ActiveTransferOverlay(
+    snapshot: TransferSnapshot,
+    endpointName: String?,
+    onCancel: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        modifier = modifier.border(2.dp, Color(0xFF4E5F70), RectangleShape),
+        shape = RectangleShape,
+        color = Color.White,
+        tonalElevation = 6.dp,
+        shadowElevation = 8.dp
+    ) {
+        Column(Modifier.padding(12.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        listOfNotNull(snapshot.phase.name.replace('_', ' '), snapshot.mode?.name, "SSID ${snapshot.ssidMatch.name}")
+                            .joinToString(" · "),
+                        fontSize = 16.sp
+                    )
+                    Text(
+                        snapshot.lastFailure?.let { "${it.code}: ${it.message}" }
+                            ?: snapshot.endpoint?.let {
+                                "${endpointName ?: snapshot.deviceId ?: "未知设备"} · ${it.host}:${it.port}"
+                            }
+                            ?: "正在通过 BLE 协商数据通道",
+                        fontSize = 11.sp,
+                        color = Color.DarkGray
+                    )
+                }
+                if (snapshot.canCancel) {
+                    IconButton(onClick = onCancel) { Icon(Icons.Default.Cancel, "取消传输") }
+                }
+            }
+            if (snapshot.totalBytes > 0) {
+                LinearProgressIndicator(
+                    progress = { (snapshot.bytesTransferred.toFloat() / snapshot.totalBytes).coerceIn(0f, 1f) },
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Text(
+                    "${snapshot.bytesTransferred}/${snapshot.totalBytes} B · ${snapshot.bytesPerSecond} B/s" +
+                        (snapshot.etaMillis?.let { " · ETA ${it / 1000}s" } ?: ""),
+                    fontSize = 11.sp
+                )
+            }
+        }
     }
 }
 
@@ -1062,7 +1159,7 @@ private fun TextPropertiesToolbar(
             }
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("字号", modifier = Modifier.padding(horizontal = 6.dp))
-                listOf(12f, 16f, 20f, 24f, 32f, 48f).forEach { size ->
+                listOf(16f, 24f, 32f, 48f, 56f, 64f).forEach { size ->
                     TextButton(onClick = { onSize(size) }) {
                         Text(
                             size.toInt().toString(),

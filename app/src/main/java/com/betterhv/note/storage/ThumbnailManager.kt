@@ -176,7 +176,20 @@ class ThumbnailManager(cacheDir: File, private val documentsDir: File = cacheDir
                     val file = File(documentsDir, obj.assetPath).canonicalFile
                     val root = File(documentsDir, "assets").canonicalFile.toPath()
                     val image = file.takeIf { it.toPath().startsWith(root) && it.isFile }
-                        ?.let { android.graphics.BitmapFactory.decodeFile(it.absolutePath) }
+                        ?.let {
+                            val maxDimension = maxOf(obj.pixelWidth, obj.pixelHeight)
+                            var sample = 1
+                            while (maxDimension / sample > IMAGE_DECODE_DIMENSION) sample *= 2
+                            android.graphics.BitmapFactory.decodeFile(
+                                it.absolutePath,
+                                android.graphics.BitmapFactory.Options().apply {
+                                    inSampleSize = sample
+                                    inPreferredConfig = if (
+                                        obj.mimeType == "image/jpeg" || obj.mimeType == "image/jpg"
+                                    ) Bitmap.Config.RGB_565 else Bitmap.Config.ARGB_8888
+                                }
+                            )
+                        }
                     if (image != null) {
                         val orientation = Matrix().apply {
                             val w = obj.pixelWidth.toFloat(); val h = obj.pixelHeight.toFloat()
@@ -233,7 +246,8 @@ class ThumbnailManager(cacheDir: File, private val documentsDir: File = cacheDir
         const val HEIGHT = 160
         private const val PADDING = 4f
         private const val MEMORY_LIMIT = 24
-        private const val RENDER_VERSION = 5
+        private const val RENDER_VERSION = 6
+        private const val IMAGE_DECODE_DIMENSION = 512
         private const val MIN_BASE_WIDTH_PX = 0.5f
         private const val MIN_PRESSURE_FLOOR = 0.65f
         private val THICKEN_OFFSETS = arrayOf(

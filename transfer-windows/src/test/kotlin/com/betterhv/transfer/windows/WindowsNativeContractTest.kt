@@ -7,6 +7,7 @@ import com.betterhv.transfer.core.BleResponse
 import com.betterhv.transfer.core.BleTransportFrameCodec
 import com.betterhv.transfer.core.BleTransportReassembler
 import com.betterhv.transfer.core.NoteLinkAdvertisementCodec
+import com.betterhv.transfer.core.NoteLinkIdentityCodec
 import java.util.ArrayDeque
 import kotlin.test.Test
 import kotlin.test.assertContentEquals
@@ -22,16 +23,13 @@ class WindowsNativeContractTest {
 
         api.startBle("client", "NoteLink", 1, 2)
         api.startBle("client", "NoteLink", 3, 4)
-        api.startWifiDirect("DIRECT-BH-1", "password-one")
-        api.startWifiDirect("DIRECT-BH-2", "password-two")
+        assertEquals("192.168.1.25", api.lanInfo().ipv4)
         api.close()
         api.close()
 
         assertEquals(1, library.initializeCalls)
         assertEquals(2, library.bleStarts)
         assertEquals(2, library.bleStops)
-        assertEquals(2, library.wifiStarts)
-        assertEquals(2, library.wifiStops)
         assertEquals(1, library.shutdownCalls)
     }
 
@@ -47,6 +45,21 @@ class WindowsNativeContractTest {
         assertEquals(2, decoded.imageCount)
         assertEquals(3, decoded.textCount)
         assertEquals("NoteLink", decoded.deviceName)
+    }
+
+    @Test fun queueCountUpdateRefreshesReadableIdentityWithoutRestartingGatt() {
+        val library = FakeLibrary()
+        val api = JnaWindowsNativeApi.forTesting(library)
+
+        api.startBle("desktop-device", "Office PC", 0, 0)
+        api.updateBleCounts(1, 2)
+
+        val identity = NoteLinkIdentityCodec.decode(library.lastIdentity)
+        assertEquals(1, identity.imageCount)
+        assertEquals(2, identity.textCount)
+        assertEquals("Office PC", identity.deviceName)
+        assertEquals(1, library.bleStarts)
+        assertEquals(0, library.bleStops)
     }
 
     @Test fun pollsNativeEventQueueAndTimesOutCleanly() {
@@ -76,6 +89,19 @@ class WindowsNativeContractTest {
         assertContentEquals(response, reassemble(library.responses))
     }
 
+    @Test fun ignoresOrphanedTailFramesAfterGattRestart() {
+        val abandoned = BleTransportFrameCodec.fragment(ByteArray(400) { 7 }, messageId = 80, maxFrameBytes = 64)
+        val command = ByteArray(240) { (it * 13).toByte() }
+        val library = FakeLibrary().apply {
+            commands.addAll(abandoned.drop(1))
+            commands.addAll(BleTransportFrameCodec.fragment(command, messageId = 81, maxFrameBytes = 64))
+        }
+        val api = JnaWindowsNativeApi.forTesting(library)
+        api.startBle("client", "NoteLink", 0, 0)
+
+        assertContentEquals(command, api.pollBleCommand(1_000))
+    }
+
     @Test fun dataProtectionUsesSizeQueryAndRoundTrips() {
         val api = JnaWindowsNativeApi.forTesting(FakeLibrary())
         val source = byteArrayOf(0, 1, 2, 127, -1)
@@ -84,10 +110,10 @@ class WindowsNativeContractTest {
         assertContentEquals(source, api.unprotect(protected))
     }
 
-    @Test fun protocolGoldenBytesRemainVersionOne() {
-        assertEquals(BleCommand.Counts, BleQueueProtocol.decodeCommand(byteArrayOf(1, 1)))
+    @Test fun protocolGoldenBytesUseVersionTwo() {
+        assertEquals(BleCommand.Counts, BleQueueProtocol.decodeCommand(byteArrayOf(2, 1)))
         assertContentEquals(
-            byteArrayOf(1, 1, 0, 2, 0, 3),
+            byteArrayOf(2, 1, 0, 2, 0, 3),
             BleQueueProtocol.encode(BleResponse.Counts(2, 3))
         )
     }
@@ -112,21 +138,27 @@ private class FakeLibrary : NoteLinkNativeLibrary {
     var initializeCalls = 0
     var bleStarts = 0
     var bleStops = 0
-    var wifiStarts = 0
-    var wifiStops = 0
     var shutdownCalls = 0
     val commands = ArrayDeque<ByteArray>()
     val responses = ArrayDeque<ByteArray>()
     var lastAdvertisement = ByteArray(0)
+    var lastIdentity = ByteArray(0)
 
     override fun nl_initialize() = 0.also { initializeCalls++ }
     override fun nl_capabilities() = 7
     override fun nl_ble_start(identity: Pointer?, identityLength: Int, advertisement: Pointer?, advertisementLength: Int) =
         0.also {
             bleStarts++
+            lastIdentity = identity?.getByteArray(0, identityLength) ?: ByteArray(0)
             lastAdvertisement = advertisement?.getByteArray(0, advertisementLength) ?: ByteArray(0)
         }
-    override fun nl_ble_update(advertisement: Pointer?, advertisementLength: Int) = 0.also {
+    override fun nl_ble_update(
+        identity: Pointer?,
+        identityLength: Int,
+        advertisement: Pointer?,
+        advertisementLength: Int
+    ) = 0.also {
+        lastIdentity = identity?.getByteArray(0, identityLength) ?: ByteArray(0)
         lastAdvertisement = advertisement?.getByteArray(0, advertisementLength) ?: ByteArray(0)
     }
     override fun nl_ble_poll(output: Pointer?, capacity: Int, timeoutMillis: Int): Int {
@@ -140,13 +172,13 @@ private class FakeLibrary : NoteLinkNativeLibrary {
         return 0
     }
     override fun nl_ble_stop() { bleStops++ }
-    override fun nl_wifi_start(networkName: String, passphrase: String, ownerIp: Pointer?, ownerIpCapacity: Int): Int {
-        wifiStarts++
-        val bytes = "192.168.137.1\u0000".encodeToByteArray()
-        ownerIp?.write(0, bytes, 0, bytes.size)
-        return 0
+    override fun nl_lan_info(ipv4: Pointer?, ipv4Capacity: Int, ssid: Pointer?, ssidCapacity: Int): Int {
+        val address = "192.168.1.25\u0000".encodeToByteArray()
+        val network = "Office WiFi".encodeToByteArray()
+        ipv4?.write(0, address, 0, address.size)
+        ssid?.write(0, network, 0, network.size)
+        return network.size
     }
-    override fun nl_wifi_stop() { wifiStops++ }
     override fun nl_protect(input: Pointer?, inputLength: Int, output: Pointer?, outputCapacity: Int) = transform(input, inputLength, output, outputCapacity)
     override fun nl_unprotect(input: Pointer?, inputLength: Int, output: Pointer?, outputCapacity: Int) = transform(input, inputLength, output, outputCapacity)
     private fun transform(input: Pointer?, length: Int, output: Pointer?, capacity: Int): Int {

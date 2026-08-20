@@ -10,6 +10,23 @@ import kotlin.test.assertNull
 
 class DesktopSettingsTest {
     @Test
+    fun recentTransferEventPreferencePersists() {
+        val root = createTempDirectory("notelink-settings-events-").toFile()
+        try {
+            val paths = DesktopPaths(root)
+            val native = PassthroughNativeApi()
+            val settings = DesktopSettings(paths, native)
+            assertEquals(true, settings.showRecentTransferEvents)
+
+            settings.showRecentTransferEvents = false
+
+            assertEquals(false, DesktopSettings(paths, native).showRecentTransferEvents)
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    @Test
     fun ownerPairingPersistsAfterAuthentication() {
         val root = createTempDirectory("notelink-settings-").toFile()
         try {
@@ -42,8 +59,7 @@ class DesktopSettingsTest {
         override fun pollBleCommand(timeoutMillis: Int): ByteArray? = null
         override fun respondBle(value: ByteArray) = Unit
         override fun stopBle() = Unit
-        override fun startWifiDirect(networkName: String, passphrase: String) = "192.168.137.1"
-        override fun stopWifiDirect() = Unit
+        override fun lanInfo() = com.betterhv.transfer.windows.WindowsLanInfo("192.168.1.10", "Test WiFi")
         override fun protect(value: ByteArray) = value.copyOf()
         override fun unprotect(value: ByteArray) = value.copyOf()
         override fun close() = Unit

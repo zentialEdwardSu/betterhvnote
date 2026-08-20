@@ -9,7 +9,7 @@ data class NoteLinkIdentity(
 )
 
 object NoteLinkIdentityCodec {
-    const val PROTOCOL_VERSION = 1
+    const val PROTOCOL_VERSION = 2
     private const val FIELD_BYTES = 48
     private const val TOTAL_BYTES = 4 + FIELD_BYTES + FIELD_BYTES
 

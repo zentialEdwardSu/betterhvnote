@@ -34,4 +34,28 @@ class EncryptedFileTransferTest {
             directory.deleteRecursively()
         }
     }
+
+    @Test
+    fun authenticatedProbeAndFileUseOneReceiverLifecycle() {
+        val directory = Files.createTempDirectory("betterhv-probe").toFile()
+        val source = File(directory, "source.bin").also { it.writeBytes(ByteArray(900_000) { index -> index.toByte() }) }
+        val destination = File(directory, "destination.bin")
+        val itemId = UUID.randomUUID()
+        val fileKey = ByteArray(32) { (it + 1).toByte() }
+        val probeKey = ByteArray(32) { (it + 33).toByte() }
+        val executor = Executors.newSingleThreadExecutor()
+        try {
+            val received = executor.submit<ReceivedFile> {
+                EncryptedFileTransfer.receive(destination, itemId, fileKey, probeKey)
+            }
+            Thread.sleep(100)
+            EncryptedFileTransfer.probe("127.0.0.1", itemId, probeKey)
+            EncryptedFileTransfer.send("127.0.0.1", itemId, source, fileKey)
+            assertEquals(source.length(), received.get(10, TimeUnit.SECONDS).byteLength)
+            assertArrayEquals(source.readBytes(), destination.readBytes())
+        } finally {
+            executor.shutdownNow()
+            directory.deleteRecursively()
+        }
+    }
 }
