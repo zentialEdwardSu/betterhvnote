@@ -55,7 +55,19 @@ extensions.configure<ApplicationExtension> {
         buildConfig = true
     }
     packaging {
-        jniLibs { useLegacyPackaging = false }
+        jniLibs {
+            useLegacyPackaging = false
+            // These binaries were recovered from the Hanvon ROM and have 4 KiB ELF LOAD
+            // alignment. Production rendering no longer calls them; keeping them in the
+            // APK would make an otherwise compatible app fail on 16 KiB page-size devices.
+            // Keep the source artifacts for ROM research, but never package them.
+            excludes += setOf(
+                "**/libc++_shared.so",
+                "**/libhvdither.so",
+                "**/libhw_PenEngine.so",
+                "**/libHwGraphUtil.so"
+            )
+        }
     }
 }
 

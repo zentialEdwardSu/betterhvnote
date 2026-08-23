@@ -45,3 +45,10 @@ target_link_libraries(ink_stroke_modeler_jni
     log
     InkStrokeModeler::stroke_modeler
 )
+
+# NDK r28+ already emits 16 KiB-compatible ELF LOAD segments by default. Keep the
+# linker contract explicit so a local toolchain override cannot silently regress it.
+target_link_options(ink_stroke_modeler_jni PRIVATE
+    "-Wl,-z,max-page-size=16384"
+    "-Wl,-z,common-page-size=16384"
+)
