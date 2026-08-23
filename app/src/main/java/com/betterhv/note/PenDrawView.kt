@@ -124,6 +124,7 @@ class PenDrawView @JvmOverloads constructor(
     private var initPenService = false
     private var romPenInkRequested = true
     private var uiInputBlocked = false
+    private var toolbarDragBlocked = false
 
     private val eink = EinkRefreshController(context)
 
@@ -612,6 +613,10 @@ class PenDrawView @JvmOverloads constructor(
     }
 
     private var gestureOpen = false
+    private var eraseGestureOpen = false
+
+    /** Hardware editor commands must not change document/tool state mid gesture. */
+    fun isInputGestureActive(): Boolean = gestureOpen || eraseGestureOpen
 
     // -- Transient lasso overlay state: marquee + selection box. Drawn in onDraw
     // on TOP of foreBitmap, never into it, so it vanishes on the next repaint /
@@ -1088,7 +1093,7 @@ class PenDrawView @JvmOverloads constructor(
         try {
             penDrawPt = penDraw!!.initService(area.left, area.top, area.right, area.bottom, this)
             applyPenStyleToService()
-            penDraw!!.enablePen(penDrawPt, romPenInkRequested && !uiInputBlocked)
+            penDraw!!.enablePen(penDrawPt, romPenInkRequested && !uiInputBlocked && !toolbarDragBlocked)
             penDraw!!.setDrawStatus(penDrawPt, HvPenDrawManager.PEN_MODE)
             penDraw!!.setAreaActive(penDrawPt, true)
             EventLog.log(TAG, "pen configured handle=$penDrawPt width=${penStyle.baseWidth} enablePen=true")
@@ -1175,9 +1180,23 @@ class PenDrawView @JvmOverloads constructor(
         EventLog.log(TAG, "ui input blocked=$blocked romRequested=$romPenInkRequested")
     }
 
+    /**
+     * Drag recognition happens after the stylus has crossed touch slop. Disable the vendor
+     * overlay synchronously at that point and reset any dot/short trail it painted while the
+     * gesture was being recognised. This block is independent from Compose popup blocking so
+     * ending a drag cannot re-enable ink underneath a still-active toolbar touch.
+     */
+    fun setToolbarDragActive(active: Boolean) {
+        if (toolbarDragBlocked == active) return
+        toolbarDragBlocked = active
+        applyRomPenInkState(resetData = true)
+        if (active) clearOverlayInk()
+        EventLog.log(TAG, "toolbar drag blocked=$active")
+    }
+
     /** Reasserts the vendor pen service after Android has suspended the process. */
     fun recoverAfterWake() {
-        if (uiInputBlocked || width <= 0 || height <= 0) return
+        if (uiInputBlocked || toolbarDragBlocked || width <= 0 || height <= 0) return
         romPenInkRequested = true
         try {
             if (!initPenService) {
@@ -1383,7 +1402,7 @@ class PenDrawView @JvmOverloads constructor(
 
     private fun applyRomPenInkState(resetData: Boolean) {
         val pd = penDraw ?: return
-        val enabled = romPenInkRequested && !uiInputBlocked
+        val enabled = romPenInkRequested && !uiInputBlocked && !toolbarDragBlocked
         try {
             pd.enablePen(penDrawPt, enabled)
             if (resetData) pd.resetData()
@@ -1645,6 +1664,7 @@ class PenDrawView @JvmOverloads constructor(
 
     /** Erase gesture starting: stop the ROM painting pen ink while erasing. */
     fun beginErase() {
+        eraseGestureOpen = true
         setRomPenInkEnabled(false)
         // Fast/autowrite mode for the drag so the per-sample eraser-disc repaints
         // don't queue into lag on the e-ink panel (see beginGesture). Reverted to
@@ -1669,6 +1689,7 @@ class PenDrawView @JvmOverloads constructor(
 
     /** Erase gesture ended: commit the accumulated erase as one undo step, let the ROM paint ink again. */
     fun endErase() {
+        eraseGestureOpen = false
         activeEraserTool().commit()
         onDocChanged?.invoke()
         // Revert to quality mode before the final full repaint so it's a clean

@@ -1,9 +1,12 @@
 package com.betterhv.note
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -24,12 +27,17 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
+import androidx.compose.material3.Tab
+import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -44,6 +52,13 @@ import com.betterhv.transfer.core.TransferModes
 import com.betterhv.transfer.core.TransferSnapshot
 import java.text.DateFormat
 import java.util.Date
+
+private enum class SettingsTab(val label: String) {
+    GENERAL("常规"),
+    TOOLBAR("工具栏"),
+    SHORTCUTS("物理按键"),
+    NOTELINK("NoteLink")
+}
 
 @Composable
 fun SettingsScreen(
@@ -62,11 +77,20 @@ fun SettingsScreen(
     skipSourceSelectionWhenQueueAvailable: Boolean,
     autoCreatePageOnNextAtEnd: Boolean,
     showRecentTransferEvents: Boolean,
+    visibleToolbarItems: Set<ToolbarItem>,
+    shortcutBindings: HardwareShortcutBindings,
+    shortcutBindingRequest: Pair<ShortcutScene, HardwareKeyId>?,
     onDebugModeChange: (Boolean) -> Unit,
     onStartupBehaviorChange: (StartupBehavior) -> Unit,
     onSkipSourceSelectionChange: (Boolean) -> Unit,
     onAutoCreatePageOnNextAtEndChange: (Boolean) -> Unit,
     onShowRecentTransferEventsChange: (Boolean) -> Unit,
+    onToolbarItemVisibilityChange: (ToolbarItem, Boolean) -> Unit,
+    onResetToolbarItems: () -> Unit,
+    onStartShortcutCapture: (ShortcutScene) -> Unit,
+    onShortcutBindingRequestConsumed: () -> Unit,
+    onShortcutBind: (ShortcutScene, HardwareKeyId, ShortcutAction?) -> Unit,
+    onShortcutSceneClear: (ShortcutScene) -> Unit,
     onScanClients: () -> Unit,
     onPairClient: (PhoneTransferClient.PairingCandidate, String) -> Unit,
     onRenameClient: (String, String) -> Unit,
@@ -79,146 +103,217 @@ fun SettingsScreen(
     var pairingCode by remember { mutableStateOf("") }
     var selectedCandidateId by remember { mutableStateOf<String?>(null) }
     var renameTarget by remember { mutableStateOf<PairedDevice?>(null) }
+    var shortcutScene by remember { mutableStateOf(ShortcutScene.EDITOR) }
+    var shortcutKey by remember { mutableStateOf<HardwareKeyId?>(null) }
+    var selectedTab by rememberSaveable { mutableStateOf(SettingsTab.GENERAL) }
     val selectedCandidate = pairingCandidates.firstOrNull { it.deviceId == selectedCandidateId }
+    LaunchedEffect(shortcutBindingRequest) {
+        shortcutBindingRequest?.let { (scene, key) ->
+            selectedTab = SettingsTab.SHORTCUTS
+            shortcutScene = scene
+            shortcutKey = key
+            onShortcutBindingRequestConsumed()
+        }
+    }
 
     Surface(Modifier.fillMaxSize(), color = Color.White) {
-        Column(
-            Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp)
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.fillMaxSize()) {
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
                 IconButton(onClick = onClose) {
                     Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
                 }
                 Text("设置", fontSize = 26.sp)
             }
-            SettingRow("调试模式", onClick = { onDebugModeChange(!debugMode) }) {
-                Switch(checked = debugMode, onCheckedChange = onDebugModeChange)
-            }
-            SettingRow("队列有内容时直接从 NoteLink 获取", onClick = {
-                onSkipSourceSelectionChange(!skipSourceSelectionWhenQueueAvailable)
-            }) {
-                Switch(
-                    checked = skipSourceSelectionWhenQueueAvailable,
-                    onCheckedChange = onSkipSourceSelectionChange
-                )
-            }
-            SettingRow("末页按下一页时自动新增页面", onClick = {
-                onAutoCreatePageOnNextAtEndChange(!autoCreatePageOnNextAtEnd)
-            }) {
-                Switch(
-                    checked = autoCreatePageOnNextAtEnd,
-                    onCheckedChange = onAutoCreatePageOnNextAtEndChange
-                )
+            TabRow(selectedTabIndex = selectedTab.ordinal, containerColor = Color.White) {
+                SettingsTab.entries.forEach { tab ->
+                    Tab(
+                        selected = selectedTab == tab,
+                        onClick = { selectedTab = tab },
+                        text = { Text(tab.label, fontSize = 16.sp) }
+                    )
+                }
             }
 
-            Text("NoteLink 客户端", modifier = Modifier.padding(top = 24.dp, bottom = 8.dp))
-            Text(transferStatus, modifier = Modifier.padding(bottom = 8.dp))
-            SettingRow("显示最近传输事件", onClick = {
-                onShowRecentTransferEventsChange(!showRecentTransferEvents)
-            }) {
-                Switch(
-                    checked = showRecentTransferEvents,
-                    onCheckedChange = onShowRecentTransferEventsChange
-                )
-            }
-            TransferDiagnostics(
-                transferSnapshot,
-                transferEvents,
-                transferEndpointName,
-                showRecentTransferEvents,
-                onCancelTransfer
-            )
-            if (pairedClients.isEmpty()) Text("尚未配对")
-            pairedClients.forEach { client ->
-                val online = onlineClients.firstOrNull { it.client.id == client.id }
-                Row(
-                    Modifier.fillMaxWidth().padding(vertical = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Column(Modifier.weight(1f)) {
-                        Text(client.name, fontSize = 18.sp)
-                        Text(
-                            if (client.legacy) "旧配对，连接后自动识别" else client.id,
-                            fontSize = 12.sp,
-                            color = Color.DarkGray
-                        )
-                        Text(
-                            if (online == null) "离线"
-                            else "在线 · ${online.imageCount} 张图片 · ${online.textCount} 段文字",
-                            fontSize = 12.sp,
-                            color = if (online == null) Color.DarkGray else Color(0xFF246B3A)
-                        )
-                        Text(
-                            "最近使用 ${DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT).format(Date(client.lastUsedAt))}",
-                            fontSize = 12.sp,
-                            color = Color.DarkGray
+            Box(Modifier.fillMaxWidth().weight(1f)) {
+                when (selectedTab) {
+                    SettingsTab.GENERAL -> Column(
+                        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp)
+                    ) {
+                        SettingRow("调试模式", onClick = { onDebugModeChange(!debugMode) }) {
+                            Switch(checked = debugMode, onCheckedChange = onDebugModeChange)
+                        }
+                        SettingRow("队列有内容时直接从 NoteLink 获取", onClick = {
+                            onSkipSourceSelectionChange(!skipSourceSelectionWhenQueueAvailable)
+                        }) {
+                            Switch(skipSourceSelectionWhenQueueAvailable, onSkipSourceSelectionChange)
+                        }
+                        SettingRow("末页按下一页时自动新增页面", onClick = {
+                            onAutoCreatePageOnNextAtEndChange(!autoCreatePageOnNextAtEnd)
+                        }) {
+                            Switch(autoCreatePageOnNextAtEnd, onAutoCreatePageOnNextAtEndChange)
+                        }
+                        Text("重新进入应用时", modifier = Modifier.padding(top = 24.dp, bottom = 8.dp))
+                        StartupBehavior.entries.forEach { behavior ->
+                            val label = when (behavior) {
+                                StartupBehavior.WORKING_COPY -> "打开 Working Copy"
+                                StartupBehavior.LAST_OPENED -> "打开上次使用的笔记本"
+                            }
+                            SettingRow(label, onClick = { onStartupBehaviorChange(behavior) }) {
+                                RadioButton(
+                                    selected = startupBehavior == behavior,
+                                    onClick = { onStartupBehaviorChange(behavior) }
+                                )
+                            }
+                        }
+                        BuildInfoRow("Build version", "${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})")
+                        BuildInfoRow(
+                            "Build time",
+                            DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.MEDIUM)
+                                .format(Date(BuildConfig.BUILD_TIME_EPOCH_MILLIS))
                         )
                     }
-                    OutlinedButton(onClick = { renameTarget = client }) { Text("重命名") }
-                    OutlinedButton(onClick = { onUnpairClient(client.id) }) { Text("移除") }
-                }
-                HorizontalDivider()
-            }
 
-            Row(
-                Modifier.fillMaxWidth().padding(top = 12.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Button(onClick = onScanClients, enabled = !pairingScanActive && !pairingInProgress) {
-                    Text(if (pairingScanActive) "正在扫描" else "扫描新客户端")
-                }
-                if (!transferPermissionsGranted) {
-                    OutlinedButton(onClick = onTransferPermissions) { Text("授予权限") }
-                }
-                OutlinedButton(onClick = onRefreshTransferStatus) { Text("刷新状态") }
-            }
+                    SettingsTab.TOOLBAR -> Column(
+                        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp)
+                    ) {
+                        Text("工具栏显示", fontSize = 20.sp, modifier = Modifier.padding(bottom = 12.dp))
+                        ToolbarItem.entries.filterNot { it == ToolbarItem.MENU }.chunked(2).forEach { items ->
+                            Row(
+                                Modifier.fillMaxWidth().padding(bottom = 8.dp),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                items.forEach { item ->
+                                    val visible = item in visibleToolbarItems
+                                    GridSettingCell(item.label, Modifier.weight(1f), {
+                                        onToolbarItemVisibilityChange(item, !visible)
+                                    }) {
+                                        Switch(visible, { onToolbarItemVisibilityChange(item, it) })
+                                    }
+                                }
+                                if (items.size == 1) Spacer(Modifier.weight(1f))
+                            }
+                        }
+                        Text(
+                            "拖动把手和 Menu 始终显示；关闭的工具会自动进入 Menu。",
+                            color = Color.DarkGray,
+                            modifier = Modifier.padding(top = 4.dp)
+                        )
+                        OutlinedButton(onClick = onResetToolbarItems, modifier = Modifier.padding(top = 12.dp)) {
+                            Text("恢复默认显示")
+                        }
+                    }
 
-            pairingCandidates.forEach { candidate ->
-                SettingRow(candidate.name, onClick = { selectedCandidateId = candidate.deviceId }) {
-                    RadioButton(
-                        selected = candidate.deviceId == selectedCandidateId,
-                        onClick = { selectedCandidateId = candidate.deviceId }
-                    )
-                }
-            }
-            if (pairingCandidates.isNotEmpty()) {
-                OutlinedTextField(
-                    value = pairingCode,
-                    onValueChange = { pairingCode = it.filter(Char::isDigit).take(6) },
-                    label = { Text("所选 NoteLink 显示的六位配对码") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
-                )
-                Button(
-                    onClick = {
-                        selectedCandidate?.let { onPairClient(it, pairingCode) }
-                    },
-                    enabled = selectedCandidate != null && pairingCode.length == 6 && !pairingInProgress,
-                    modifier = Modifier.padding(top = 8.dp)
-                ) { Text(if (pairingInProgress) "正在配对" else "完成配对") }
-            }
+                    SettingsTab.SHORTCUTS -> Column(
+                        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp)
+                    ) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            ShortcutScene.entries.forEach { scene ->
+                                OutlinedButton(onClick = { shortcutScene = scene }) {
+                                    Text(if (scene == shortcutScene) "● ${scene.label}" else scene.label)
+                                }
+                            }
+                        }
+                        Row(
+                            Modifier.fillMaxWidth().padding(vertical = 12.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Button(onClick = { onStartShortcutCapture(shortcutScene) }) { Text("按实体键识别") }
+                            OutlinedButton(onClick = { onShortcutSceneClear(shortcutScene) }) { Text("清空本场景") }
+                        }
+                        HardwareKeyId.entries.chunked(2).forEach { keys ->
+                            Row(
+                                Modifier.fillMaxWidth().padding(bottom = 8.dp),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                keys.forEach { key ->
+                                    val action = shortcutBindings.action(shortcutScene, key)
+                                    GridSettingCell("K${key.number}", Modifier.weight(1f), { shortcutKey = key }) {
+                                        Text(action?.label ?: "未绑定", color = Color.DarkGray, maxLines = 2)
+                                    }
+                                }
+                            }
+                        }
+                    }
 
-            Text("重新进入应用时", modifier = Modifier.padding(top = 24.dp, bottom = 8.dp))
-            StartupBehavior.entries.forEach { behavior ->
-                val label = when (behavior) {
-                    StartupBehavior.WORKING_COPY -> "打开 Working Copy"
-                    StartupBehavior.LAST_OPENED -> "打开上次使用的笔记本"
-                }
-                SettingRow(label, onClick = { onStartupBehaviorChange(behavior) }) {
-                    RadioButton(
-                        selected = startupBehavior == behavior,
-                        onClick = { onStartupBehaviorChange(behavior) }
-                    )
+                    SettingsTab.NOTELINK -> Column(
+                        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp)
+                    ) {
+                        Text("NoteLink 客户端", fontSize = 20.sp, modifier = Modifier.padding(bottom = 8.dp))
+                        Text(transferStatus, modifier = Modifier.padding(bottom = 8.dp))
+                        SettingRow("显示最近传输事件", onClick = {
+                            onShowRecentTransferEventsChange(!showRecentTransferEvents)
+                        }) {
+                            Switch(showRecentTransferEvents, onShowRecentTransferEventsChange)
+                        }
+                        TransferDiagnostics(
+                            transferSnapshot, transferEvents, transferEndpointName,
+                            showRecentTransferEvents, onCancelTransfer
+                        )
+                        if (pairedClients.isEmpty()) Text("尚未配对")
+                        pairedClients.forEach { client ->
+                            val online = onlineClients.firstOrNull { it.client.id == client.id }
+                            Row(
+                                Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Column(Modifier.weight(1f)) {
+                                    Text(client.name, fontSize = 18.sp)
+                                    Text(if (client.legacy) "旧配对，连接后自动识别" else client.id, fontSize = 12.sp, color = Color.DarkGray)
+                                    Text(
+                                        if (online == null) "离线" else "在线 · ${online.imageCount} 张图片 · ${online.textCount} 段文字",
+                                        fontSize = 12.sp,
+                                        color = if (online == null) Color.DarkGray else Color(0xFF246B3A)
+                                    )
+                                    Text(
+                                        "最近使用 ${DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT).format(Date(client.lastUsedAt))}",
+                                        fontSize = 12.sp, color = Color.DarkGray
+                                    )
+                                }
+                                OutlinedButton(onClick = { renameTarget = client }) { Text("重命名") }
+                                OutlinedButton(onClick = { onUnpairClient(client.id) }) { Text("移除") }
+                            }
+                            HorizontalDivider()
+                        }
+                        Row(
+                            Modifier.fillMaxWidth().padding(top = 12.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Button(onClick = onScanClients, enabled = !pairingScanActive && !pairingInProgress) {
+                                Text(if (pairingScanActive) "正在扫描" else "扫描新客户端")
+                            }
+                            if (!transferPermissionsGranted) OutlinedButton(onClick = onTransferPermissions) { Text("授予权限") }
+                            OutlinedButton(onClick = onRefreshTransferStatus) { Text("刷新状态") }
+                        }
+                        pairingCandidates.forEach { candidate ->
+                            SettingRow(candidate.name, onClick = { selectedCandidateId = candidate.deviceId }) {
+                                RadioButton(
+                                    selected = candidate.deviceId == selectedCandidateId,
+                                    onClick = { selectedCandidateId = candidate.deviceId }
+                                )
+                            }
+                        }
+                        if (pairingCandidates.isNotEmpty()) {
+                            OutlinedTextField(
+                                pairingCode,
+                                { pairingCode = it.filter(Char::isDigit).take(6) },
+                                label = { Text("所选 NoteLink 显示的六位配对码") },
+                                singleLine = true,
+                                modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
+                            )
+                            Button(
+                                onClick = { selectedCandidate?.let { onPairClient(it, pairingCode) } },
+                                enabled = selectedCandidate != null && pairingCode.length == 6 && !pairingInProgress,
+                                modifier = Modifier.padding(top = 8.dp)
+                            ) { Text(if (pairingInProgress) "正在配对" else "完成配对") }
+                        }
+                    }
                 }
             }
-            BuildInfoRow("Build version", "${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})")
-            BuildInfoRow(
-                "Build time",
-                DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.MEDIUM)
-                    .format(Date(BuildConfig.BUILD_TIME_EPOCH_MILLIS))
-            )
         }
     }
 
@@ -243,6 +338,35 @@ fun SettingsScreen(
             },
             dismissButton = {
                 OutlinedButton(onClick = { renameTarget = null }) { Text("取消") }
+            }
+        )
+    }
+
+    shortcutKey?.let { key ->
+        AlertDialog(
+            onDismissRequest = { shortcutKey = null },
+            title = { Text("${shortcutScene.label} · K${key.number}") },
+            text = {
+                Column(Modifier.heightIn(max = 460.dp).verticalScroll(rememberScrollState())) {
+                    SettingRow("未绑定", onClick = {
+                        onShortcutBind(shortcutScene, key, null)
+                        shortcutKey = null
+                    }) { RadioButton(selected = shortcutBindings.action(shortcutScene, key) == null, onClick = null) }
+                    ShortcutAction.forScene(shortcutScene).forEach { action ->
+                        SettingRow(action.label, onClick = {
+                            onShortcutBind(shortcutScene, key, action)
+                            shortcutKey = null
+                        }) {
+                            RadioButton(
+                                selected = shortcutBindings.action(shortcutScene, key) == action,
+                                onClick = null
+                            )
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { shortcutKey = null }) { Text("取消") }
             }
         )
     }
@@ -356,6 +480,27 @@ private fun SettingRow(
         horizontalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         Text(label, modifier = Modifier.weight(1f), fontSize = 18.sp)
+        control()
+    }
+}
+
+@Composable
+private fun GridSettingCell(
+    label: String,
+    modifier: Modifier,
+    onClick: () -> Unit,
+    control: @Composable () -> Unit
+) {
+    Row(
+        modifier = modifier
+            .heightIn(min = 64.dp)
+            .border(1.dp, Color(0xFFB0B0B0))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Text(label, modifier = Modifier.weight(1f), fontSize = 17.sp)
         control()
     }
 }

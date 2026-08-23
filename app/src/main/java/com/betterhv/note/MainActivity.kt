@@ -96,6 +96,7 @@ import java.util.UUID
 class MainActivity : ComponentActivity() {
     private var penView: PenDrawView? = null
     private var releaseTransientInputGuards: (() -> Unit)? = null
+    private var hardwareKeyHandler: ((HardwareKeyId) -> Unit)? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -104,7 +105,8 @@ class MainActivity : ComponentActivity() {
         setContent {
             AppRoot(
                 onView = { penView = it },
-                onTransientInputGuardReleaseReady = { releaseTransientInputGuards = it }
+                onTransientInputGuardReleaseReady = { releaseTransientInputGuards = it },
+                onHardwareKeyHandlerReady = { hardwareKeyHandler = it }
             )
         }
     }
@@ -129,11 +131,18 @@ class MainActivity : ComponentActivity() {
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
         PenButtonTracker.observeKey(event)
+        if (N10ProHardwareKeys.dispatch(event) { hardwareKeyHandler?.invoke(it) }) return true
         return super.dispatchKeyEvent(event)
+    }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (hasFocus) N10ProHardwareKeys.enterNoteKeyScene(this)
     }
 
     override fun onDestroy() {
         releaseTransientInputGuards = null
+        hardwareKeyHandler = null
         penView?.teardown()
         super.onDestroy()
     }
@@ -156,7 +165,8 @@ private sealed interface TextEditorRequest {
 @Composable
 private fun AppRoot(
     onView: (PenDrawView) -> Unit,
-    onTransientInputGuardReleaseReady: ((() -> Unit)?) -> Unit
+    onTransientInputGuardReleaseReady: ((() -> Unit)?) -> Unit,
+    onHardwareKeyHandlerReady: (((HardwareKeyId) -> Unit)?) -> Unit
 ) {
     val context = LocalContext.current
     val exportViewModel: ExportViewModel = viewModel()
@@ -213,7 +223,15 @@ private fun AppRoot(
         var toolKind by remember { mutableStateOf(ToolKind.PEN) }
         var eraserMode by remember { mutableStateOf(EraserMode.WHOLE_STROKE) }
         var debugMode by remember { mutableStateOf(false) }
-        var dockEdge by rememberSaveable { mutableStateOf(DockEdge.START) }
+        var dockEdge by rememberSaveable { mutableStateOf(appSettingsStore.toolbarDockEdge) }
+        var dockFraction by rememberSaveable { mutableStateOf(appSettingsStore.toolbarDockFraction) }
+        var toolbarHidden by rememberSaveable { mutableStateOf(appSettingsStore.toolbarHidden) }
+        var visibleToolbarItems by remember { mutableStateOf(appSettingsStore.visibleToolbarItems) }
+        var shortcutBindings by remember { mutableStateOf(appSettingsStore.loadHardwareShortcuts()) }
+        var shortcutCaptureScene by remember { mutableStateOf<ShortcutScene?>(null) }
+        var shortcutBindingRequest by remember { mutableStateOf<Pair<ShortcutScene, HardwareKeyId>?>(null) }
+        var pendingHardwareKey by remember { mutableStateOf<HardwareKeyId?>(null) }
+        var toolbarShortcutScene by remember { mutableStateOf<ShortcutScene?>(null) }
         var pageManagerOpen by rememberSaveable { mutableStateOf(false) }
         var penSettingsOpen by remember { mutableStateOf(false) }
         var settingsOpen by rememberSaveable { mutableStateOf(false) }
@@ -236,6 +254,10 @@ private fun AppRoot(
                 debugInteractionBlocked = false
             }
             onDispose { onTransientInputGuardReleaseReady(null) }
+        }
+        DisposableEffect(Unit) {
+            onHardwareKeyHandlerReady { pendingHardwareKey = it }
+            onDispose { onHardwareKeyHandlerReady(null) }
         }
         var startupBehavior by remember { mutableStateOf(StartupBehavior.WORKING_COPY) }
         var skipSourceSelectionWhenQueueAvailable by remember {
@@ -484,10 +506,195 @@ private fun AppRoot(
         val canUndo = gen.let { penView?.canUndo() ?: false }
         val canRedo = gen.let { penView?.canRedo() ?: false }
         val hasSelection = gen.let { penView?.currentSelection()?.isEmpty?.not() ?: false }
+        var requestedToolbarItem by remember { mutableStateOf<ToolbarItem?>(null) }
+        var pendingFlyoutShortcutAction by remember { mutableStateOf<ShortcutAction?>(null) }
+        var shortcutDeletePageId by remember { mutableStateOf<UUID?>(null) }
+        var shortcutDeleteAt by remember { mutableStateOf(0L) }
+
+        val invokeToolbarItem: (ToolbarItem) -> Unit = { item ->
+            when (item) {
+                ToolbarItem.PEN_1, ToolbarItem.PEN_2, ToolbarItem.PEN_3 -> {
+                    val slot = item.ordinal
+                    penToolbarSettings = penToolbarSettings.selectSlot(slot)
+                    penSettingsStore.save(penToolbarSettings)
+                    toolKind = ToolKind.PEN
+                    penView?.setTool(ToolKind.PEN)
+                }
+                ToolbarItem.TAIL_ERASER -> {
+                    toolbarHidden = false
+                    appSettingsStore.toolbarHidden = false
+                    requestedToolbarItem = item
+                }
+                ToolbarItem.LASSO -> {
+                    toolKind = ToolKind.LASSO
+                    penView?.setTool(ToolKind.LASSO)
+                }
+                ToolbarItem.INSERT, ToolbarItem.MENU -> {
+                    toolbarHidden = false
+                    appSettingsStore.toolbarHidden = false
+                    requestedToolbarItem = item
+                }
+                ToolbarItem.UNDO -> penView?.undo()
+                ToolbarItem.REDO -> penView?.redo()
+                ToolbarItem.DELETE -> penView?.deleteSelection()
+                ToolbarItem.PAGES -> {
+                    pageManagerOpen = !pageManagerOpen
+                    notebookManagerOpen = false
+                    settingsOpen = false
+                }
+                ToolbarItem.NOTEBOOKS -> {
+                    notebookManagerOpen = !notebookManagerOpen
+                    settingsOpen = false
+                    pageManagerOpen = false
+                }
+                ToolbarItem.EXPORT -> {
+                    exportPanelOpen = !exportPanelOpen
+                    if (exportPanelOpen) {
+                        exportInitialNotebookId = penView?.currentNotebookId()
+                        exportViewModel.refresh()
+                    }
+                    notebookManagerOpen = false
+                    settingsOpen = false
+                    pageManagerOpen = false
+                }
+            }
+        }
+
+        LaunchedEffect(pendingHardwareKey) {
+            val key = pendingHardwareKey ?: return@LaunchedEffect
+            pendingHardwareKey = null
+            shortcutCaptureScene?.let { scene ->
+                shortcutBindingRequest = scene to key
+                shortcutCaptureScene = null
+                return@LaunchedEffect
+            }
+            if (penView?.isInputGestureActive() == true) return@LaunchedEffect
+            val modalWithoutShortcuts = penSettingsOpen || settingsOpen || notebookManagerOpen || exportPanelOpen ||
+                textEditorRequest != null || pendingNotebookCreation != null || notebookBusy
+            val scene = when {
+                pageManagerOpen -> ShortcutScene.PAGE_MANAGER
+                insertionState is InsertionState.ChoosingSource ||
+                    insertionState is InsertionState.ChoosingClient -> ShortcutScene.INSERT
+                toolbarShortcutScene != null -> toolbarShortcutScene
+                modalWithoutShortcuts -> null
+                else -> ShortcutScene.EDITOR
+            }
+            val action = scene?.let { shortcutBindings.action(it, key) } ?: return@LaunchedEffect
+            when (scene) {
+                ShortcutScene.EDITOR -> when (action) {
+                    ShortcutAction.EDITOR_PEN_1 -> invokeToolbarItem(ToolbarItem.PEN_1)
+                    ShortcutAction.EDITOR_PEN_2 -> invokeToolbarItem(ToolbarItem.PEN_2)
+                    ShortcutAction.EDITOR_PEN_3 -> invokeToolbarItem(ToolbarItem.PEN_3)
+                    ShortcutAction.EDITOR_TAIL_ERASER -> invokeToolbarItem(ToolbarItem.TAIL_ERASER)
+                    ShortcutAction.EDITOR_LASSO -> invokeToolbarItem(ToolbarItem.LASSO)
+                    ShortcutAction.EDITOR_INSERT -> invokeToolbarItem(ToolbarItem.INSERT)
+                    ShortcutAction.EDITOR_UNDO -> invokeToolbarItem(ToolbarItem.UNDO)
+                    ShortcutAction.EDITOR_REDO -> invokeToolbarItem(ToolbarItem.REDO)
+                    ShortcutAction.EDITOR_DELETE -> invokeToolbarItem(ToolbarItem.DELETE)
+                    ShortcutAction.EDITOR_PAGES -> invokeToolbarItem(ToolbarItem.PAGES)
+                    ShortcutAction.EDITOR_NOTEBOOKS -> invokeToolbarItem(ToolbarItem.NOTEBOOKS)
+                    ShortcutAction.EDITOR_EXPORT -> invokeToolbarItem(ToolbarItem.EXPORT)
+                    ShortcutAction.EDITOR_MENU -> invokeToolbarItem(ToolbarItem.MENU)
+                    ShortcutAction.EDITOR_TOGGLE_TOOLBAR -> {
+                        toolbarHidden = !toolbarHidden
+                        appSettingsStore.toolbarHidden = toolbarHidden
+                    }
+                    else -> Unit
+                }
+                ShortcutScene.PAGE_MANAGER -> PageManagerShortcutContext { pageAction ->
+                    val pv = penView ?: return@PageManagerShortcutContext false
+                    when (pageAction) {
+                        ShortcutAction.PAGE_PREVIOUS -> {
+                            if (!pv.navigatePage(-1)) showNotice("已经是第一页")
+                        }
+                        ShortcutAction.PAGE_NEXT -> {
+                            if (!pv.navigatePage(1)) showNotice("已经是最后一页")
+                        }
+                        ShortcutAction.PAGE_ADD -> {
+                            pv.addPageAfter(pv.pageIds()[pv.currentPageIndex()], activate = true)
+                            showNotice("已新增第 ${pv.currentPageIndex() + 1} 页")
+                        }
+                        ShortcutAction.PAGE_DELETE -> {
+                            val id = pv.pageIds().getOrNull(pv.currentPageIndex()) ?: return@PageManagerShortcutContext false
+                            val now = android.os.SystemClock.uptimeMillis()
+                            if (shortcutDeletePageId == id && now - shortcutDeleteAt <= 3_000L) {
+                                if (!pv.canDeletePage()) showNotice("最后一页不能删除") else pv.deletePage(id)
+                                shortcutDeletePageId = null
+                            } else {
+                                shortcutDeletePageId = id
+                                shortcutDeleteAt = now
+                                showNotice("再次按删除键确认删除当前页")
+                            }
+                        }
+                        ShortcutAction.PAGE_BOOKMARK -> {
+                            val value = pv.toggleCurrentPageBookmark()
+                            showNotice(if (value) "已添加书签" else "已取消书签")
+                        }
+                        ShortcutAction.PAGE_CLOSE -> pageManagerOpen = false
+                        else -> return@PageManagerShortcutContext false
+                    }
+                    true
+                }.perform(action)
+                ShortcutScene.INSERT -> {
+                    val handled = InsertShortcutContext { insertAction ->
+                    when (insertAction) {
+                        ShortcutAction.INSERT_IMAGE -> insertion.choose(ContentKind.IMAGE)
+                        ShortcutAction.INSERT_TEXT -> insertion.choose(ContentKind.TEXT)
+                        ShortcutAction.INSERT_LOCAL -> {
+                            val choosing = insertion.state.value as? InsertionState.ChoosingSource
+                                ?: return@InsertShortcutContext false
+                            if (choosing.kind == ContentKind.IMAGE) {
+                                insertion.cancel()
+                                imagePicker.launch(arrayOf("image/*"))
+                            } else {
+                                insertion.manualText()
+                                showNotice("请点击页面确定文字位置")
+                            }
+                        }
+                        ShortcutAction.INSERT_NOTELINK -> {
+                            val choosing = insertion.state.value as? InsertionState.ChoosingSource
+                                ?: return@InsertShortcutContext false
+                            val missing = TransferPermissions.missingNotePermissions(context)
+                            if (missing.isEmpty()) {
+                                snackbarScope.launch { insertion.remote(choosing.kind) }
+                            } else {
+                                permissionRemoteKind = choosing.kind
+                                permissionRemoteAuto = false
+                                transferPermissionLauncher.launch(missing)
+                            }
+                        }
+                        ShortcutAction.INSERT_CANCEL -> insertion.cancel()
+                        else -> return@InsertShortcutContext false
+                    }
+                    true
+                    }.perform(action)
+                    if (handled) pendingFlyoutShortcutAction = action
+                }
+            }
+        }
         EditorToolbar(
             modifier = Modifier.fillMaxSize(),
             dockEdge = dockEdge,
-            onDockEdgeChange = { dockEdge = it },
+            onDockEdgeChange = {
+                dockEdge = it
+                appSettingsStore.toolbarDockEdge = it
+            },
+            dockFraction = dockFraction,
+            onDockFractionChange = {
+                dockFraction = it
+                appSettingsStore.toolbarDockFraction = it
+            },
+            toolbarHidden = toolbarHidden,
+            onToolbarHiddenChange = {
+                toolbarHidden = it
+                appSettingsStore.toolbarHidden = it
+            },
+            visibleItems = visibleToolbarItems,
+            requestedItem = requestedToolbarItem,
+            onRequestedItemConsumed = { requestedToolbarItem = null },
+            hardwareShortcutAction = pendingFlyoutShortcutAction,
+            onHardwareShortcutConsumed = { pendingFlyoutShortcutAction = null },
+            onShortcutSceneChange = { toolbarShortcutScene = it },
             toolKind = toolKind,
             onToolSelected = { kind ->
                 toolKind = kind
@@ -510,6 +717,25 @@ private fun AppRoot(
             },
             onInsertText = {
                 beginInsertion(ContentKind.TEXT)
+            },
+            onInsertLocal = { kind ->
+                if (kind == ContentKind.IMAGE) {
+                    insertion.cancel()
+                    imagePicker.launch(arrayOf("image/*"))
+                } else {
+                    insertion.manualText()
+                    showNotice("请点击页面确定文字位置")
+                }
+            },
+            onInsertNoteLink = { kind ->
+                val missing = TransferPermissions.missingNotePermissions(context)
+                if (missing.isEmpty()) {
+                    snackbarScope.launch { insertion.remote(kind) }
+                } else {
+                    permissionRemoteKind = kind
+                    permissionRemoteAuto = false
+                    transferPermissionLauncher.launch(missing)
+                }
             },
             pageManagerOpen = pageManagerOpen,
             onPageManagerToggle = {
@@ -584,6 +810,9 @@ private fun AppRoot(
             },
             onPenPanelVisibilityChange = { visible ->
                 penSettingsOpen = visible
+            },
+            onToolbarDragStateChange = { active ->
+                penView?.setToolbarDragActive(active)
             },
             onInteractionBlockChange = { toolbarInteractionBlocked = it }
         )
@@ -780,17 +1009,23 @@ private fun AppRoot(
         if (pageManagerOpen && penView != null) {
             val managerModifier = when (dockEdge) {
                 DockEdge.START -> Modifier.align(Alignment.CenterStart)
-                    .padding(start = 64.dp, top = 8.dp, bottom = 8.dp)
-                    .width(thumbnailSize.width + 4.dp).fillMaxHeight()
+                    .padding(start = 52.dp, top = 8.dp, bottom = 8.dp)
+                    .width(thumbnailSize.width + PAGE_MANAGER_SIDE_EXTRA_WIDTH).fillMaxHeight()
                 DockEdge.END -> Modifier.align(Alignment.CenterEnd)
-                    .padding(end = 64.dp, top = 8.dp, bottom = 8.dp)
-                    .width(thumbnailSize.width + 4.dp).fillMaxHeight()
+                    .padding(end = 52.dp, top = 8.dp, bottom = 8.dp)
+                    .width(thumbnailSize.width + PAGE_MANAGER_SIDE_EXTRA_WIDTH).fillMaxHeight()
                 DockEdge.TOP -> Modifier.align(Alignment.TopCenter)
-                    .padding(start = 8.dp, end = 8.dp, top = 64.dp)
-                    .fillMaxWidth().height(thumbnailSize.height + PAGE_MANAGER_TAB_HEIGHT + 4.dp)
+                    .padding(start = 8.dp, end = 8.dp, top = 52.dp)
+                    .fillMaxWidth().height(
+                        PAGE_MANAGER_HEADER_HEIGHT + thumbnailSize.height +
+                            PAGE_MANAGER_CONTENT_PADDING * 2 + 2.dp
+                    )
                 DockEdge.BOTTOM -> Modifier.align(Alignment.BottomCenter)
-                    .padding(start = 8.dp, end = 8.dp, bottom = 64.dp)
-                    .fillMaxWidth().height(thumbnailSize.height + PAGE_MANAGER_TAB_HEIGHT + 4.dp)
+                    .padding(start = 8.dp, end = 8.dp, bottom = 52.dp)
+                    .fillMaxWidth().height(
+                        PAGE_MANAGER_HEADER_HEIGHT + thumbnailSize.height +
+                            PAGE_MANAGER_CONTENT_PADDING * 2 + 2.dp
+                    )
             }
             PageManagerPanel(
                 modifier = managerModifier,
@@ -898,6 +1133,9 @@ private fun AppRoot(
                 skipSourceSelectionWhenQueueAvailable = skipSourceSelectionWhenQueueAvailable,
                 autoCreatePageOnNextAtEnd = autoCreatePageOnNextAtEnd,
                 showRecentTransferEvents = showRecentTransferEvents,
+                visibleToolbarItems = visibleToolbarItems,
+                shortcutBindings = shortcutBindings,
+                shortcutBindingRequest = shortcutBindingRequest,
                 onDebugModeChange = { debugMode = it },
                 onStartupBehaviorChange = { behavior ->
                     runCatching { penView?.setStartupBehavior(behavior) }
@@ -919,6 +1157,24 @@ private fun AppRoot(
                 onShowRecentTransferEventsChange = {
                     showRecentTransferEvents = it
                     appSettingsStore.showRecentTransferEvents = it
+                },
+                onToolbarItemVisibilityChange = { item, visible ->
+                    visibleToolbarItems = if (visible) visibleToolbarItems + item else visibleToolbarItems - item
+                    appSettingsStore.visibleToolbarItems = visibleToolbarItems
+                },
+                onResetToolbarItems = {
+                    visibleToolbarItems = ToolbarItem.defaults
+                    appSettingsStore.visibleToolbarItems = visibleToolbarItems
+                },
+                onStartShortcutCapture = { shortcutCaptureScene = it },
+                onShortcutBindingRequestConsumed = { shortcutBindingRequest = null },
+                onShortcutBind = { scene, key, action ->
+                    shortcutBindings = shortcutBindings.bind(scene, key, action)
+                    appSettingsStore.saveHardwareShortcut(scene, key, action)
+                },
+                onShortcutSceneClear = { scene ->
+                    shortcutBindings = shortcutBindings.clear(scene)
+                    appSettingsStore.clearHardwareShortcuts(scene)
                 },
                 onScanClients = {
                     if (missingTransferPermissions.isNotEmpty()) {

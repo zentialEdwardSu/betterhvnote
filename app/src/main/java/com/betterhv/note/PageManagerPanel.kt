@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -24,8 +25,6 @@ import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Tab
-import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -51,7 +50,11 @@ import kotlinx.coroutines.delay
 import java.util.UUID
 import kotlin.math.floor
 
-internal val PAGE_MANAGER_TAB_HEIGHT = 44.dp
+internal val PAGE_MANAGER_HEADER_HEIGHT = 36.dp
+internal val PAGE_MANAGER_TAB_RAIL_WIDTH = 52.dp
+internal val PAGE_MANAGER_SIDE_EXTRA_WIDTH = 48.dp
+internal val PAGE_MANAGER_CONTENT_PADDING = 6.dp
+internal val PAGE_MANAGER_HORIZONTAL_TITLE_WIDTH = 132.dp
 
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
@@ -111,7 +114,9 @@ fun PageManagerPanel(
                     tool, event.buttonState or PenButtonTracker.currentButtonState, event.source
                 )
                 side1Armed = modifierKey == PenSideButton.SIDE_1
-                side1Delta = if (event.y < panelHeight / 2f) -1 else 1
+                val main = if (vertical) event.y else event.x
+                val mainSize = if (vertical) panelHeight else panelWidth
+                side1Delta = if (main < mainSize / 2f) -1 else 1
                 side1Armed
             }
             MotionEvent.ACTION_UP -> {
@@ -204,104 +209,149 @@ fun PageManagerPanel(
         )
     }
 
-    Surface(
-        modifier = modifier
-            .onSizeChanged { panelWidth = it.width.toFloat(); panelHeight = it.height.toFloat() }
-            .then(side1Input)
-            .then(dragInput),
-        color = Color(0xFFF2F2F2),
-        contentColor = Color.Black,
-        tonalElevation = 6.dp,
-        shadowElevation = 8.dp
-    ) {
-        val card: @Composable (Int, Modifier) -> Unit = { slot, cardModifier ->
-            val pageIndex = model.chunkIndex * PageManagerModel.CHUNK_SIZE + slot
-            val info = displayedPages.getOrNull(pageIndex)
-            if (info == null) {
-                Box(cardModifier)
-            } else {
-                PageThumbnailCard(
-                        modifier = cardModifier.padding(2.dp),
-                        info = info,
-                        bitmap = thumbnail(info.id),
-                        current = info.id == currentPageId,
-                        pendingDelete = info.id == model.pendingDeleteId,
-                        dragging = info.id == draggingId,
-                        onNormalClick = {
-                            model = model.cancelDelete()
-                            onSelect(info.id)
-                        },
-                        onSide2Click = {
-                            model = model.cancelDelete()
-                            onAddAfter(info.id)
-                            if (bookmarkedOnly) bookmarkedOnly = false
-                            val fullIndex = pages.indexOfFirst { it.id == info.id }.coerceAtLeast(0)
-                            model = model.afterStructureChange(fullIndex + 1, pages.size + 1)
-                        },
-                        onSide3Click = {
-                            val now = SystemClock.uptimeMillis()
-                            val (updated, decision) = model.deleteClick(info.id, now)
-                            model = updated
-                            if (decision == DeleteDecision.ARMED) {
-                                onNotice("再次按 Side3 删除第 ${info.pageNumber} 页")
-                            } else if (onDelete(info.id)) {
-                                onNotice("已删除第 ${info.pageNumber} 页")
-                                model = model.afterStructureChange(
-                                    currentIndex,
-                                    (displayedPages.size - 1).coerceAtLeast(0)
-                                )
-                            }
-                        }
-                )
-            }
-        }
-        Column(Modifier.fillMaxSize()) {
-            TabRow(
-                selectedTabIndex = if (bookmarkedOnly) 1 else 0,
-                modifier = Modifier.fillMaxWidth().height(PAGE_MANAGER_TAB_HEIGHT)
-            ) {
-                Tab(
-                    selected = !bookmarkedOnly,
-                    onClick = {
-                        bookmarkedOnly = false
-                        model = PageManagerModel().openAt(
-                            pages.indexOfFirst { it.id == currentPageId }.coerceAtLeast(0)
+    val card: @Composable (Int, Modifier) -> Unit = { slot, cardModifier ->
+        val pageIndex = model.chunkIndex * PageManagerModel.CHUNK_SIZE + slot
+        val info = displayedPages.getOrNull(pageIndex)
+        if (info == null) {
+            Box(cardModifier)
+        } else {
+            PageThumbnailCard(
+                modifier = cardModifier.padding(2.dp),
+                info = info,
+                bitmap = thumbnail(info.id),
+                current = info.id == currentPageId,
+                pendingDelete = info.id == model.pendingDeleteId,
+                dragging = info.id == draggingId,
+                onNormalClick = {
+                    model = model.cancelDelete()
+                    onSelect(info.id)
+                },
+                onSide2Click = {
+                    model = model.cancelDelete()
+                    onAddAfter(info.id)
+                    if (bookmarkedOnly) bookmarkedOnly = false
+                    val fullIndex = pages.indexOfFirst { it.id == info.id }.coerceAtLeast(0)
+                    model = model.afterStructureChange(fullIndex + 1, pages.size + 1)
+                },
+                onSide3Click = {
+                    val now = SystemClock.uptimeMillis()
+                    val (updated, decision) = model.deleteClick(info.id, now)
+                    model = updated
+                    if (decision == DeleteDecision.ARMED) {
+                        onNotice("再次按 Side3 删除第 ${info.pageNumber} 页")
+                    } else if (onDelete(info.id)) {
+                        onNotice("已删除第 ${info.pageNumber} 页")
+                        model = model.afterStructureChange(
+                            currentIndex,
+                            (displayedPages.size - 1).coerceAtLeast(0)
                         )
-                    },
-                    icon = {
-                        Icon(Icons.Filled.Layers, contentDescription = "全部页面")
                     }
-                )
-                Tab(
-                    selected = bookmarkedOnly,
-                    onClick = {
-                        bookmarkedOnly = true
-                        val bookmarkIndex = pages.filter(PageUiInfo::bookmarked)
-                            .indexOfFirst { it.id == currentPageId }
-                            .coerceAtLeast(0)
-                        model = PageManagerModel().openAt(bookmarkIndex)
-                    },
-                    icon = {
-                        Icon(Icons.Filled.Bookmark, contentDescription = "书签页面")
+                }
+            )
+        }
+    }
+    val showAll = {
+        bookmarkedOnly = false
+        model = PageManagerModel().openAt(
+            pages.indexOfFirst { it.id == currentPageId }.coerceAtLeast(0)
+        )
+    }
+    val showBookmarks = {
+        bookmarkedOnly = true
+        val bookmarkIndex = pages.filter(PageUiInfo::bookmarked)
+            .indexOfFirst { it.id == currentPageId }
+            .coerceAtLeast(0)
+        model = PageManagerModel().openAt(bookmarkIndex)
+    }
+    val viewportModifier = Modifier
+        .fillMaxSize()
+        .padding(PAGE_MANAGER_CONTENT_PADDING)
+        .onSizeChanged { panelWidth = it.width.toFloat(); panelHeight = it.height.toFloat() }
+        .then(side1Input)
+        .then(dragInput)
+
+    ToolbarFlyoutSurface(
+        title = "页面 ${currentIndex + 1}/${displayedPages.size.coerceAtLeast(1)}",
+        dockEdge = dockEdge,
+        modifier = modifier,
+        compactHeaderWidth = if (vertical) null else PAGE_MANAGER_HORIZONTAL_TITLE_WIDTH,
+        wrapContentWidth = false
+    ) {
+        if (vertical) {
+            Column(Modifier.fillMaxSize()) {
+                Row(Modifier.fillMaxWidth().height(PAGE_MANAGER_TAB_RAIL_WIDTH)) {
+                    PageManagerTab(
+                        selected = !bookmarkedOnly,
+                        icon = Icons.Filled.Layers,
+                        description = "全部页面",
+                        modifier = Modifier.weight(1f),
+                        onClick = showAll
+                    )
+                    PageManagerTab(
+                        selected = bookmarkedOnly,
+                        icon = Icons.Filled.Bookmark,
+                        description = "书签页面",
+                        modifier = Modifier.weight(1f),
+                        onClick = showBookmarks
+                    )
+                }
+                Column(
+                    viewportModifier.verticalScroll(scrollState),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    repeat(PageManagerModel.CHUNK_SIZE) { slot ->
+                        card(slot, Modifier.size(thumbnailSize))
                     }
-                )
+                }
             }
-            Box(Modifier.fillMaxWidth().weight(1f)) {
-                if (vertical) {
-                    Column(Modifier.fillMaxHeight().verticalScroll(scrollState)) {
-                        repeat(PageManagerModel.CHUNK_SIZE) {
-                            slot -> card(slot, Modifier.size(thumbnailSize))
-                        }
-                    }
-                } else {
-                    Row(Modifier.fillMaxWidth().horizontalScroll(scrollState)) {
-                        repeat(PageManagerModel.CHUNK_SIZE) {
-                            slot -> card(slot, Modifier.size(thumbnailSize))
-                        }
+        } else {
+            Row(Modifier.fillMaxSize()) {
+                Column(Modifier.width(PAGE_MANAGER_TAB_RAIL_WIDTH).fillMaxHeight()) {
+                    PageManagerTab(
+                        selected = !bookmarkedOnly,
+                        icon = Icons.Filled.Layers,
+                        description = "全部页面",
+                        modifier = Modifier.weight(1f),
+                        onClick = showAll
+                    )
+                    PageManagerTab(
+                        selected = bookmarkedOnly,
+                        icon = Icons.Filled.Bookmark,
+                        description = "书签页面",
+                        modifier = Modifier.weight(1f),
+                        onClick = showBookmarks
+                    )
+                }
+                Row(
+                    viewportModifier.horizontalScroll(scrollState),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    repeat(PageManagerModel.CHUNK_SIZE) { slot ->
+                        card(slot, Modifier.size(thumbnailSize))
                     }
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun PageManagerTab(
+    selected: Boolean,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    description: String,
+    modifier: Modifier,
+    onClick: () -> Unit
+) {
+    Box(
+        modifier
+            .fillMaxSize()
+            .background(if (selected) Color.Black else Color(0xFFE5E5E5))
+            .border(0.5.dp, Color(0xFF808080))
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center
+    ) {
+        Icon(icon, contentDescription = description, tint = if (selected) Color.White else Color.Black)
     }
 }
 
