@@ -2,6 +2,7 @@ package com.betterhv.note.storage
 
 import android.content.Context
 import android.graphics.BitmapFactory
+import android.graphics.Bitmap
 import android.media.ExifInterface
 import android.net.Uri
 import java.io.File
@@ -55,6 +56,26 @@ class ImageAssetStore(private val context: Context) {
             return inspect(temp, mimeType)
         } catch (t: Throwable) {
             temp.delete(); throw t
+        }
+    }
+
+    fun importPng(bitmap: Bitmap): ImportedImage {
+        require(bitmap.width > 0 && bitmap.height > 0) { "截图尺寸无效" }
+        require(bitmap.width.toLong() * bitmap.height <= 100_000_000L) { "截图像素不能超过 1 亿" }
+        val temp = File(incomingDir, "${UUID.randomUUID()}.png.tmp")
+        try {
+            temp.outputStream().buffered().use { output ->
+                check(bitmap.compress(Bitmap.CompressFormat.PNG, 100, output)) { "无法保存 PDF 截图" }
+            }
+            return ImportedImage(
+                relativePath = "incoming/${temp.name}",
+                mimeType = "image/png",
+                pixelWidth = bitmap.width,
+                pixelHeight = bitmap.height
+            )
+        } catch (t: Throwable) {
+            temp.delete()
+            throw t
         }
     }
 

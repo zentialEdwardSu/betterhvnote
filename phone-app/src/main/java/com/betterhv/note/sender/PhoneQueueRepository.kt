@@ -10,6 +10,7 @@ import android.provider.OpenableColumns
 import com.betterhv.transfer.android.SenderContentProvider
 import com.betterhv.transfer.android.SenderLease
 import com.betterhv.transfer.core.ContentKind
+import com.betterhv.transfer.core.ContentCounts
 import com.betterhv.transfer.core.QueueCoordinator
 import com.betterhv.transfer.core.QueueItem
 import com.betterhv.transfer.core.QueueState
@@ -90,6 +91,46 @@ class PhoneQueueRepository(context: Context) : QueueStore, SenderContentProvider
         return item
     }
 
+    fun enqueuePdf(uri: Uri, destinationDeviceId: String?): QueueItem {
+        val resolver = appContext.contentResolver
+        val mime = resolver.getType(uri)
+        require(mime == "application/pdf") { "只支持 PDF" }
+        val displayName = resolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
+            ?.use { if (it.moveToFirst()) it.getString(0) else null }
+        val id = UUID.randomUUID()
+        val temp = File(outboxDir, "$id.tmp")
+        val target = File(outboxDir, "$id.pdf")
+        try {
+            resolver.openInputStream(uri).use { input ->
+                requireNotNull(input) { "无法读取 PDF" }
+                temp.outputStream().buffered().use { output ->
+                    val buffer = ByteArray(64 * 1024)
+                    var total = 0L
+                    while (true) {
+                        val count = input.read(buffer)
+                        if (count < 0) break
+                        total += count
+                        require(total <= TransferLimits.MAX_PDF_BYTES) { "PDF 不能超过 512 MiB" }
+                        output.write(buffer, 0, count)
+                    }
+                }
+            }
+            require(temp.inputStream().use { input ->
+                ByteArray(5).also(input::read).contentEquals("%PDF-".encodeToByteArray())
+            }) { "文件不是有效的 PDF" }
+            check(temp.renameTo(target)) { "无法保存队列 PDF" }
+            val now = System.currentTimeMillis()
+            val item = QueueItem(
+                id, destinationDeviceId, ContentKind.PDF, "application/pdf", target.length(), sha256(target),
+                now, nextPosition(), QueueState.PENDING, displayName ?: "文档.pdf"
+            )
+            insertWithPayload(item, target.relativeTo(appContext.filesDir).path, null)
+            return item
+        } catch (t: Throwable) {
+            temp.delete(); target.delete(); throw t
+        }
+    }
+
     fun delete(id: UUID): Boolean {
         payloadFile(id)?.delete()
         val removed = remove(id)
@@ -137,9 +178,13 @@ class PhoneQueueRepository(context: Context) : QueueStore, SenderContentProvider
         publish()
     }
 
-    override fun counts(): Pair<Int, Int> {
+    override fun counts(): ContentCounts {
         val available = items().filter { it.state == QueueState.PENDING }
-        return available.count { it.kind == ContentKind.IMAGE } to available.count { it.kind == ContentKind.TEXT }
+        return ContentCounts(
+            available.count { it.kind == ContentKind.IMAGE },
+            available.count { it.kind == ContentKind.TEXT },
+            available.count { it.kind == ContentKind.PDF }
+        )
     }
 
     override fun leaseNext(kind: ContentKind, destinationDeviceId: String): SenderLease? {

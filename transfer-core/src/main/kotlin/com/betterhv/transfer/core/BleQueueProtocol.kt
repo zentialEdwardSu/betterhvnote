@@ -32,7 +32,7 @@ sealed interface BleCommand {
 }
 
 sealed interface BleResponse {
-    data class Counts(val images: Int, val texts: Int) : BleResponse
+    data class Counts(val images: Int, val texts: Int, val pdfs: Int = 0) : BleResponse
     data class Offer(val item: QueueItem) : BleResponse
     data object Empty : BleResponse
     data class TextChunk(val itemId: UUID, val offset: Int, val total: Int, val bytes: ByteArray) : BleResponse {
@@ -55,7 +55,7 @@ class UnsupportedBleProtocolException(val receivedVersion: Int) : IllegalArgumen
 )
 
 object BleQueueProtocol {
-    const val VERSION = 2
+    const val VERSION = 3
     const val TEXT_CHUNK_BYTES = 160
     const val CAPABILITY_EXPORT_PUSH = 1
     private const val MAX_STRING = 512
@@ -102,14 +102,17 @@ object BleQueueProtocol {
             ))
             13 -> BleCommand.PushStatus(value.uuid())
             14 -> BleCommand.PushCancel(value.uuid())
-            else -> error("Unknown BLE v2 command")
+            else -> error("Unknown BLE v3 command")
         }
     }
 
     fun encode(response: BleResponse): ByteArray = bytes { out ->
         out.writeByte(VERSION)
         when (response) {
-            is BleResponse.Counts -> { out.writeByte(1); out.writeShort(response.images); out.writeShort(response.texts) }
+            is BleResponse.Counts -> {
+                out.writeByte(1); out.writeShort(response.images); out.writeShort(response.texts)
+                out.writeShort(response.pdfs)
+            }
             is BleResponse.Offer -> {
                 out.writeByte(2); val item = response.item; out.uuid(item.id); out.writeByte(item.kind.ordinal)
                 out.safeUtf(item.mimeType); out.writeLong(item.byteLength); out.write(item.sha256); out.safeUtf(item.displayName.orEmpty())
@@ -140,7 +143,9 @@ object BleQueueProtocol {
     fun decodeResponse(bytes: ByteArray): BleResponse = input(bytes) { value ->
         requireVersion(value.readUnsignedByte())
         when (value.readUnsignedByte()) {
-            1 -> BleResponse.Counts(value.readUnsignedShort(), value.readUnsignedShort())
+            1 -> BleResponse.Counts(
+                value.readUnsignedShort(), value.readUnsignedShort(), value.readUnsignedShort()
+            )
             2 -> BleResponse.Offer(QueueItem(
                 value.uuid(), null, ContentKind.entries[value.readUnsignedByte()], value.safeUtf(), value.readLong(),
                 ByteArray(32).also(value::readFully), 0, 0, QueueState.LEASED, value.safeUtf()
@@ -163,7 +168,7 @@ object BleQueueProtocol {
                 val mode = value.readUnsignedByte().let { if (it == 0) null else TransferMode.entries[it - 1] }
                 BleResponse.Failure(TransferFailure(code, message, recoverable, mode))
             }
-            else -> error("Unknown BLE v2 response")
+            else -> error("Unknown BLE v3 response")
         }
     }
 

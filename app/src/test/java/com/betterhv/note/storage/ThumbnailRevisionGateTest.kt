@@ -19,4 +19,16 @@ class ThumbnailRevisionGateTest {
         assertFalse(gate.expect(old))
         assertTrue(gate.isCurrent(current))
     }
+
+    @Test
+    fun backgroundRevisionReplacesSameContentGeneration() {
+        val id = UUID.randomUUID()
+        val gate = ThumbnailRevisionGate()
+        val old = ThumbnailKey(id, 5L, "template-a")
+        val current = ThumbnailKey(id, 5L, "template-b")
+        assertTrue(gate.expect(old))
+        assertTrue(gate.expect(current))
+        assertFalse(gate.isCurrent(old))
+        assertTrue(gate.isCurrent(current))
+    }
 }

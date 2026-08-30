@@ -13,7 +13,16 @@ data class Stroke(
     val points: List<InkPoint>,
     val style: PenStyle
 ) {
-    val bounds: Bounds by lazy { outline.bounds }
+    val bounds: Bounds by lazy {
+        // Marker is rendered as a round-capped centerline. Its cap extends by
+        // half a width beyond both endpoints, which the ribbon-only bounds do
+        // not include. Keep spatial queries and selection aware of those pixels.
+        if (style.penType == PenType.Marker) {
+            Bounds.of(points).inflate(style.maxWidth * 0.5f)
+        } else {
+            outline.bounds
+        }
+    }
 
     /**
      * Cached because the renderer asks for this on every repaint of a committed

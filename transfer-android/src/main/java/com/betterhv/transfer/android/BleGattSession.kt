@@ -15,6 +15,7 @@ import android.util.Log
 import com.betterhv.transfer.core.BleTransportFrameCodec
 import com.betterhv.transfer.core.BleTransportReassembler
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -171,7 +172,13 @@ class BleGattSession private constructor(
         check(gatt?.discoverServices() == true) { "GATT service discovery was rejected" }
         withTimeout(15_000L) { ready.await() }
         val mtu = if (gatt?.requestMtu(247) == true) {
-            runCatching { withTimeout(5_000L) { mtuReady.await() } }.getOrDefault(23)
+            try {
+                withTimeout(5_000L) { mtuReady.await() }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Throwable) {
+                23
+            }
         } else 23
         // Windows' GATT peripheral accepts the negotiated MTU but can still
         // reject characteristic writes above the legacy ATT payload. Keep

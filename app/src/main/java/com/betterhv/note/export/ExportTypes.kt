@@ -32,7 +32,12 @@ data class ExportTaskSummary(
     val lastError: String?
 )
 
-data class ExportPageSource(val id: UUID, val contentRevision: Long, val position: Int)
+data class ExportPageSource(
+    val id: UUID,
+    val contentRevision: Long,
+    val position: Int,
+    val backgroundRevision: String = ""
+)
 
 data class ExportNotebookOption(
     val id: UUID,

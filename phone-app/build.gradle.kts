@@ -4,7 +4,10 @@ import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.plugin.compose")
+    id("io.gitlab.arturbosch.detekt")
 }
+
+// Desktop sources live in :phone-desktop; this module is Android-only.
 
 extensions.configure<ApplicationExtension> {
     namespace = "com.betterhv.note.sender"

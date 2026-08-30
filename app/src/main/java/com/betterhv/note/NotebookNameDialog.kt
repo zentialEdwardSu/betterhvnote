@@ -21,13 +21,25 @@ import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import android.graphics.Bitmap
+import com.betterhv.note.doc.DEFAULT_TEMPLATE_ID
+import com.betterhv.note.template.TemplateCatalogSnapshot
 
 @Composable
 fun NotebookNameDialog(
-    onConfirm: (String) -> Unit,
+    catalog: TemplateCatalogSnapshot,
+    pageWidth: Float,
+    pageHeight: Float,
+    preview: (String, Int, Int) -> Bitmap?,
+    onConnectDirectory: () -> Unit,
+    onRefresh: () -> Unit,
+    templateEnabled: Boolean = true,
+    onConfirm: (String, String) -> Unit,
     onDismiss: () -> Unit
 ) {
     var title by remember { mutableStateOf("") }
+    var selectedTemplateId by remember { mutableStateOf(DEFAULT_TEMPLATE_ID) }
+    var chooserOpen by remember { mutableStateOf(false) }
     val focusRequester = remember { FocusRequester() }
     val keyboard = LocalSoftwareKeyboardController.current
     val normalized = title.trim()
@@ -46,6 +58,16 @@ fun NotebookNameDialog(
                 label = { Text("笔记本名称") },
                 shape = RectangleShape
             )
+            if (templateEnabled) {
+                TemplateSelectionRow(
+                    definition = catalog.find(selectedTemplateId),
+                    preview = preview,
+                    onClick = {
+                        keyboard?.hide()
+                        chooserOpen = true
+                    }
+                )
+            }
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.End)
@@ -54,9 +76,22 @@ fun NotebookNameDialog(
                 EinkDialogAction(
                     "创建",
                     enabled = normalized.isNotEmpty(),
-                    onClick = { onConfirm(normalized) }
+                    onClick = { onConfirm(normalized, selectedTemplateId) }
                 )
             }
         }
+    }
+    if (chooserOpen && templateEnabled) {
+        TemplateChooserOverlay(
+            catalog = catalog,
+            selectedId = selectedTemplateId,
+            pageWidth = pageWidth,
+            pageHeight = pageHeight,
+            preview = preview,
+            onSelect = { selectedTemplateId = it; chooserOpen = false },
+            onConnectDirectory = onConnectDirectory,
+            onRefresh = onRefresh,
+            onDismiss = { chooserOpen = false }
+        )
     }
 }

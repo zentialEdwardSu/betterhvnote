@@ -13,6 +13,7 @@ import java.util.UUID
 class Notebook(
     val id: UUID = UUID.randomUUID(),
     var title: String = "Untitled",
+    val kind: NotebookKind = NotebookKind.STANDARD,
     val createdAt: Long = System.currentTimeMillis(),
     updatedAt: Long = createdAt
 ) {
@@ -23,7 +24,11 @@ class Notebook(
         val bookmarked: Boolean,
         val contentRevision: Long,
         val createdAt: Long,
-        val updatedAt: Long
+        val updatedAt: Long,
+        val kind: PageKind = PageKind.BLANK,
+        val parentPdfPageId: UUID? = null,
+        val pdfSource: PdfPageSource? = null,
+        val templateId: String? = if (kind == PageKind.PDF_SOURCE) null else DEFAULT_TEMPLATE_ID
     )
 
     var updatedAt: Long = updatedAt
@@ -92,6 +97,7 @@ class Notebook(
     }
 
     private fun Page.toMetadata() = PageMetadata(
-        id, width, height, bookmarked, contentRevision, createdAt, updatedAt
+        id, width, height, bookmarked, contentRevision, createdAt, updatedAt,
+        kind, parentPdfPageId, pdfSource, templateId
     )
 }

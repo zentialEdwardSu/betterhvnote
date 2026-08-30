@@ -4,8 +4,8 @@ package com.betterhv.transfer.windows
 interface WindowsNativeApi : AutoCloseable {
     fun initialize()
     fun capabilities(): WindowsCapabilities
-    fun startBle(deviceId: String, deviceName: String, imageCount: Int, textCount: Int)
-    fun updateBleCounts(imageCount: Int, textCount: Int)
+    fun startBle(deviceId: String, deviceName: String, imageCount: Int, textCount: Int, pdfCount: Int = 0)
+    fun updateBleCounts(imageCount: Int, textCount: Int, pdfCount: Int = 0)
     fun pollBleCommand(timeoutMillis: Int): ByteArray?
     fun respondBle(value: ByteArray)
     fun stopBle()

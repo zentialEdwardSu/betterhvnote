@@ -7,6 +7,7 @@ enum class ToolbarItem(val storageId: String, val label: String) {
     PEN_3("pen_3", "笔 3"),
     TAIL_ERASER("tail_eraser", "笔尾橡皮模式"),
     LASSO("lasso", "套索"),
+    NAVIGATION("navigation", "PDF 导航"),
     INSERT("insert", "插入"),
     UNDO("undo", "撤销"),
     REDO("redo", "重做"),

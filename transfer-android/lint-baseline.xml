@@ -1,0 +1,334 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<issues format="6" by="lint 9.3.1" type="baseline" client="gradle" dependencies="true" name="AGP (9.3.1)" variant="all" version="9.3.1">
+
+    <issue
+        id="MissingPermission"
+        message="Call requires permission which may be rejected by user: code should explicitly check to see if permission is available (with `checkPermission`) or explicitly handle a potential `SecurityException`"
+        errorLine1="            server?.sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, offset, value)"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/betterhv/transfer/android/BleSenderPeripheral.kt"
+            line="71"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingPermission"
+        message="Missing permissions required by BluetoothGattServer.sendResponse: android.permission.BLUETOOTH_CONNECT"
+        errorLine1="            server?.sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, offset, value)"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/betterhv/transfer/android/BleSenderPeripheral.kt"
+            line="71"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingPermission"
+        message="Call requires permission which may be rejected by user: code should explicitly check to see if permission is available (with `checkPermission`) or explicitly handle a potential `SecurityException`"
+        errorLine1="            if (responseNeeded) server?.sendResponse("
+        errorLine2="                                ^">
+        <location
+            file="src/main/java/com/betterhv/transfer/android/BleSenderPeripheral.kt"
+            line="91"
+            column="33"/>
+    </issue>
+
+    <issue
+        id="MissingPermission"
+        message="Missing permissions required by BluetoothGattServer.sendResponse: android.permission.BLUETOOTH_CONNECT"
+        errorLine1="            if (responseNeeded) server?.sendResponse("
+        errorLine2="                                ^">
+        <location
+            file="src/main/java/com/betterhv/transfer/android/BleSenderPeripheral.kt"
+            line="91"
+            column="33"/>
+    </issue>
+
+    <issue
+        id="MissingPermission"
+        message="Call requires permission which may be rejected by user: code should explicitly check to see if permission is available (with `checkPermission`) or explicitly handle a potential `SecurityException`"
+        errorLine1="            if (responseNeeded) server?.sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, offset, null)"
+        errorLine2="                                ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/betterhv/transfer/android/BleSenderPeripheral.kt"
+            line="108"
+            column="33"/>
+    </issue>
+
+    <issue
+        id="MissingPermission"
+        message="Missing permissions required by BluetoothGattServer.sendResponse: android.permission.BLUETOOTH_CONNECT"
+        errorLine1="            if (responseNeeded) server?.sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, offset, null)"
+        errorLine2="                                ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/betterhv/transfer/android/BleSenderPeripheral.kt"
+            line="108"
+            column="33"/>
+    </issue>
+
+    <issue
+        id="ApplySharedPref"
+        message="Consider using `apply()` instead; `commit` writes its data to persistent storage immediately, whereas `apply` will handle it in the background"
+        errorLine1="        context.getSharedPreferences(AndroidPairingController.PREFS, Context.MODE_PRIVATE).edit().clear().commit()"
+        errorLine2="                                                                                                          ~~~~~~~~">
+        <location
+            file="src/androidTest/java/com/betterhv/transfer/android/PairingMigrationInstrumentedTest.kt"
+            line="25"
+            column="107"/>
+    </issue>
+
+    <issue
+        id="ApplySharedPref"
+        message="Consider using `apply()` instead; `commit` writes its data to persistent storage immediately, whereas `apply` will handle it in the background"
+        errorLine1="            .commit()"
+        errorLine2="             ~~~~~~~~">
+        <location
+            file="src/androidTest/java/com/betterhv/transfer/android/PairingMigrationInstrumentedTest.kt"
+            line="38"
+            column="14"/>
+    </issue>
+
+    <issue
+        id="InlinedApi"
+        message="Field requires API level 29 (current min is 28): `android.net.wifi.p2p.WifiP2pConfig#GROUP_OWNER_BAND_AUTO`"
+        errorLine1="            .setGroupOperatingBand(WifiP2pConfig.GROUP_OWNER_BAND_AUTO)"
+        errorLine2="                                   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/betterhv/transfer/android/WifiDirectController.kt"
+            line="302"
+            column="36"/>
+    </issue>
+
+    <issue
+        id="NewApi"
+        message="Call requires API level 29 (current min is 28): `android.net.NetworkCapabilities#getTransportInfo`"
+        errorLine1="        val capabilitySsid = (capabilities.transportInfo as? WifiInfo)?.ssid"
+        errorLine2="                                           ~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/betterhv/transfer/android/AndroidNetworkInfoProvider.kt"
+            line="36"
+            column="44"/>
+    </issue>
+
+    <issue
+        id="NewApi"
+        message="Cast from `TransportInfo` to `WifiInfo` requires API level 29 (current min is 28)"
+        errorLine1="        val capabilitySsid = (capabilities.transportInfo as? WifiInfo)?.ssid"
+        errorLine2="                              ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/betterhv/transfer/android/AndroidNetworkInfoProvider.kt"
+            line="36"
+            column="31"/>
+    </issue>
+
+    <issue
+        id="NewApi"
+        message="Call requires API level 30 (current min is 28): `android.net.wifi.p2p.WifiP2pGroup#getNetworkId`"
+        errorLine1="        activeNetworkId = group?.networkId?.takeIf { it >= 0 }"
+        errorLine2="                                 ~~~~~~~~~">
+        <location
+            file="src/main/java/com/betterhv/transfer/android/WifiDirectController.kt"
+            line="93"
+            column="34"/>
+    </issue>
+
+    <issue
+        id="NewApi"
+        message="Call requires API level 29 (current min is 28): `android.net.wifi.p2p.WifiP2pConfig.Builder()`"
+        errorLine1="        return WifiP2pConfig.Builder()"
+        errorLine2="                             ~~~~~~~">
+        <location
+            file="src/main/java/com/betterhv/transfer/android/WifiDirectController.kt"
+            line="299"
+            column="30"/>
+    </issue>
+
+    <issue
+        id="NewApi"
+        message="Call requires API level 29 (current min is 28): `android.net.wifi.p2p.WifiP2pConfig.Builder#setNetworkName`"
+        errorLine1="            .setNetworkName(&quot;DIRECT-BH-BetterHv-${random.take(6)}&quot;)"
+        errorLine2="             ~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/betterhv/transfer/android/WifiDirectController.kt"
+            line="300"
+            column="14"/>
+    </issue>
+
+    <issue
+        id="NewApi"
+        message="Call requires API level 29 (current min is 28): `android.net.wifi.p2p.WifiP2pConfig.Builder#setPassphrase`"
+        errorLine1="            .setPassphrase(&quot;BetterHv-$random&quot;)"
+        errorLine2="             ~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/betterhv/transfer/android/WifiDirectController.kt"
+            line="301"
+            column="14"/>
+    </issue>
+
+    <issue
+        id="NewApi"
+        message="Call requires API level 29 (current min is 28): `android.net.wifi.p2p.WifiP2pConfig.Builder#setGroupOperatingBand`"
+        errorLine1="            .setGroupOperatingBand(WifiP2pConfig.GROUP_OWNER_BAND_AUTO)"
+        errorLine2="             ~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/betterhv/transfer/android/WifiDirectController.kt"
+            line="302"
+            column="14"/>
+    </issue>
+
+    <issue
+        id="NewApi"
+        message="Call requires API level 29 (current min is 28): `android.net.wifi.p2p.WifiP2pConfig.Builder#enablePersistentMode`"
+        errorLine1="            .enablePersistentMode(false)"
+        errorLine2="             ~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/betterhv/transfer/android/WifiDirectController.kt"
+            line="303"
+            column="14"/>
+    </issue>
+
+    <issue
+        id="NewApi"
+        message="Call requires API level 29 (current min is 28): `android.net.wifi.p2p.WifiP2pConfig.Builder#build`"
+        errorLine1="            .build()"
+        errorLine2="             ~~~~~">
+        <location
+            file="src/main/java/com/betterhv/transfer/android/WifiDirectController.kt"
+            line="304"
+            column="14"/>
+    </issue>
+
+    <issue
+        id="WrongConstant"
+        message="Must be one of: BluetoothStatusCodes.SUCCESS, BluetoothStatusCodes.ERROR_MISSING_BLUETOOTH_CONNECT_PERMISSION, BluetoothStatusCodes.ERROR_PROFILE_SERVICE_NOT_BOUND, BluetoothStatusCodes.ERROR_GATT_WRITE_NOT_ALLOWED, BluetoothStatusCodes.ERROR_GATT_WRITE_REQUEST_BUSY, BluetoothStatusCodes.ERROR_UNKNOWN"
+        errorLine1="                gatt?.writeCharacteristic(characteristic, frame, BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT) == BluetoothGatt.GATT_SUCCESS"
+        errorLine2="                                                                                                                    ~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/betterhv/transfer/android/BleGattSession.kt"
+            line="217"
+            column="117"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of androidx.core:core-ktx than 1.13.1 is available: 1.19.0"
+        errorLine1="    implementation(&quot;androidx.core:core-ktx:1.13.1&quot;)"
+        errorLine2="                   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="build.gradle.kts"
+            line="28"
+            column="20"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of androidx.test:core than 1.6.1 is available: 1.7.0"
+        errorLine1="    androidTestImplementation(&quot;androidx.test:core:1.6.1&quot;)"
+        errorLine2="                              ~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="build.gradle.kts"
+            line="31"
+            column="31"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of androidx.test:runner than 1.6.2 is available: 1.7.0"
+        errorLine1="    androidTestImplementation(&quot;androidx.test:runner:1.6.2&quot;)"
+        errorLine2="                              ~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="build.gradle.kts"
+            line="32"
+            column="31"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of androidx.test.ext:junit than 1.2.1 is available: 1.3.0"
+        errorLine1="    androidTestImplementation(&quot;androidx.test.ext:junit:1.2.1&quot;)"
+        errorLine2="                              ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="build.gradle.kts"
+            line="33"
+            column="31"/>
+    </issue>
+
+    <issue
+        id="NewerVersionAvailable"
+        message="A newer version of org.jetbrains.kotlinx:kotlinx-coroutines-android than 1.9.0 is available: 1.11.0"
+        errorLine1="    implementation(&quot;org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0&quot;)"
+        errorLine2="                   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="build.gradle.kts"
+            line="29"
+            column="20"/>
+    </issue>
+
+    <issue
+        id="ObsoleteSdkInt"
+        message="Unnecessary; `SDK_INT` is always >= 28"
+        errorLine1="        gatt = if (Build.VERSION.SDK_INT >= 26) device.connectGatt(context, false, callback, BluetoothDevice.TRANSPORT_LE)"
+        errorLine2="                   ~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/betterhv/transfer/android/BleGattSession.kt"
+            line="160"
+            column="20"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `SQLiteDatabase.transaction` instead?"
+        errorLine1="        writable.beginTransaction()"
+        errorLine2="        ~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/betterhv/transfer/android/AndroidPairingController.kt"
+            line="155"
+            column="9"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `SharedPreferences.edit` instead?"
+        errorLine1="        prefs.edit()"
+        errorLine2="        ~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/betterhv/transfer/android/AndroidPairingController.kt"
+            line="207"
+            column="9"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `SharedPreferences.edit` instead?"
+        errorLine1="        ?: UUID.randomUUID().toString().also { prefs.edit().putString(KEY_LOCAL_ID, it).apply() }"
+        errorLine2="                                               ~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/betterhv/transfer/android/AndroidPairingController.kt"
+            line="217"
+            column="48"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `SharedPreferences.edit` instead?"
+        errorLine1="        context.getSharedPreferences(AndroidPairingController.PREFS, Context.MODE_PRIVATE).edit().clear().commit()"
+        errorLine2="        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/androidTest/java/com/betterhv/transfer/android/PairingMigrationInstrumentedTest.kt"
+            line="25"
+            column="9"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `SharedPreferences.edit` instead?"
+        errorLine1="        context.getSharedPreferences(AndroidPairingController.PREFS, Context.MODE_PRIVATE).edit()"
+        errorLine2="        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/androidTest/java/com/betterhv/transfer/android/PairingMigrationInstrumentedTest.kt"
+            line="32"
+            column="9"/>
+    </issue>
+
+</issues>

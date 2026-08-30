@@ -41,6 +41,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.betterhv.note.storage.StartupBehavior
@@ -60,51 +61,98 @@ private enum class SettingsTab(val label: String) {
     NOTELINK("NoteLink")
 }
 
+data class SettingsState(
+    val debugMode: Boolean,
+    val startupBehavior: StartupBehavior,
+    val pairedClients: List<PairedDevice>,
+    val onlineClients: List<PhoneTransferClient.AvailableNoteLink>,
+    val pairingCandidates: List<PhoneTransferClient.PairingCandidate>,
+    val pairingScanActive: Boolean,
+    val pairingInProgress: Boolean,
+    val transferStatus: String,
+    val transferSnapshot: TransferSnapshot,
+    val transferEvents: List<TransferLogEntry>,
+    val transferEndpointName: String?,
+    val transferPermissionsGranted: Boolean,
+    val skipSourceSelectionWhenQueueAvailable: Boolean,
+    val autoCreatePageOnNextAtEnd: Boolean,
+    val showRecentTransferEvents: Boolean,
+    val visibleToolbarItems: Set<ToolbarItem>,
+    val shortcutBindings: HardwareShortcutBindings,
+    val shortcutBindingRequest: Pair<ShortcutScene, HardwareKeyId>?,
+)
+
+data class SettingsActions(
+    val onDebugModeChange: (Boolean) -> Unit,
+    val onStartupBehaviorChange: (StartupBehavior) -> Unit,
+    val onSkipSourceSelectionChange: (Boolean) -> Unit,
+    val onAutoCreatePageOnNextAtEndChange: (Boolean) -> Unit,
+    val onShowRecentTransferEventsChange: (Boolean) -> Unit,
+    val onToolbarItemVisibilityChange: (ToolbarItem, Boolean) -> Unit,
+    val onResetToolbarItems: () -> Unit,
+    val onStartShortcutCapture: (ShortcutScene) -> Unit,
+    val onShortcutBindingRequestConsumed: () -> Unit,
+    val onShortcutBind: (ShortcutScene, HardwareKeyId, ShortcutAction?) -> Unit,
+    val onShortcutSceneClear: (ShortcutScene) -> Unit,
+    val onScanClients: () -> Unit,
+    val onPairClient: (PhoneTransferClient.PairingCandidate, String) -> Unit,
+    val onRenameClient: (String, String) -> Unit,
+    val onUnpairClient: (String) -> Unit,
+    val onTransferPermissions: () -> Unit,
+    val onRefreshTransferStatus: () -> Unit,
+    val onCancelTransfer: () -> Unit,
+    val onClose: () -> Unit,
+)
+
 @Composable
 fun SettingsScreen(
-    debugMode: Boolean,
-    startupBehavior: StartupBehavior,
-    pairedClients: List<PairedDevice>,
-    onlineClients: List<PhoneTransferClient.AvailableNoteLink>,
-    pairingCandidates: List<PhoneTransferClient.PairingCandidate>,
-    pairingScanActive: Boolean,
-    pairingInProgress: Boolean,
-    transferStatus: String,
-    transferSnapshot: TransferSnapshot,
-    transferEvents: List<TransferLogEntry>,
-    transferEndpointName: String?,
-    transferPermissionsGranted: Boolean,
-    skipSourceSelectionWhenQueueAvailable: Boolean,
-    autoCreatePageOnNextAtEnd: Boolean,
-    showRecentTransferEvents: Boolean,
-    visibleToolbarItems: Set<ToolbarItem>,
-    shortcutBindings: HardwareShortcutBindings,
-    shortcutBindingRequest: Pair<ShortcutScene, HardwareKeyId>?,
-    onDebugModeChange: (Boolean) -> Unit,
-    onStartupBehaviorChange: (StartupBehavior) -> Unit,
-    onSkipSourceSelectionChange: (Boolean) -> Unit,
-    onAutoCreatePageOnNextAtEndChange: (Boolean) -> Unit,
-    onShowRecentTransferEventsChange: (Boolean) -> Unit,
-    onToolbarItemVisibilityChange: (ToolbarItem, Boolean) -> Unit,
-    onResetToolbarItems: () -> Unit,
-    onStartShortcutCapture: (ShortcutScene) -> Unit,
-    onShortcutBindingRequestConsumed: () -> Unit,
-    onShortcutBind: (ShortcutScene, HardwareKeyId, ShortcutAction?) -> Unit,
-    onShortcutSceneClear: (ShortcutScene) -> Unit,
-    onScanClients: () -> Unit,
-    onPairClient: (PhoneTransferClient.PairingCandidate, String) -> Unit,
-    onRenameClient: (String, String) -> Unit,
-    onUnpairClient: (String) -> Unit,
-    onTransferPermissions: () -> Unit,
-    onRefreshTransferStatus: () -> Unit,
-    onCancelTransfer: () -> Unit,
-    onClose: () -> Unit
+    state: SettingsState,
+    actions: SettingsActions,
 ) {
+    val debugMode = state.debugMode
+    val startupBehavior = state.startupBehavior
+    val pairedClients = state.pairedClients
+    val onlineClients = state.onlineClients
+    val pairingCandidates = state.pairingCandidates
+    val pairingScanActive = state.pairingScanActive
+    val pairingInProgress = state.pairingInProgress
+    val transferStatus = state.transferStatus
+    val transferSnapshot = state.transferSnapshot
+    val transferEvents = state.transferEvents
+    val transferEndpointName = state.transferEndpointName
+    val transferPermissionsGranted = state.transferPermissionsGranted
+    val skipSourceSelectionWhenQueueAvailable = state.skipSourceSelectionWhenQueueAvailable
+    val autoCreatePageOnNextAtEnd = state.autoCreatePageOnNextAtEnd
+    val showRecentTransferEvents = state.showRecentTransferEvents
+    val visibleToolbarItems = state.visibleToolbarItems
+    val shortcutBindings = state.shortcutBindings
+    val shortcutBindingRequest = state.shortcutBindingRequest
+    val onDebugModeChange = actions.onDebugModeChange
+    val onStartupBehaviorChange = actions.onStartupBehaviorChange
+    val onSkipSourceSelectionChange = actions.onSkipSourceSelectionChange
+    val onAutoCreatePageOnNextAtEndChange = actions.onAutoCreatePageOnNextAtEndChange
+    val onShowRecentTransferEventsChange = actions.onShowRecentTransferEventsChange
+    val onToolbarItemVisibilityChange = actions.onToolbarItemVisibilityChange
+    val onResetToolbarItems = actions.onResetToolbarItems
+    val onStartShortcutCapture = actions.onStartShortcutCapture
+    val onShortcutBindingRequestConsumed = actions.onShortcutBindingRequestConsumed
+    val onShortcutBind = actions.onShortcutBind
+    val onShortcutSceneClear = actions.onShortcutSceneClear
+    val onScanClients = actions.onScanClients
+    val onPairClient = actions.onPairClient
+    val onRenameClient = actions.onRenameClient
+    val onUnpairClient = actions.onUnpairClient
+    val onTransferPermissions = actions.onTransferPermissions
+    val onRefreshTransferStatus = actions.onRefreshTransferStatus
+    val onCancelTransfer = actions.onCancelTransfer
+    val onClose = actions.onClose
     var pairingCode by remember { mutableStateOf("") }
     var selectedCandidateId by remember { mutableStateOf<String?>(null) }
     var renameTarget by remember { mutableStateOf<PairedDevice?>(null) }
     var shortcutScene by remember { mutableStateOf(ShortcutScene.EDITOR) }
     var shortcutKey by remember { mutableStateOf<HardwareKeyId?>(null) }
+    var showOpenSourceLicenses by remember { mutableStateOf(false) }
+    val uriHandler = LocalUriHandler.current
     var selectedTab by rememberSaveable { mutableStateOf(SettingsTab.GENERAL) }
     val selectedCandidate = pairingCandidates.firstOrNull { it.deviceId == selectedCandidateId }
     LaunchedEffect(shortcutBindingRequest) {
@@ -174,6 +222,9 @@ fun SettingsScreen(
                             DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.MEDIUM)
                                 .format(Date(BuildConfig.BUILD_TIME_EPOCH_MILLIS))
                         )
+                        SettingRow("开源许可", onClick = { showOpenSourceLicenses = true }) {
+                            Text("AGPL-3.0-or-later", color = Color.DarkGray)
+                        }
                     }
 
                     SettingsTab.TOOLBAR -> Column(
@@ -264,7 +315,7 @@ fun SettingsScreen(
                                     Text(client.name, fontSize = 18.sp)
                                     Text(if (client.legacy) "旧配对，连接后自动识别" else client.id, fontSize = 12.sp, color = Color.DarkGray)
                                     Text(
-                                        if (online == null) "离线" else "在线 · ${online.imageCount} 张图片 · ${online.textCount} 段文字",
+                                        if (online == null) "离线" else "在线 · ${online.imageCount} 张图片 · ${online.textCount} 段文字 · ${online.pdfCount} 份 PDF",
                                         fontSize = 12.sp,
                                         color = if (online == null) Color.DarkGray else Color(0xFF246B3A)
                                     )
@@ -367,6 +418,41 @@ fun SettingsScreen(
             },
             confirmButton = {
                 TextButton(onClick = { shortcutKey = null }) { Text("取消") }
+            }
+        )
+    }
+
+    if (showOpenSourceLicenses) {
+        AlertDialog(
+            onDismissRequest = { showOpenSourceLicenses = false },
+            title = { Text("开源许可") },
+            text = {
+                Column(Modifier.heightIn(max = 460.dp).verticalScroll(rememberScrollState())) {
+                    Text("BetterHvNote · AGPL-3.0-or-later", fontSize = 18.sp)
+                    Text(
+                        "PDF Ink annotation 导出使用 MuPDF fitz 1.28.0，" +
+                            "Copyright Artifex Software, Inc.，按 GNU AGPL v3 或更高版本授权。",
+                        modifier = Modifier.padding(top = 12.dp)
+                    )
+                    Text(
+                        "对应源代码：\nhttps://github.com/zentialEdwardSu/betterhvnote\n\n" +
+                            "完整许可：\nhttps://www.gnu.org/licenses/agpl-3.0.txt",
+                        color = Color.DarkGray,
+                        modifier = Modifier.padding(top = 12.dp)
+                    )
+                    Text(
+                        "汉王 ROM 接口由设备平台提供，声明仅用于编译，不随应用分发。",
+                        modifier = Modifier.padding(top = 12.dp)
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showOpenSourceLicenses = false }) { Text("关闭") }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    uriHandler.openUri("https://github.com/zentialEdwardSu/betterhvnote")
+                }) { Text("查看源代码") }
             }
         )
     }

@@ -4,6 +4,7 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.betterhv.note.storage.NotebookRepository
+import com.betterhv.note.template.TemplateStore
 import java.io.File
 import java.util.UUID
 import kotlinx.coroutines.Dispatchers
@@ -28,7 +29,7 @@ class ExportViewModel(application: Application) : AndroidViewModel(application) 
     private val engine = ExportEngine(
         notebookRepository,
         taskRepository,
-        PageRenderer(File(application.filesDir, "documents")),
+        PageRenderer(File(application.filesDir, "documents"), TemplateStore.get(application)),
         File(application.filesDir, "exports")
     )
     private val downloads = ExportDownloads(application)

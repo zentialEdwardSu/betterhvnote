@@ -34,7 +34,7 @@ There is no CI config in this repo; `./gradlew test` and `./gradlew assembleDebu
 - `:app` — the application module (`com.betterhv.note`), namespace/applicationId `com.betterhv.note`, `minSdk 28`/`targetSdk 34`, `arm64-v8a` only.
 - `:framework-stubs` — a `java-library` module providing **compile-only** stubs for the ROM's custom framework classes (`android.os.HvPenDrawManager`, `android.os.HvPenDrawListener`). These exist purely so the app compiles; the real implementations are baked into the device ROM's `framework.jar` and are never packaged into the APK (see `compileOnly(project(":framework-stubs"))` in `app/build.gradle.kts`). Method bodies in the stubs just `throw new RuntimeException("stub")` — they are never actually invoked, only linked against.
 - `:phone-app` — the Android NoteLink sender/receiver application. Its `src/commonMain` tree is also consumed by the desktop build.
-- `:phone-desktop` — the Compose Desktop NoteLink build wrapper. Desktop implementation and resources live in `phone-app/src/desktopMain`; this module owns desktop dependencies, SQLDelight generation, and packaging.
+- `:phone-desktop` — the Compose Desktop NoteLink application. Desktop implementation, tests, resources, and packaging live under this module; shared UI remains in `phone-app/src/commonMain`.
 - `:transfer-core` — platform-neutral transfer protocol, cryptography, observability, and shared file-transfer orchestration.
 - `:transfer-android` — Android BLE, LAN, and Wi-Fi Direct discovery/session integration used by the tablet and phone apps.
 - `:transfer-windows` — Windows Kotlin/JNA transport plus the native Wi-Fi Direct and firewall helpers used by desktop NoteLink.
@@ -106,7 +106,7 @@ The export functionality (Phase 7) follows the architecture principle: **strokes
 **Key components:**
 - `ExportTaskRepository` stores reusable single-page, fixed-selection, and all-page tasks in the notebook SQLite database.
 - `PageRenderer` uses one Android Canvas path for 2x PNG and vector PDF output, including multiline text, object transforms, and image EXIF orientation.
-- `ExportEngine` caches one PDF per `pageId + contentRevision + rendererVersion`; multi-page output re-renders only stale pages and combines the cached pages with the Android-specific iTextG port.
+- `ExportEngine` caches one PDF per `pageId + contentRevision + rendererVersion`; multi-page output re-renders only stale pages and combines the cached pages with MuPDF page grafting.
 - `ExportViewModel` owns the active job, progress/cancellation, Downloads destination, and task list state.
 - `ExportManagerScreen` is the full-screen, cross-notebook task manager opened from both the toolbar and notebook cards.
 
@@ -120,11 +120,12 @@ The export functionality (Phase 7) follows the architecture principle: **strokes
 
 **NoteLink integration:**
 - BLE capability negotiation and push commands extend the existing protocol without renumbering Phone→Note commands.
-- NoteLink remains discoverable after pairing, receives PDF/PNG over the encrypted v2 file channel (LAN first, Android Wi-Fi Direct fallback), and keeps a persistent inbox.
+- NoteLink remains discoverable after pairing, uses the v3 control protocol and encrypted file channel for PDF/PNG (LAN first, Android Wi-Fi Direct fallback), and keeps a persistent inbox.
 - Artifact IDs make retry idempotent; the receiver validates declared length and SHA-256 before committing a file.
 
 **Known limitations:**
-- PDF ink annotations (editability in PDF viewers) deferred to future phase
+- Imported PDF annotations are preserved and displayed read-only; editing those source annotations is not supported.
+- Imported encrypted PDFs and PDF reflow are not supported.
 - Large notebooks (>100 pages) not stress-tested
 - Memory: renders one page at a time, recycles bitmaps immediately
 

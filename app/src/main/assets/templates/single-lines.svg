@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg"
+     version="1.1"
+     width="1860"
+     height="2414"
+     viewBox="0 0 1860 2414"
+     preserveAspectRatio="xMidYMid meet">
+  <title>Single lines</title>
+  <desc>White notebook page with evenly spaced light gray horizontal rules.</desc>
+  <rect x="0" y="0" width="1860" height="2414" fill="#ffffff"/>
+  <path d="M 0 96 H 1860 M 0 192 H 1860 M 0 288 H 1860 M 0 384 H 1860 M 0 480 H 1860 M 0 576 H 1860 M 0 672 H 1860 M 0 768 H 1860 M 0 864 H 1860 M 0 960 H 1860 M 0 1056 H 1860 M 0 1152 H 1860 M 0 1248 H 1860 M 0 1344 H 1860 M 0 1440 H 1860 M 0 1536 H 1860 M 0 1632 H 1860 M 0 1728 H 1860 M 0 1824 H 1860 M 0 1920 H 1860 M 0 2016 H 1860 M 0 2112 H 1860 M 0 2208 H 1860 M 0 2304 H 1860 M 0 2400 H 1860" fill="none" stroke="#bdbdbd" stroke-width="1.5"/>
+</svg>

@@ -4,7 +4,7 @@ import android.database.sqlite.SQLiteDatabase
 
 /** Explicit schema migrations; every semantic schema change increments VERSION. */
 object MigrationManager {
-    const val VERSION = 5
+    const val VERSION = 7
 
     fun create(db: SQLiteDatabase) {
         db.execSQL("CREATE TABLE metadata(key TEXT PRIMARY KEY, value TEXT NOT NULL)")
@@ -12,6 +12,7 @@ object MigrationManager {
             """CREATE TABLE notebooks(
                 id TEXT PRIMARY KEY,
                 title TEXT NOT NULL,
+                kind TEXT NOT NULL DEFAULT 'STANDARD',
                 created_at INTEGER NOT NULL,
                 updated_at INTEGER NOT NULL
             )""".trimIndent()
@@ -24,6 +25,20 @@ object MigrationManager {
                 height REAL NOT NULL,
                 bookmarked INTEGER NOT NULL DEFAULT 0,
                 content_revision INTEGER NOT NULL DEFAULT 0,
+                kind TEXT NOT NULL DEFAULT 'BLANK',
+                parent_pdf_page_id TEXT REFERENCES pages(id) ON DELETE CASCADE,
+                pdf_page_index INTEGER,
+                pdf_bound_left REAL,
+                pdf_bound_top REAL,
+                pdf_bound_right REAL,
+                pdf_bound_bottom REAL,
+                pdf_a REAL,
+                pdf_b REAL,
+                pdf_c REAL,
+                pdf_d REAL,
+                pdf_tx REAL,
+                pdf_ty REAL,
+                template_id TEXT,
                 created_at INTEGER NOT NULL,
                 updated_at INTEGER NOT NULL
             )""".trimIndent()
@@ -64,6 +79,7 @@ object MigrationManager {
             )""".trimIndent()
         )
         createRichObjectTables(db)
+        createPdfTables(db)
         createTransferReceiptTable(db)
         createExportTables(db)
         db.execSQL(
@@ -102,6 +118,29 @@ object MigrationManager {
         if (version == 4) {
             createExportTables(db)
             version = 5
+        }
+        if (version == 5) {
+            db.execSQL("ALTER TABLE notebooks ADD COLUMN kind TEXT NOT NULL DEFAULT 'STANDARD'")
+            db.execSQL("ALTER TABLE pages ADD COLUMN kind TEXT NOT NULL DEFAULT 'BLANK'")
+            db.execSQL("ALTER TABLE pages ADD COLUMN parent_pdf_page_id TEXT REFERENCES pages(id) ON DELETE CASCADE")
+            db.execSQL("ALTER TABLE pages ADD COLUMN pdf_page_index INTEGER")
+            db.execSQL("ALTER TABLE pages ADD COLUMN pdf_bound_left REAL")
+            db.execSQL("ALTER TABLE pages ADD COLUMN pdf_bound_top REAL")
+            db.execSQL("ALTER TABLE pages ADD COLUMN pdf_bound_right REAL")
+            db.execSQL("ALTER TABLE pages ADD COLUMN pdf_bound_bottom REAL")
+            db.execSQL("ALTER TABLE pages ADD COLUMN pdf_a REAL")
+            db.execSQL("ALTER TABLE pages ADD COLUMN pdf_b REAL")
+            db.execSQL("ALTER TABLE pages ADD COLUMN pdf_c REAL")
+            db.execSQL("ALTER TABLE pages ADD COLUMN pdf_d REAL")
+            db.execSQL("ALTER TABLE pages ADD COLUMN pdf_tx REAL")
+            db.execSQL("ALTER TABLE pages ADD COLUMN pdf_ty REAL")
+            createPdfTables(db)
+            version = 6
+        }
+        if (version == 6) {
+            db.execSQL("ALTER TABLE pages ADD COLUMN template_id TEXT")
+            db.execSQL("UPDATE pages SET template_id='builtin.blank' WHERE kind!='PDF_SOURCE'")
+            version = 7
         }
         require(version == newVersion) { "Incomplete migration $oldVersion -> $newVersion (at $version)" }
         // Future migrations are appended here, never by mutating v1 semantics.
@@ -142,6 +181,40 @@ object MigrationManager {
                 PRIMARY KEY(source_device_id, item_id)
             )""".trimIndent()
         )
+    }
+
+    private fun createPdfTables(db: SQLiteDatabase) {
+        db.execSQL(
+            """CREATE TABLE IF NOT EXISTS pdf_documents(
+                notebook_id TEXT PRIMARY KEY REFERENCES notebooks(id) ON DELETE CASCADE,
+                asset_path TEXT NOT NULL UNIQUE,
+                display_name TEXT NOT NULL,
+                mime_type TEXT NOT NULL,
+                byte_length INTEGER NOT NULL,
+                sha256 TEXT NOT NULL,
+                page_count INTEGER NOT NULL,
+                created_at INTEGER NOT NULL
+            )""".trimIndent()
+        )
+        db.execSQL(
+            """CREATE TABLE IF NOT EXISTS pdf_anchors(
+                id TEXT PRIMARY KEY,
+                source_page_id TEXT NOT NULL REFERENCES pages(id) ON DELETE CASCADE,
+                note_page_id TEXT NOT NULL REFERENCES pages(id) ON DELETE CASCADE,
+                note_object_id TEXT NOT NULL UNIQUE REFERENCES objects(id) ON DELETE CASCADE,
+                kind TEXT NOT NULL,
+                normalized_left REAL NOT NULL,
+                normalized_top REAL NOT NULL,
+                normalized_right REAL NOT NULL,
+                normalized_bottom REAL NOT NULL,
+                selected_text TEXT,
+                ordinal INTEGER NOT NULL,
+                created_at INTEGER NOT NULL,
+                UNIQUE(source_page_id, ordinal)
+            )""".trimIndent()
+        )
+        db.execSQL("CREATE INDEX IF NOT EXISTS pdf_anchors_note_page ON pdf_anchors(note_page_id)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS pages_parent_pdf ON pages(parent_pdf_page_id)")
     }
 
     private fun createExportTables(db: SQLiteDatabase) {

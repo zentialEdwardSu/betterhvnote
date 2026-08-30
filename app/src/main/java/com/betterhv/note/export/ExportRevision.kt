@@ -11,7 +11,10 @@ object ExportRevision {
     ): String {
         val value = buildString {
             append(rendererVersion).append('|').append(format.name).append('|')
-            sources.forEach { append(it.id).append(':').append(it.contentRevision).append(';') }
+            sources.forEach {
+                append(it.id).append(':').append(it.contentRevision).append(':')
+                    .append(it.backgroundRevision).append(';')
+            }
         }
         return MessageDigest.getInstance("SHA-256").digest(value.encodeToByteArray())
             .joinToString("") { "%02x".format(it) }

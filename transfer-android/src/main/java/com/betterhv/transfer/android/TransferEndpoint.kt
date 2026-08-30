@@ -1,6 +1,7 @@
 package com.betterhv.transfer.android
 
 import com.betterhv.transfer.core.ContentKind
+import com.betterhv.transfer.core.ContentCounts
 import com.betterhv.transfer.core.PairedDevice
 import com.betterhv.transfer.core.QueueItem
 import com.betterhv.transfer.core.RemotePayload
@@ -28,7 +29,8 @@ data class DiscoveredSender(
     val deviceId: String,
     val name: String,
     val imageCount: Int,
-    val textCount: Int
+    val textCount: Int,
+    val pdfCount: Int = 0
 ) {
     /** Version-1 advertisements carry the first five SHA-256 bytes, not the full device ID. */
     val identityHash: String get() = deviceId
@@ -44,7 +46,7 @@ interface ReceivedLease : TransferLease {
 }
 
 interface SenderContentProvider {
-    fun counts(): Pair<Int, Int>
+    fun counts(): ContentCounts
     fun leaseNext(kind: ContentKind, destinationDeviceId: String): SenderLease?
     fun releaseExpired(now: Long = System.currentTimeMillis()): Int
 }
@@ -89,6 +91,7 @@ data class BleIdentity(
     val protocolVersion: Int,
     val imageCount: Int,
     val textCount: Int,
+    val pdfCount: Int,
     val deviceId: String,
     val deviceName: String
 )

@@ -4,12 +4,13 @@ data class NoteLinkAdvertisement(
     val protocolVersion: Int,
     val imageCount: Int,
     val textCount: Int,
+    val pdfCount: Int,
     val identityHash: ByteArray,
     val deviceName: String
 ) {
     override fun equals(other: Any?): Boolean = other is NoteLinkAdvertisement &&
         protocolVersion == other.protocolVersion && imageCount == other.imageCount &&
-        textCount == other.textCount && identityHash.contentEquals(other.identityHash) &&
+        textCount == other.textCount && pdfCount == other.pdfCount && identityHash.contentEquals(other.identityHash) &&
         deviceName == other.deviceName
 
     override fun hashCode(): Int = 31 * identityHash.contentHashCode() + deviceName.hashCode()
@@ -19,9 +20,15 @@ object NoteLinkAdvertisementCodec {
     const val MANUFACTURER_ID = 0x0B17
     const val IDENTITY_HASH_BYTES = 5
     const val MAX_NAME_BYTES = 16
-    private const val HEADER_BYTES = 3 + IDENTITY_HASH_BYTES
+    private const val HEADER_BYTES = 4 + IDENTITY_HASH_BYTES
 
-    fun encode(identityHash: ByteArray, deviceName: String, imageCount: Int, textCount: Int): ByteArray {
+    fun encode(
+        identityHash: ByteArray,
+        deviceName: String,
+        imageCount: Int,
+        textCount: Int,
+        pdfCount: Int = 0
+    ): ByteArray {
         require(identityHash.size >= IDENTITY_HASH_BYTES) { "NoteLink identity hash is too short" }
         val name = deviceName.encodeToByteArray().copyOf(MAX_NAME_BYTES)
         val nameLength = deviceName.encodeToByteArray().size.coerceAtMost(MAX_NAME_BYTES)
@@ -29,7 +36,8 @@ object NoteLinkAdvertisementCodec {
             output[0] = NoteLinkIdentityCodec.PROTOCOL_VERSION.toByte()
             output[1] = imageCount.coerceIn(0, 255).toByte()
             output[2] = textCount.coerceIn(0, 255).toByte()
-            identityHash.copyInto(output, 3, 0, IDENTITY_HASH_BYTES)
+            output[3] = pdfCount.coerceIn(0, 255).toByte()
+            identityHash.copyInto(output, 4, 0, IDENTITY_HASH_BYTES)
             name.copyInto(output, HEADER_BYTES, 0, nameLength)
         }
     }
@@ -44,7 +52,8 @@ object NoteLinkAdvertisementCodec {
             protocolVersion = version,
             imageCount = bytes[1].toInt() and 0xff,
             textCount = bytes[2].toInt() and 0xff,
-            identityHash = bytes.copyOfRange(3, HEADER_BYTES),
+            pdfCount = bytes[3].toInt() and 0xff,
+            identityHash = bytes.copyOfRange(4, HEADER_BYTES),
             deviceName = bytes.copyOfRange(HEADER_BYTES, bytes.size).decodeToString().trim().ifBlank { "NoteLink" }
         )
     }

@@ -12,6 +12,13 @@ class EditorInteractionTest {
         assertEquals(ToolbarItem.entries.size - 1, ToolbarItem.defaults.size)
     }
 
+    @Test fun legacyLinkedNoteToolbarItemMigratesToLasso() {
+        val decoded = decodeVisibleToolbarItems(setOf("pen_1", "linked_note"))
+        assertTrue(ToolbarItem.PEN_1 in decoded)
+        assertTrue(ToolbarItem.LASSO in decoded)
+        assertFalse(decoded.any { it.storageId == "linked_note" })
+    }
+
     @Test fun bindingsAreIndependentBySceneAndDefaultToEmpty() {
         var bindings = HardwareShortcutBindings()
         assertNull(bindings.action(ShortcutScene.EDITOR, HardwareKeyId.K1))

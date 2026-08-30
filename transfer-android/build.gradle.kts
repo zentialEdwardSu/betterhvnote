@@ -3,6 +3,7 @@ import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 plugins {
     id("com.android.library")
+    id("io.gitlab.arturbosch.detekt")
 }
 
 extensions.configure<LibraryExtension> {

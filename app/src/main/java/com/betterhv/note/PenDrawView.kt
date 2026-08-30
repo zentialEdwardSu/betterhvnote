@@ -4,6 +4,7 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Canvas
+import android.graphics.DashPathEffect
 import android.graphics.Matrix
 import android.graphics.Paint
 import android.graphics.RectF
@@ -21,7 +22,13 @@ import android.view.View
 import com.betterhv.note.doc.CommandStack
 import com.betterhv.note.doc.ImageObject
 import com.betterhv.note.doc.Notebook
+import com.betterhv.note.doc.NotebookKind
 import com.betterhv.note.doc.Page
+import com.betterhv.note.doc.PageKind
+import com.betterhv.note.doc.DEFAULT_TEMPLATE_ID
+import com.betterhv.note.doc.inheritedTemplateId
+import com.betterhv.note.doc.PdfAnchor
+import com.betterhv.note.doc.PdfAnchorKind
 import com.betterhv.note.doc.PageObject
 import com.betterhv.note.doc.SelectionSet
 import com.betterhv.note.doc.StrokeObject
@@ -34,6 +41,7 @@ import com.betterhv.note.doc.commands.DeletePageCommand
 import com.betterhv.note.doc.commands.DeleteObjectsCommand
 import com.betterhv.note.doc.commands.MovePageCommand
 import com.betterhv.note.doc.commands.SetPageBookmarkCommand
+import com.betterhv.note.doc.commands.SetPageTemplateCommand
 import com.betterhv.note.doc.commands.TransformObjectsCommand
 import com.betterhv.note.doc.commands.UpdateObjectCommand
 import com.betterhv.note.ink.Bounds
@@ -59,7 +67,13 @@ import com.betterhv.note.storage.PageSnapshot
 import com.betterhv.note.storage.ThumbnailManager
 import com.betterhv.note.storage.ThumbnailKey
 import com.betterhv.note.storage.TransferReceipt
+import com.betterhv.note.pdf.PdfAssetStore
+import com.betterhv.note.pdf.PdfImportCoordinator
+import com.betterhv.note.pdf.MuPdfEngine
+import com.betterhv.note.template.TemplateCatalogSnapshot
+import com.betterhv.note.template.TemplateStore
 import java.io.File
+import java.util.ArrayDeque
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
@@ -67,6 +81,7 @@ import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlin.math.atan2
+import kotlin.math.exp
 import kotlin.math.hypot
 
 /**
@@ -77,7 +92,21 @@ import kotlin.math.hypot
  * eraser's behavior is chosen by [EraserMode], toggled independently of the tip
  * tool.
  */
-enum class ToolKind { PEN, LASSO }
+enum class ToolKind { PEN, LASSO, NAVIGATION }
+
+enum class LinkedNoteContent { REGION_IMAGE, REGION_TEXT }
+
+data class LinkedNoteTarget(
+    val pageId: UUID,
+    val ordinal: Int
+)
+
+data class PdfRegionSelection(
+    val sourcePageId: UUID,
+    val normalizedBounds: Bounds,
+    val selectedObjectIds: List<UUID>,
+    val screenBounds: Bounds
+)
 
 /**
  * How the hardware tail eraser removes ink: [WHOLE_STROKE] deletes any stroke
@@ -133,12 +162,17 @@ class PenDrawView @JvmOverloads constructor(
     private var bitmapCanvas: Canvas? = null
     private var renderedPageId: UUID? = null
     private var renderedContentRevision: Long = Long.MIN_VALUE
+    private var renderedTemplateFingerprint: String = ""
 
     /** Authoritative multi-page document plus asynchronous persistence (spec §46-56). */
     @Volatile private var persistenceAvailable = true
     @Volatile private var persistenceError: String? = null
     private val repository = NotebookRepository(context.applicationContext)
     private val imageAssets = ImageAssetStore(context.applicationContext)
+    private val pdfAssets = PdfAssetStore(context.applicationContext)
+    private val pdfImport = PdfImportCoordinator(context.applicationContext, repository, pdfAssets)
+    private val pdfEngine = MuPdfEngine()
+    private val templateStore = TemplateStore.get(context.applicationContext)
     private var notebook: Notebook = try {
         repository.openOrCreate()
     } catch (t: Throwable) {
@@ -147,7 +181,9 @@ class PenDrawView @JvmOverloads constructor(
         EventLog.log(TAG, "ERROR opening notebook: ${t.javaClass.simpleName}: ${t.message}")
         Notebook().also { it.addPage(Page()) }
     }
-    private var page: Page = notebook.pageAt(0) ?: Page().also { notebook.addPage(it) }
+    private var page: Page = notebook.pageOrder.asSequence().mapNotNull(notebook::getPage).firstOrNull()
+        ?: notebook.pageOrder.firstOrNull()?.let(repository::loadPage)?.also { notebook.attachPage(it) }
+        ?: Page().also { notebook.addPage(it) }
     private val pageCache = PageCache(PAGE_CACHE_SIZE)
     private val notebookOperations = Executors.newSingleThreadExecutor { runnable ->
         Thread(runnable, "inknote-notebooks").apply { isDaemon = true }
@@ -171,9 +207,13 @@ class PenDrawView @JvmOverloads constructor(
         affectedPageIds.forEach { id ->
             command.currentPage(id)?.let(notebook::refreshPageMetadata)
         }
-        command.affectedObjects.keys.forEach { id ->
+        affectedPageIds.forEach { id ->
             command.currentPage(id)?.let { changed ->
-                thumbnails.invalidate(id, changed.contentRevision)
+                thumbnails.invalidate(
+                    id,
+                    changed.contentRevision,
+                    templateStore.visualFingerprint(changed.templateId)
+                )
             }
         }
         val change = DocumentChange.forCommand(notebook, command, action)
@@ -201,9 +241,60 @@ class PenDrawView @JvmOverloads constructor(
         val notebookId: UUID,
         val pageId: UUID,
         val contentRevision: Long,
+        val backgroundRevision: String,
         val width: Int,
-        val height: Int
+        val height: Int,
+        val viewportRevision: Int
     )
+
+    private val pdfViewportStates = ConcurrentHashMap<UUID, PdfViewportState>()
+    private data class DocumentLocation(
+        val notebookId: UUID,
+        val pageId: UUID,
+        val viewport: PdfViewportState?,
+        val focusedObjectId: UUID?,
+        val focusedAnchorId: UUID?
+    )
+    private val documentBackStack = ArrayDeque<DocumentLocation>()
+    private var visiblePdfAnchors: List<PdfAnchor> = emptyList()
+    private var visibleLinkedNoteAnchors: List<PdfAnchor> = emptyList()
+    private var highlightedAnchorId: UUID? = null
+    private val anchorFramePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = android.graphics.Color.BLACK
+        style = Paint.Style.STROKE
+        strokeWidth = 2f
+    }
+    private val anchorRegionPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = android.graphics.Color.BLACK
+        style = Paint.Style.STROKE
+        strokeWidth = 2f
+    }
+    private val anchorBadgeFillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = android.graphics.Color.WHITE
+        style = Paint.Style.FILL
+    }
+    private val linkIconPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = android.graphics.Color.BLACK
+        style = Paint.Style.STROKE
+        strokeCap = Paint.Cap.ROUND
+        strokeJoin = Paint.Join.ROUND
+    }
+    private enum class PdfNavigationGesture { NONE, PAN, ZOOM }
+    private var navigationGesture = PdfNavigationGesture.NONE
+    private var navigationStartX = 0f
+    private var navigationStartY = 0f
+    private var navigationCurrentX = 0f
+    private var navigationCurrentY = 0f
+    private var navigationDeltaX = 0f
+    private var navigationDeltaY = 0f
+    private var navigationStartState = PdfViewportState()
+    private var navigationPreviewState: PdfViewportState? = null
+    private val zoomSliderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = android.graphics.Color.BLACK
+        strokeWidth = 3f
+        style = Paint.Style.STROKE
+        textSize = 28f
+    }
 
     private val viewRenderContext = RenderContext()
     private val imageCache = object : android.util.LruCache<String, Bitmap>(IMAGE_CACHE_BYTES) {
@@ -250,6 +341,20 @@ class PenDrawView @JvmOverloads constructor(
     private var onDocChanged: (() -> Unit)? = null
     private var onNotice: ((String) -> Unit)? = null
     private var onTextEditRequested: ((TextObject) -> Unit)? = null
+    private var onPdfRegionSelected: ((PdfRegionSelection) -> Unit)? = null
+    private var pdfRegionStart: FloatArray? = null
+    private var pdfRegionEnd: FloatArray? = null
+    private data class PendingLinkedNotePlacement(
+        val sourceNotebookId: UUID,
+        val sourcePageId: UUID,
+        val notePageId: UUID,
+        val normalizedBounds: Bounds,
+        val content: LinkedNoteContent,
+        val selectedText: String?,
+        val preparedImage: ImportedImage?,
+        val createdNotePage: Boolean
+    )
+    private var pendingLinkedNotePlacement: PendingLinkedNotePlacement? = null
 
     /** Set by the toolbar to observe undo/redo availability and selection state. */
     fun setOnDocChanged(listener: (() -> Unit)?) {
@@ -279,7 +384,7 @@ class PenDrawView @JvmOverloads constructor(
     }
 
     fun placeImage(image: ImportedImage, centerX: Float, centerY: Float): ImageObject =
-        placeImageWithId(image, centerX, centerY, UUID.randomUUID())
+        screenToPage(centerX, centerY).let { placeImageWithId(image, it[0], it[1], UUID.randomUUID()) }
 
     private fun placeImageWithId(
         image: ImportedImage, centerX: Float, centerY: Float, objectId: UUID
@@ -329,7 +434,8 @@ class PenDrawView @JvmOverloads constructor(
         val objectId = UUID.randomUUID()
         pendingTransferReceipt = TransferReceipt(sourceDeviceId, itemId, objectId)
         pendingTransferPersisted = null
-        val placed = placeImageWithId(image, centerX, centerY, objectId)
+        val point = screenToPage(centerX, centerY)
+        val placed = placeImageWithId(image, point[0], point[1], objectId)
         if (pendingTransferPersisted != true) {
             commandStack.undo()
             imageAssets.resolve(placed.assetPath)?.delete()
@@ -344,7 +450,8 @@ class PenDrawView @JvmOverloads constructor(
     }
 
     fun placeText(text: String, x: Float, y: Float): TextObject {
-        return placeTextWithId(text, x, y, UUID.randomUUID())
+        val point = screenToPage(x, y)
+        return placeTextWithId(text, point[0], point[1], UUID.randomUUID())
     }
 
     fun placeTransferredText(
@@ -357,7 +464,8 @@ class PenDrawView @JvmOverloads constructor(
         val objectId = UUID.randomUUID()
         pendingTransferReceipt = TransferReceipt(sourceDeviceId, itemId, objectId)
         pendingTransferPersisted = null
-        val placed = placeTextWithId(text, x, y, objectId)
+        val point = screenToPage(x, y)
+        val placed = placeTextWithId(text, point[0], point[1], objectId)
         if (pendingTransferPersisted != true) {
             commandStack.undo()
             error("接收文字保存失败")
@@ -430,13 +538,31 @@ class PenDrawView @JvmOverloads constructor(
     /** Side1 direct-selects the topmost image/text object. */
     fun selectRichObjectAt(x: Float, y: Float): Boolean {
         materialize()
+        val point = screenToPage(x, y)
         val hit = page.scene.all().asReversed().firstOrNull { obj ->
-            (obj is ImageObject || obj is TextObject) && pointInsideObject(obj, x, y)
+            (obj is ImageObject || obj is TextObject) && pointInsideObject(obj, point[0], point[1])
         }
         selectedRichObjectId = hit?.id
         postInvalidate()
         onDocChanged?.invoke()
         return hit != null
+    }
+
+    fun activatePdfRegionEdit(selection: PdfRegionSelection): Boolean {
+        if (page.id != selection.sourcePageId || selection.selectedObjectIds.isEmpty()) return false
+        materialize()
+        val objects = selection.selectedObjectIds.mapNotNull(page::getObject)
+        if (objects.isEmpty()) return false
+        if (objects.size == 1 && (objects[0] is ImageObject || objects[0] is TextObject)) {
+            selectionTool.clearSelection()
+            selectedRichObjectId = objects[0].id
+        } else {
+            selectedRichObjectId = null
+            selectionTool.selectObjectIds(objects.map(PageObject::id))
+        }
+        postInvalidate()
+        onDocChanged?.invoke()
+        return true
     }
 
     fun requestSelectedTextEdit(): Boolean {
@@ -448,17 +574,21 @@ class PenDrawView @JvmOverloads constructor(
     /** Begins a move/scale/rotate gesture after an object was selected with Side1. */
     fun beginRichObjectGesture(x: Float, y: Float): Boolean {
         val obj = selectedRichObject() ?: return false
+        val pagePoint = screenToPage(x, y)
+        val pageX = pagePoint[0]
+        val pageY = pagePoint[1]
         val corners = objectCorners(obj)
-        val handle = corners.indexOfFirst { point -> distance(x, y, point[0], point[1]) <= HANDLE_TOUCH_RADIUS }
-        val rotate = obj is ImageObject && distanceTo(x, y, rotationHandle(obj)) <= HANDLE_TOUCH_RADIUS * 1.35f
+        val handleRadius = currentViewport().screenDistanceToPage(HANDLE_TOUCH_RADIUS)
+        val handle = corners.indexOfFirst { point -> distance(pageX, pageY, point[0], point[1]) <= handleRadius }
+        val rotate = obj is ImageObject && distanceTo(pageX, pageY, rotationHandle(obj)) <= handleRadius * 1.35f
         richGestureMode = when {
             rotate -> RichGestureMode.ROTATE
             (obj is ImageObject || obj is TextObject) && handle >= 0 -> RichGestureMode.SCALE
-            pointInsideObject(obj, x, y) -> RichGestureMode.MOVE
+            pointInsideObject(obj, pageX, pageY) -> RichGestureMode.MOVE
             else -> return false
         }
-        richGestureStartX = x
-        richGestureStartY = y
+        richGestureStartX = pageX
+        richGestureStartY = pageY
         richGestureBefore = obj.transform
         val center = objectCenter(obj)
         when (richGestureMode) {
@@ -467,13 +597,13 @@ class PenDrawView @JvmOverloads constructor(
                 richGestureAnchorX = opposite[0]
                 richGestureAnchorY = opposite[1]
                 richGestureStartValue = hypot(
-                    (x - richGestureAnchorX).toDouble(), (y - richGestureAnchorY).toDouble()
+                    (pageX - richGestureAnchorX).toDouble(), (pageY - richGestureAnchorY).toDouble()
                 ).toFloat().coerceAtLeast(1f)
             }
             RichGestureMode.ROTATE -> {
                 richGestureAnchorX = center[0]
                 richGestureAnchorY = center[1]
-                richGestureStartValue = atan2(y - center[1], x - center[0])
+                richGestureStartValue = atan2(pageY - center[1], pageX - center[0])
             }
             else -> Unit
         }
@@ -486,11 +616,14 @@ class PenDrawView @JvmOverloads constructor(
 
     fun updateRichObjectGesture(x: Float, y: Float) {
         val obj = selectedRichObject() ?: return
+        val pagePoint = screenToPage(x, y)
+        val pageX = pagePoint[0]
+        val pageY = pagePoint[1]
         val delta = when (richGestureMode) {
-            RichGestureMode.MOVE -> Transform2D.translate(x - richGestureStartX, y - richGestureStartY)
+            RichGestureMode.MOVE -> Transform2D.translate(pageX - richGestureStartX, pageY - richGestureStartY)
             RichGestureMode.SCALE -> {
                 val distance = hypot(
-                    (x - richGestureAnchorX).toDouble(), (y - richGestureAnchorY).toDouble()
+                    (pageX - richGestureAnchorX).toDouble(), (pageY - richGestureAnchorY).toDouble()
                 ).toFloat().coerceAtLeast(1f)
                 Transform2D.scaleAbout(
                     richGestureAnchorX, richGestureAnchorY,
@@ -499,7 +632,7 @@ class PenDrawView @JvmOverloads constructor(
             }
             RichGestureMode.ROTATE -> Transform2D.rotateAbout(
                 richGestureAnchorX, richGestureAnchorY,
-                atan2(y - richGestureAnchorY, x - richGestureAnchorX) - richGestureStartValue
+                atan2(pageY - richGestureAnchorY, pageX - richGestureAnchorX) - richGestureStartValue
             )
             RichGestureMode.NONE -> return
         }
@@ -555,7 +688,59 @@ class PenDrawView @JvmOverloads constructor(
         val dx = top[0] - center[0]
         val dy = top[1] - center[1]
         val length = hypot(dx.toDouble(), dy.toDouble()).toFloat().coerceAtLeast(1f)
-        return floatArrayOf(top[0] + dx / length * ROTATE_HANDLE_OFFSET, top[1] + dy / length * ROTATE_HANDLE_OFFSET)
+        val offset = currentViewport().screenDistanceToPage(ROTATE_HANDLE_OFFSET)
+        return floatArrayOf(top[0] + dx / length * offset, top[1] + dy / length * offset)
+    }
+
+    fun setOnPdfRegionSelected(listener: ((PdfRegionSelection) -> Unit)?) {
+        onPdfRegionSelected = listener
+    }
+
+    private fun currentViewport(): ViewportTransform =
+        viewportFor(page.id, page.width, page.height, width, height)
+
+    private fun refreshVisiblePdfAnchors() {
+        visiblePdfAnchors = if (persistenceAvailable && page.kind == PageKind.PDF_SOURCE) {
+            runCatching { repository.pdfAnchors(page.id) }.getOrDefault(emptyList())
+        } else {
+            emptyList()
+        }
+        visibleLinkedNoteAnchors = if (persistenceAvailable && page.kind == PageKind.LINKED_NOTE) {
+            runCatching { repository.pdfAnchorsForNotePage(page.id) }.getOrDefault(emptyList())
+        } else {
+            emptyList()
+        }
+    }
+
+    private fun anchorPageBounds(anchor: PdfAnchor): Bounds = Bounds(
+        anchor.normalizedBounds.left * page.width,
+        anchor.normalizedBounds.top * page.height,
+        anchor.normalizedBounds.right * page.width,
+        anchor.normalizedBounds.bottom * page.height
+    )
+
+    private fun viewportFor(
+        pageId: UUID,
+        pageWidth: Float,
+        pageHeight: Float,
+        viewWidth: Int,
+        viewHeight: Int
+    ): ViewportTransform {
+        val base = ViewportTransform.fit(pageWidth, pageHeight, viewWidth, viewHeight)
+        val state = pdfViewportStates[pageId] ?: return base
+        val scale = base.scale * state.zoom
+        return ViewportTransform(
+            scale,
+            (viewWidth - pageWidth * scale) / 2f + state.panX,
+            (viewHeight - pageHeight * scale) / 2f + state.panY
+        )
+    }
+
+    private fun screenToPage(x: Float, y: Float): FloatArray = currentViewport().screenToPage(x, y)
+
+    private fun screenPointToPage(point: InkPoint): InkPoint {
+        val mapped = screenToPage(point.x, point.y)
+        return point.copy(x = mapped[0], y = mapped[1])
     }
 
     private fun distance(x: Float, y: Float, px: Float, py: Float): Float =
@@ -581,9 +766,12 @@ class PenDrawView @JvmOverloads constructor(
 
     init {
         pageCache.put(page)
+        refreshVisiblePdfAnchors()
         if (persistenceAvailable) {
             runCatching { imageAssets.cleanupUnreferenced(repository.referencedImageAssets()) }
                 .onFailure { EventLog.log(TAG, "asset cleanup skipped: ${it.message}") }
+            runCatching { pdfAssets.cleanupUnreferenced(repository.referencedPdfAssets()) }
+                .onFailure { EventLog.log(TAG, "PDF asset cleanup skipped: ${it.message}") }
         }
     }
 
@@ -657,11 +845,13 @@ class PenDrawView @JvmOverloads constructor(
     override fun onSizeChanged(w: Int, h: Int, ow: Int, oh: Int) {
         super.onSizeChanged(w, h, ow, oh)
         if (w > 0 && h > 0) {
-            val oldRevision = page.contentRevision
-            page.updateSize(w.toFloat(), h.toFloat())
-            if (page.contentRevision != oldRevision) {
-                notebook.refreshPageMetadata(page)
-                thumbnails.invalidate(page.id, page.contentRevision)
+            if (page.kind != PageKind.PDF_SOURCE) {
+                val oldRevision = page.contentRevision
+                page.updateSize(w.toFloat(), h.toFloat())
+                if (page.contentRevision != oldRevision) {
+                    notebook.refreshPageMetadata(page)
+                    thumbnails.invalidate(page.id, page.contentRevision)
+                }
             }
             createBitmap(w, h)
             initPenDraw()
@@ -680,18 +870,20 @@ class PenDrawView @JvmOverloads constructor(
     fun notebookSummaries(): List<NotebookSummary> = repository.listNotebooks(notebook.id)
 
     fun notebookCoverThumbnail(summary: NotebookSummary): Bitmap? =
-        summary.cover?.let { thumbnails.get(it.id, it.contentRevision) }
+        summary.cover?.let { thumbnails.get(it.id, it.contentRevision, backgroundRevision(it)) }
 
     fun requestNotebookCovers(summaries: List<NotebookSummary>) {
-        summaries.mapNotNull(NotebookSummary::cover).forEach { metadata ->
-            val key = ThumbnailKey(metadata.id, metadata.contentRevision)
+        summaries.forEach { summary ->
+            val metadata = summary.cover ?: return@forEach
+            val key = ThumbnailKey(metadata.id, metadata.contentRevision, backgroundRevision(metadata))
             val loaded = notebook.getPage(metadata.id)
             if (loaded != null) {
-                thumbnails.request(PageSnapshot.capture(loaded)) { onDocChanged?.invoke() }
+                requestThumbnail(summary.id, PageSnapshot.capture(loaded))
             } else {
                 thumbnails.request(
                     key,
-                    snapshotProvider = { repository.loadPage(metadata.id)?.let(PageSnapshot::capture) }
+                    snapshotProvider = { repository.loadPage(metadata.id)?.let(PageSnapshot::capture) },
+                    backgroundProvider = pageThumbnailBackground(summary.id, metadata)
                 ) { onDocChanged?.invoke() }
             }
         }
@@ -712,10 +904,28 @@ class PenDrawView @JvmOverloads constructor(
         }
     }
 
-    fun createBlankNotebook(title: String, onComplete: (Result<UUID>) -> Unit) {
+    fun createBlankNotebook(
+        title: String,
+        templateId: String = DEFAULT_TEMPLATE_ID,
+        onComplete: (Result<UUID>) -> Unit
+    ) {
         runNotebookOperation(onComplete) {
-            val id = repository.createBlankNotebook(title, width.toFloat(), height.toFloat())
+            val id = repository.createBlankNotebook(title, width.toFloat(), height.toFloat(), templateId)
             repository.loadNotebook(id) ?: error("无法加载新笔记本")
+        }
+    }
+
+    fun importPdf(uri: Uri, onComplete: (Result<UUID>) -> Unit) {
+        runNotebookOperation(onComplete) {
+            val id = pdfImport.importLocalBlocking(uri)
+            repository.loadNotebook(id) ?: error("无法加载导入的 PDF")
+        }
+    }
+
+    fun importPdfFile(file: File, displayName: String, onComplete: (Result<UUID>) -> Unit) {
+        runNotebookOperation(onComplete) {
+            val id = pdfImport.importFileBlocking(file, displayName)
+            repository.loadNotebook(id) ?: error("无法加载导入的 PDF")
         }
     }
 
@@ -733,8 +943,10 @@ class PenDrawView @JvmOverloads constructor(
 
     fun deleteNotebook(id: UUID, onComplete: (Result<UUID>) -> Unit) {
         runNotebookOperation(onComplete) {
+            val pdf = repository.pdfDocument(id)
             val deletion = repository.deleteNotebook(id)
             deletion.deletedPageIds.forEach(thumbnails::delete)
+            pdf?.let { record -> pdfAssets.resolve(record.assetPath)?.delete() }
             repository.loadNotebook(deletion.activeNotebookId) ?: error("无法加载删除后的笔记本")
         }
     }
@@ -761,15 +973,22 @@ class PenDrawView @JvmOverloads constructor(
     }
 
     private fun installNotebook(target: Notebook) {
-        val first = target.pageAt(0) ?: error("笔记本没有页面")
+        val initialId = repository.lastOpenedPageId(target.id) ?: target.pageOrder.firstOrNull()
+            ?: error("笔记本没有页面")
+        val initial = target.getPage(initialId) ?: repository.loadPage(initialId)
+            ?: error("无法加载上次停留页面")
+        target.attachPage(initial)
+        val notebookChanged = notebook.id != target.id
         notebook = target
+        if (notebookChanged) documentBackStack.clear()
         pageCache.clear()
         pageBitmapCache.evictAll()
         pagePreRenderInFlight.clear()
         desiredWarmPageIds = emptySet()
         desiredWarmNotebookId = target.id
-        page = first
-        pageCache.put(first)
+        page = initial
+        refreshVisiblePdfAnchors()
+        pageCache.put(initial)
         commandStack.clear()
         if (width > 0 && height > 0 && (page.width <= 0f || page.height <= 0f)) {
             page.updateSize(width.toFloat(), height.toFloat())
@@ -778,7 +997,7 @@ class PenDrawView @JvmOverloads constructor(
             scheduleSave(DocumentChange.fullPage(notebook, page, "page:size"))
         }
         rebuildTools()
-        warmAdjacentPages(0)
+        warmAdjacentPages(target.pageOrder.indexOf(initialId).coerceAtLeast(0))
         redrawAll()
         clearOverlayInk()
         requestThumbnail(page)
@@ -795,11 +1014,51 @@ class PenDrawView @JvmOverloads constructor(
         }
     }
     fun pageThumbnail(id: UUID): Bitmap? = notebook.metadata(id)?.let { metadata ->
-        thumbnails.get(id, metadata.contentRevision)
+        thumbnails.get(id, metadata.contentRevision, backgroundRevision(metadata))
     }
     fun canDeletePage(): Boolean = notebook.pageOrder.size > 1
     fun persistenceWarning(): String? = persistenceError
     fun currentPageBookmarked(): Boolean = page.bookmarked
+    fun currentPageKind(): PageKind = page.kind
+    fun currentPageSize(): Pair<Float, Float> = page.width to page.height
+    fun currentPageTemplateId(): String? = page.templateId
+    fun templateCatalog(): TemplateCatalogSnapshot = templateStore.snapshot()
+
+    fun templatePreview(templateId: String, targetWidth: Int, targetHeight: Int): Bitmap? =
+        templateStore.resolve(templateId)?.let { definition ->
+            templateStore.renderer.renderOwned(definition, targetWidth, targetHeight)
+        }
+
+    fun refreshTemplates(force: Boolean = false): TemplateCatalogSnapshot {
+        val before = templateStore.snapshot().generation
+        val updated = templateStore.refresh()
+        if (force || updated.generation != before) {
+            pageBitmapCache.evictAll()
+            notebook.allPageMetadata().forEach { metadata ->
+                thumbnails.invalidate(metadata.id, metadata.contentRevision, backgroundRevision(metadata))
+            }
+            redrawAll()
+            requestThumbnail(page)
+            onDocChanged?.invoke()
+        }
+        return updated
+    }
+
+    fun setCurrentPageTemplate(templateId: String): Boolean {
+        if (page.kind == PageKind.PDF_SOURCE) return false
+        val definition = templateStore.resolve(templateId) ?: return false
+        if (!definition.isCompatible(page.width, page.height)) return false
+        if (page.templateId == templateId) return true
+        materialize()
+        commandStack.execute(SetPageTemplateCommand(page, templateId))
+        notebook.refreshPageMetadata(page)
+        thumbnails.invalidate(page.id, page.contentRevision, backgroundRevision(page.toMetadataForTemplate()))
+        pageBitmapCache.evictAll()
+        redrawAll()
+        requestThumbnail(page)
+        onDocChanged?.invoke()
+        return true
+    }
 
     private fun scheduleSave(change: DocumentChange) {
         if (persistenceAvailable) autosave.schedule(change)
@@ -817,10 +1076,146 @@ class PenDrawView @JvmOverloads constructor(
 
     fun switchToPage(id: UUID): Boolean = switchToPage(notebook.pageOrder.indexOf(id))
 
+    fun canNavigateDocumentBack(): Boolean = documentBackStack.isNotEmpty()
+
+    /** Claims an ordinary pen tap only when it starts on a visible Link icon. */
+    fun beginLinkedNavigationIconTap(screenX: Float, screenY: Float): Boolean {
+        if (!isLinkedNavigationIconHit(screenX, screenY)) return false
+        setRomPenInkEnabled(false)
+        return true
+    }
+
+    fun isLinkedNavigationIconHit(screenX: Float, screenY: Float): Boolean =
+        linkedAnchorAtIcon(screenX, screenY) != null
+
+    /** Completes the dedicated Link-icon gesture without sharing Side1 image editing. */
+    fun endLinkedNavigationIconTap(screenX: Float, screenY: Float, cancelled: Boolean): Boolean {
+        val navigated = !cancelled && navigateLinkedContentAt(screenX, screenY)
+        setRomPenInkEnabled(true)
+        return navigated
+    }
+
+    /** Link-icon activation for either a PDF region or its linked-note screenshot. */
+    fun navigateLinkedContentAt(screenX: Float, screenY: Float): Boolean {
+        materialize()
+        return when (page.kind) {
+            PageKind.PDF_SOURCE -> {
+                val anchor = linkedAnchorAtIcon(screenX, screenY) ?: return false
+                pushDocumentLocation(focusedAnchorId = anchor.id)
+                if (!switchToPage(anchor.notePageId)) {
+                    documentBackStack.pollLast()
+                    false
+                } else {
+                    selectedRichObjectId = null
+                    highlightedAnchorId = null
+                    postInvalidate()
+                    onDocChanged?.invoke()
+                    true
+                }
+            }
+            PageKind.LINKED_NOTE -> {
+                val anchor = linkedAnchorAtIcon(screenX, screenY) ?: return false
+                pushDocumentLocation(focusedObjectId = null, focusedAnchorId = null)
+                if (!switchToPage(anchor.sourcePageId)) {
+                    documentBackStack.pollLast()
+                    false
+                } else {
+                    highlightAnchor(anchor.id)
+                    onDocChanged?.invoke()
+                    true
+                }
+            }
+            PageKind.BLANK -> false
+        }
+    }
+
+    private fun linkedAnchorAtIcon(screenX: Float, screenY: Float): PdfAnchor? {
+        val density = resources.displayMetrics.density
+        val hitRadius = ANCHOR_HIT_RADIUS_DP * density
+        val viewport = currentViewport()
+        val radius = viewport.screenDistanceToPage(LINK_ICON_RADIUS_DP * density)
+        val candidates = when (page.kind) {
+            PageKind.PDF_SOURCE -> visiblePdfAnchors
+            PageKind.LINKED_NOTE -> visibleLinkedNoteAnchors
+            PageKind.BLANK -> return null
+        }
+        return candidates.asReversed().firstOrNull { candidate ->
+            val iconPage = when (page.kind) {
+                PageKind.PDF_SOURCE -> anchorBadgePoint(candidate, radius)
+                PageKind.LINKED_NOTE -> page.getObject(candidate.noteObjectId)?.let {
+                    linkedNoteBadgePoint(it, radius)
+                } ?: return@firstOrNull false
+                PageKind.BLANK -> return@firstOrNull false
+            }
+            val icon = viewport.pageToScreen(iconPage[0], iconPage[1])
+            distance(screenX, screenY, icon[0], icon[1]) <= hitRadius
+        }
+    }
+
+    fun navigateDocumentBack(): Boolean {
+        while (documentBackStack.isNotEmpty()) {
+            val location = documentBackStack.removeLast()
+            if (location.notebookId != notebook.id || location.pageId !in notebook.pageOrder) continue
+            if (!switchToPage(location.pageId)) continue
+            if (page.kind == PageKind.PDF_SOURCE && location.viewport != null) {
+                pdfViewportStates[page.id] = clampViewportState(
+                    location.viewport.copy(revision = location.viewport.revision + 1)
+                )
+                renderedPageId = null
+                redrawAll()
+            }
+            selectedRichObjectId = location.focusedObjectId?.takeIf { page.getObject(it) != null }
+            location.focusedAnchorId?.let(::highlightAnchor)
+            postInvalidate()
+            onDocChanged?.invoke()
+            return true
+        }
+        onDocChanged?.invoke()
+        return false
+    }
+
+    private fun pushDocumentLocation(
+        focusedObjectId: UUID? = selectedRichObjectId,
+        focusedAnchorId: UUID? = highlightedAnchorId
+    ) {
+        if (documentBackStack.size >= MAX_DOCUMENT_HISTORY) documentBackStack.removeFirst()
+        documentBackStack.addLast(
+            DocumentLocation(
+                notebookId = notebook.id,
+                pageId = page.id,
+                viewport = if (page.kind == PageKind.PDF_SOURCE) {
+                    pdfViewportStates[page.id] ?: PdfViewportState()
+                } else null,
+                focusedObjectId = focusedObjectId,
+                focusedAnchorId = focusedAnchorId
+            )
+        )
+        onDocChanged?.invoke()
+    }
+
+    private fun highlightAnchor(anchorId: UUID) {
+        highlightedAnchorId = anchorId
+        postInvalidate()
+        handler.postDelayed({
+            if (highlightedAnchorId == anchorId) {
+                highlightedAnchorId = null
+                postInvalidate()
+            }
+        }, ANCHOR_HIGHLIGHT_MS)
+    }
+
     fun navigatePage(delta: Int): Boolean {
-        val target = currentPageIndex() + delta
+        val current = currentPageIndex()
+        val target = if (notebook.kind == NotebookKind.PDF && !studyNavigation) {
+            generateSequence(current + delta) { it + delta }
+                .takeWhile { it in notebook.pageOrder.indices }
+                .firstOrNull { index -> notebook.metadata(notebook.pageOrder[index])?.kind != PageKind.LINKED_NOTE }
+                ?: if (delta > 0) notebook.pageOrder.size else -1
+        } else {
+            current + delta
+        }
         if (target !in notebook.pageOrder.indices) {
-            if (delta > 0 && autoCreatePageOnNextAtEnd) {
+            if (delta > 0 && autoCreatePageOnNextAtEnd && notebook.kind != NotebookKind.PDF) {
                 addPage()
                 return true
             }
@@ -831,6 +1226,15 @@ class PenDrawView @JvmOverloads constructor(
 
     /** Updated by the Compose settings surface and read by page-turn overlays. */
     var autoCreatePageOnNextAtEnd: Boolean = false
+    private var studyNavigation: Boolean = true
+
+    fun isStudyNavigation(): Boolean = studyNavigation
+
+    fun toggleStudyNavigation(): Boolean {
+        studyNavigation = !studyNavigation
+        onDocChanged?.invoke()
+        return studyNavigation
+    }
 
     fun addPage(): UUID = addPageAfter(page.id, activate = true)
 
@@ -845,7 +1249,23 @@ class PenDrawView @JvmOverloads constructor(
         val afterIndex = notebook.pageOrder.indexOf(afterPageId).takeIf { it >= 0 }
             ?: currentPageIndex()
         val insertAt = afterIndex + 1
-        val newPage = Page(width = width.toFloat(), height = height.toFloat())
+        val afterMetadata = notebook.metadata(notebook.pageOrder[afterIndex])
+        val parentPdfPageId = when (afterMetadata?.kind) {
+            PageKind.PDF_SOURCE -> afterMetadata.id
+            PageKind.LINKED_NOTE -> afterMetadata.parentPdfPageId
+            else -> null
+        }
+        val newTemplateId = inheritedTemplateId(afterMetadata)
+        val newPage = if (notebook.kind == NotebookKind.PDF) {
+            requireNotNull(parentPdfPageId) { "PDF 笔记本只能在源页后添加夹纸" }
+            Page(
+                width = width.toFloat(), height = height.toFloat(),
+                kind = PageKind.LINKED_NOTE, parentPdfPageId = parentPdfPageId,
+                templateId = newTemplateId
+            )
+        } else {
+            Page(width = width.toFloat(), height = height.toFloat(), templateId = newTemplateId)
+        }
         commandStack.execute(AddPageCommand(notebook, newPage, insertAt))
         pageCache.put(newPage)
         if (activate) {
@@ -861,6 +1281,10 @@ class PenDrawView @JvmOverloads constructor(
 
     fun deletePage(pageId: UUID): Boolean {
         if (!canDeletePage() || pageId !in notebook.pageOrder) return false
+        if (notebook.metadata(pageId)?.kind == PageKind.PDF_SOURCE) {
+            emitNotice("PDF 源页不能删除")
+            return false
+        }
         val deletingCurrent = page.id == pageId
         if (deletingCurrent) materialize()
         val oldIndex = notebook.pageOrder.indexOf(pageId)
@@ -886,6 +1310,10 @@ class PenDrawView @JvmOverloads constructor(
     }
 
     fun movePage(pageId: UUID, targetIndex: Int): Boolean {
+        if (notebook.kind == NotebookKind.PDF) {
+            emitNotice("PDF 源页与夹纸的顺序由关联关系维护")
+            return false
+        }
         val from = notebook.pageOrder.indexOf(pageId)
         if (from < 0) return false
         val target = targetIndex.coerceIn(0, notebook.pageOrder.lastIndex)
@@ -911,14 +1339,15 @@ class PenDrawView @JvmOverloads constructor(
         }
         pageIds.filter { it != page.id }.forEach { id ->
             val metadata = notebook.metadata(id) ?: return@forEach
-            val key = ThumbnailKey(id, metadata.contentRevision)
+            val key = ThumbnailKey(id, metadata.contentRevision, backgroundRevision(metadata))
             val loaded = notebook.getPage(id)
             if (loaded != null) {
-                thumbnails.request(PageSnapshot.capture(loaded)) { onDocChanged?.invoke() }
+                requestThumbnail(notebook.id, PageSnapshot.capture(loaded))
             } else {
                 thumbnails.request(
                     key,
-                    snapshotProvider = { repository.loadPage(id)?.let(PageSnapshot::capture) }
+                    snapshotProvider = { repository.loadPage(id)?.let(PageSnapshot::capture) },
+                    backgroundProvider = pageThumbnailBackground(notebook.id, metadata)
                 ) { onDocChanged?.invoke() }
             }
         }
@@ -933,7 +1362,12 @@ class PenDrawView @JvmOverloads constructor(
             if (evicted.id != target.id) notebook.detachPage(evicted.id)
         }
         page = target
+        if (persistenceAvailable) {
+            runCatching { repository.setLastOpenedPage(notebook.id, page.id) }
+                .onFailure { EventLog.log(TAG, "last-page save failed: ${it.message}") }
+        }
         selectedRichObjectId = null
+        refreshVisiblePdfAnchors()
         if (width > 0 && height > 0 && (page.width <= 0f || page.height <= 0f)) {
             page.updateSize(width.toFloat(), height.toFloat())
             notebook.refreshPageMetadata(page)
@@ -949,13 +1383,22 @@ class PenDrawView @JvmOverloads constructor(
     }
 
     private fun rebuildTools() {
-        penTool = PenTool(page, commandStack, this) { penStyle }
-        strokeEraserTool = StrokeEraserTool(page, commandStack, this) { eraserWidth / 2.0f }
-        pointEraserTool = PointEraserTool(page, commandStack, this) { eraserWidth / 2.0f }
-        selectionTool = SelectionTool(page, commandStack, this) { HANDLE_TOUCH_RADIUS }
+        penTool = PenTool(page, commandStack, this) {
+            penStyle.copy(baseWidth = currentViewport().screenDistanceToPage(penStyle.baseWidth))
+        }
+        strokeEraserTool = StrokeEraserTool(page, commandStack, this) {
+            currentViewport().screenDistanceToPage(eraserWidth / 2.0f)
+        }
+        pointEraserTool = PointEraserTool(page, commandStack, this) {
+            currentViewport().screenDistanceToPage(eraserWidth / 2.0f)
+        }
+        selectionTool = SelectionTool(page, commandStack, this) {
+            currentViewport().screenDistanceToPage(HANDLE_TOUCH_RADIUS)
+        }
         currentTool = when (toolKind) {
             ToolKind.PEN -> penTool
             ToolKind.LASSO -> selectionTool
+            ToolKind.NAVIGATION -> selectionTool
         }
     }
 
@@ -981,7 +1424,11 @@ class PenDrawView @JvmOverloads constructor(
         val renderHeight = height
         if (renderWidth <= 0 || renderHeight <= 0) return
         val notebookId = notebook.id
-        val key = PageRenderKey(notebookId, id, metadata.contentRevision, renderWidth, renderHeight)
+        val viewportRevision = pdfViewportStates[id]?.revision ?: 0
+        val key = PageRenderKey(
+            notebookId, id, metadata.contentRevision, backgroundRevision(metadata),
+            renderWidth, renderHeight, viewportRevision
+        )
         if (pageBitmapCache.get(key) != null || !pagePreRenderInFlight.add(key)) return
         val residentSnapshot = (notebook.getPage(id) ?: pageCache.get(id))?.let(PageSnapshot::capture)
         pagePreRenderExecutor.execute {
@@ -996,11 +1443,20 @@ class PenDrawView @JvmOverloads constructor(
                 ) {
                     return@execute
                 }
-                val rendered = renderPageBitmap(snapshot, renderWidth, renderHeight)
+                val viewport = viewportFor(
+                    snapshot.metadata.id,
+                    snapshot.metadata.width,
+                    snapshot.metadata.height,
+                    renderWidth,
+                    renderHeight
+                )
+                val rendered = renderPageBitmap(notebookId, snapshot, renderWidth, renderHeight, viewport)
                 post {
                     val currentMetadata = if (notebook.id == notebookId) notebook.metadata(id) else null
                     if (!pagePreRenderClosed && desiredWarmNotebookId == notebookId &&
-                        currentMetadata?.contentRevision == key.contentRevision && id in desiredWarmPageIds
+                        currentMetadata?.contentRevision == key.contentRevision &&
+                        currentMetadata?.let(::backgroundRevision) == key.backgroundRevision &&
+                        id in desiredWarmPageIds
                     ) {
                         if (loaded != null && notebook.getPage(id) == null) {
                             notebook.attachPage(loaded)
@@ -1009,6 +1465,15 @@ class PenDrawView @JvmOverloads constructor(
                             }
                         }
                         pageBitmapCache.put(key, rendered)
+                        if (page.id == id) {
+                            val ready = pageBitmapCache.remove(key)
+                            if (ready != null) {
+                                foreBitmap = ready
+                                bitmapCanvas = Canvas(ready)
+                                markCurrentPageRendered()
+                                postInvalidate()
+                            }
+                        }
                     }
                 }
             } finally {
@@ -1019,7 +1484,11 @@ class PenDrawView @JvmOverloads constructor(
 
     private fun currentPageRenderKey(target: Page = page): PageRenderKey? =
         if (width > 0 && height > 0) {
-            PageRenderKey(notebook.id, target.id, target.contentRevision, width, height)
+            PageRenderKey(
+                notebook.id, target.id, target.contentRevision,
+                backgroundRevision(target.toMetadataForTemplate()), width, height,
+                pdfViewportStates[target.id]?.revision ?: 0
+            )
         } else {
             null
         }
@@ -1048,17 +1517,125 @@ class PenDrawView @JvmOverloads constructor(
         }
     }
 
-    private fun renderPageBitmap(snapshot: PageSnapshot, renderWidth: Int, renderHeight: Int): Bitmap {
+    private fun renderPageBitmap(
+        notebookId: UUID,
+        snapshot: PageSnapshot,
+        renderWidth: Int,
+        renderHeight: Int,
+        viewport: ViewportTransform
+    ): Bitmap {
         val bitmap = Bitmap.createBitmap(renderWidth, renderHeight, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bitmap)
+        canvas.drawColor(android.graphics.Color.WHITE)
+        if (snapshot.metadata.kind == PageKind.PDF_SOURCE) {
+            drawPdfBackground(canvas, notebookId, snapshot.metadata, viewport)
+        } else {
+            drawTemplateBackground(canvas, snapshot.metadata, viewport)
+        }
         val renderContext = RenderContext()
+        val save = canvas.save()
+        canvas.translate(viewport.offsetX, viewport.offsetY)
+        canvas.scale(viewport.scale, viewport.scale)
         snapshot.objects.forEach { drawObject(canvas, it, renderContext) }
+        canvas.restoreToCount(save)
         return bitmap
     }
 
-    private fun requestThumbnail(target: Page) {
-        thumbnails.request(PageSnapshot.capture(target)) { onDocChanged?.invoke() }
+    private fun drawPdfBackground(
+        canvas: Canvas,
+        notebookId: UUID,
+        metadata: Notebook.PageMetadata,
+        viewport: ViewportTransform
+    ) {
+        val source = metadata.pdfSource ?: return
+        val record = repository.pdfDocument(notebookId) ?: return
+        val file = pdfAssets.resolve(record.assetPath) ?: return
+        val targetWidth = (metadata.width * viewport.scale).toInt().coerceAtLeast(1)
+        val rendered = pdfEngine.renderPage(file, source.sourcePageIndex, targetWidth)
+        try {
+            val target = RectF(
+                viewport.offsetX,
+                viewport.offsetY,
+                viewport.offsetX + metadata.width * viewport.scale,
+                viewport.offsetY + metadata.height * viewport.scale
+            )
+            canvas.drawBitmap(rendered, null, target, null)
+        } finally {
+            rendered.recycle()
+        }
     }
+
+    private fun drawTemplateBackground(
+        canvas: Canvas,
+        metadata: Notebook.PageMetadata,
+        viewport: ViewportTransform
+    ) {
+        val definition = templateStore.resolve(metadata.templateId) ?: return
+        if (!definition.isCompatible(metadata.width, metadata.height)) return
+        val save = canvas.save()
+        canvas.translate(viewport.offsetX, viewport.offsetY)
+        canvas.scale(viewport.scale, viewport.scale)
+        templateStore.renderer.draw(
+            canvas,
+            definition,
+            RectF(0f, 0f, metadata.width.coerceAtLeast(1f), metadata.height.coerceAtLeast(1f))
+        )
+        canvas.restoreToCount(save)
+    }
+
+    private fun requestThumbnail(target: Page) {
+        requestThumbnail(notebook.id, PageSnapshot.capture(target))
+    }
+
+    private fun requestThumbnail(notebookId: UUID, snapshot: PageSnapshot) {
+        thumbnails.request(
+            snapshot,
+            backgroundRevision = backgroundRevision(snapshot.metadata),
+            backgroundProvider = pageThumbnailBackground(notebookId, snapshot.metadata)
+        ) { onDocChanged?.invoke() }
+    }
+
+    /** MuPDF background used by PDF page thumbnails and, in particular, PDF notebook covers. */
+    private fun pdfThumbnailBackground(
+        notebookId: UUID,
+        metadata: Notebook.PageMetadata
+    ): (() -> Bitmap?)? {
+        val source = metadata.pdfSource ?: return null
+        return {
+            val record = repository.pdfDocument(notebookId)
+            val file = record?.let { pdfAssets.resolve(it.assetPath) }
+            file?.let {
+                pdfEngine.renderPage(
+                    it,
+                    source.sourcePageIndex,
+                    ThumbnailManager.WIDTH - 8
+                )
+            }
+        }
+    }
+
+    private fun pageThumbnailBackground(
+        notebookId: UUID,
+        metadata: Notebook.PageMetadata
+    ): (() -> Bitmap?)? {
+        if (metadata.kind == PageKind.PDF_SOURCE) return pdfThumbnailBackground(notebookId, metadata)
+        val definition = templateStore.resolve(metadata.templateId) ?: return null
+        if (!definition.isCompatible(metadata.width, metadata.height)) return null
+        return {
+            val targetWidth = ThumbnailManager.WIDTH - 16
+            val targetHeight = (targetWidth * metadata.height / metadata.width).toInt().coerceAtLeast(1)
+            templateStore.renderer.renderOwned(definition, targetWidth, targetHeight)
+        }
+    }
+
+    private fun backgroundRevision(metadata: Notebook.PageMetadata): String =
+        if (metadata.kind == PageKind.PDF_SOURCE) "pdf:${metadata.pdfSource?.sourcePageIndex ?: -1}"
+        else templateStore.visualFingerprint(metadata.templateId)
+
+    private fun Page.toMetadataForTemplate() = Notebook.PageMetadata(
+        id, width, height, bookmarked, contentRevision, createdAt, updatedAt,
+        kind, parentPdfPageId, pdfSource, templateId
+    )
 
     private fun createBitmap(w: Int, h: Int) {
         val bmp = foreBitmap
@@ -1147,7 +1724,8 @@ class PenDrawView @JvmOverloads constructor(
             clearOverlayInk()
         }
         gestureOpen = true
-        currentTool.onDown(x, y)
+        val point = screenToPage(x, y)
+        currentTool.onDown(point[0], point[1])
         if (toolKind != ToolKind.PEN) postInvalidate()
     }
 
@@ -1158,6 +1736,7 @@ class PenDrawView @JvmOverloads constructor(
         currentTool = when (kind) {
             ToolKind.PEN -> penTool
             ToolKind.LASSO -> selectionTool
+            ToolKind.NAVIGATION -> selectionTool
         }
     }
 
@@ -1228,7 +1807,7 @@ class PenDrawView @JvmOverloads constructor(
     fun updateLasso(samples: List<InkPoint>) {
         if (toolKind != ToolKind.LASSO || !gestureOpen) return
         if (samples.isEmpty()) return
-        selectionTool.onBatch(samples)
+        selectionTool.onBatch(samples.map(::screenPointToPage))
         invalidateToolOverlay()
     }
 
@@ -1237,6 +1816,7 @@ class PenDrawView @JvmOverloads constructor(
         if (toolKind != ToolKind.LASSO || !gestureOpen) return
         if (!cancelled) {
             finishGesture()
+            emitCompletedPdfSelection()
             return
         }
 
@@ -1323,12 +1903,12 @@ class PenDrawView @JvmOverloads constructor(
             )
 
             batch.add(
-                InkPoint(
+                screenPointToPage(InkPoint(
                     x = p[0],
                     y = p[1],
                     pressure = normalizePressure(rawPressure),
                     timestamp = now
-                )
+                ))
             )
         }
         currentTool.onBatch(batch)
@@ -1477,7 +2057,8 @@ class PenDrawView @JvmOverloads constructor(
         )
         val save = canvas.save()
         canvas.clipRect(dirty)
-        canvas.drawColor(0, android.graphics.PorterDuff.Mode.CLEAR)
+        canvas.drawColor(android.graphics.Color.WHITE)
+        drawTemplateBackground(canvas, page.toMetadataForTemplate(), currentViewport())
         for (obj in page.scene.all()) {
             if (obj.pageBounds.intersects(testBounds)) drawObject(canvas, obj, viewRenderContext)
         }
@@ -1592,7 +2173,12 @@ class PenDrawView @JvmOverloads constructor(
     // -- ToolHost (spec §17): tools call back into the view to repaint or update selection UI --
 
     override fun requestRepaint(bounds: Bounds) {
-        repaintRegion(InkRenderer.dirtyRect(bounds, penStyle))
+        if (page.kind == PageKind.PDF_SOURCE) {
+            redrawAll()
+        } else {
+            val screenBounds = currentViewport().pageToScreen(bounds)
+            repaintRegion(InkRenderer.dirtyRect(screenBounds, penStyle))
+        }
         onDocChanged?.invoke()
     }
 
@@ -1684,7 +2270,8 @@ class PenDrawView @JvmOverloads constructor(
      * state comment).
      */
     fun eraseMove(x: Float, y: Float) {
-        activeEraserTool().eraseAt(x, y)
+        val point = screenToPage(x, y)
+        activeEraserTool().eraseAt(point[0], point[1])
     }
 
     /** Erase gesture ended: commit the accumulated erase as one undo step, let the ROM paint ink again. */
@@ -1716,8 +2303,28 @@ class PenDrawView @JvmOverloads constructor(
 
     override fun onDraw(c: Canvas) {
         super.onDraw(c)
-        foreBitmap?.let { c.drawBitmap(it, 0f, 0f, null) }
+        val preview = navigationPreviewState
+        if (preview != null) {
+            c.drawColor(android.graphics.Color.WHITE)
+        }
+        foreBitmap?.let { bitmap ->
+            if (preview == null) {
+                c.drawBitmap(bitmap, 0f, 0f, null)
+            } else {
+                val oldViewport = viewportForState(navigationStartState)
+                val newViewport = viewportForState(preview)
+                val ratio = newViewport.scale / oldViewport.scale
+                val tx = newViewport.offsetX - oldViewport.offsetX * ratio
+                val ty = newViewport.offsetY - oldViewport.offsetY * ratio
+                val save = c.save()
+                c.translate(tx, ty)
+                c.scale(ratio, ratio)
+                c.drawBitmap(bitmap, 0f, 0f, null)
+                c.restoreToCount(save)
+            }
+        }
         drawToolOverlay(c)
+        if (navigationGesture == PdfNavigationGesture.ZOOM) drawZoomSlider(c)
     }
 
     /**
@@ -1728,6 +2335,19 @@ class PenDrawView @JvmOverloads constructor(
      * eraser deliberately has no cursor overlay (see the overlay state comment).
      */
     private fun drawToolOverlay(c: Canvas) {
+        val viewport = currentViewport()
+        val save = c.save()
+        c.translate(viewport.offsetX, viewport.offsetY)
+        c.scale(viewport.scale, viewport.scale)
+        val oldMarqueeWidth = marqueePaint.strokeWidth
+        marqueePaint.strokeWidth = oldMarqueeWidth / viewport.scale
+        val handleRadius = viewport.screenDistanceToPage(HANDLE_TOUCH_RADIUS)
+        if (navigationPreviewState == null && page.kind == PageKind.PDF_SOURCE) {
+            drawPdfAnchors(c, viewport)
+        }
+        if (page.kind == PageKind.LINKED_NOTE) {
+            drawLinkedNoteAnchors(c, viewport)
+        }
         if (toolKind == ToolKind.LASSO) {
             // In-progress lasso marquee.
             val lasso = selectionTool.activeLassoPath()
@@ -1747,7 +2367,7 @@ class PenDrawView @JvmOverloads constructor(
             if (!sel.isEmpty) {
                 val b = sel.bounds
                 c.drawRect(b.left, b.top, b.right, b.bottom, marqueePaint)
-                val h = HANDLE_TOUCH_RADIUS
+                val h = handleRadius
                 for (corner in arrayOf(
                     b.left to b.top, b.right to b.top,
                     b.left to b.bottom, b.right to b.bottom
@@ -1760,6 +2380,17 @@ class PenDrawView @JvmOverloads constructor(
                 }
             }
         }
+        val regionStart = pdfRegionStart
+        val regionEnd = pdfRegionEnd
+        if (regionStart != null && regionEnd != null) {
+            c.drawRect(
+                minOf(regionStart[0], regionEnd[0]),
+                minOf(regionStart[1], regionEnd[1]),
+                maxOf(regionStart[0], regionEnd[0]),
+                maxOf(regionStart[1], regionEnd[1]),
+                marqueePaint
+            )
+        }
         selectedRichObject()?.let { obj ->
             val corners = objectCorners(obj)
             overlayPath.rewind()
@@ -1771,7 +2402,7 @@ class PenDrawView @JvmOverloads constructor(
             c.drawPath(overlayPath, marqueePaint)
             if (obj is ImageObject || obj is TextObject) {
                 corners.forEach { point ->
-                    c.drawCircle(point[0], point[1], HANDLE_TOUCH_RADIUS, handlePaint)
+                    c.drawCircle(point[0], point[1], handleRadius, handlePaint)
                 }
             }
             if (obj is ImageObject) {
@@ -1779,9 +2410,531 @@ class PenDrawView @JvmOverloads constructor(
                 val top = obj.transform.mapPoint((b.left + b.right) / 2f, b.top)
                 val rotate = rotationHandle(obj)
                 c.drawLine(top[0], top[1], rotate[0], rotate[1], marqueePaint)
-                c.drawCircle(rotate[0], rotate[1], HANDLE_TOUCH_RADIUS, handlePaint)
+                c.drawCircle(rotate[0], rotate[1], handleRadius, handlePaint)
             }
         }
+        marqueePaint.strokeWidth = oldMarqueeWidth
+        c.restoreToCount(save)
+    }
+
+    private fun drawPdfAnchors(canvas: Canvas, viewport: ViewportTransform) {
+        if (visiblePdfAnchors.isEmpty()) return
+        val density = resources.displayMetrics.density
+        val radius = viewport.screenDistanceToPage(LINK_ICON_RADIUS_DP * density)
+        val oldRegionWidth = anchorRegionPaint.strokeWidth
+        val dash = viewport.screenDistanceToPage(8f * density)
+        anchorRegionPaint.pathEffect = DashPathEffect(floatArrayOf(dash, dash * 0.75f), 0f)
+        visiblePdfAnchors.forEach { anchor ->
+            val bounds = anchorPageBounds(anchor)
+            anchorRegionPaint.strokeWidth = viewport.screenDistanceToPage(
+                if (anchor.id == highlightedAnchorId) 4f else 2f
+            )
+            canvas.drawRect(bounds.left, bounds.top, bounds.right, bounds.bottom, anchorRegionPaint)
+            val badge = anchorBadgePoint(anchor, radius)
+            val badgeX = badge[0]
+            val badgeY = badge[1]
+            canvas.drawCircle(badgeX, badgeY, radius, anchorBadgeFillPaint)
+            canvas.drawCircle(badgeX, badgeY, radius, anchorFramePaint)
+            drawLinkIcon(canvas, badgeX, badgeY, radius, viewport)
+        }
+        anchorRegionPaint.strokeWidth = oldRegionWidth
+    }
+
+    /** Mirrors the PDF badge on each pasted screenshot so the link is visible on both ends. */
+    private fun drawLinkedNoteAnchors(canvas: Canvas, viewport: ViewportTransform) {
+        if (visibleLinkedNoteAnchors.isEmpty()) return
+        val density = resources.displayMetrics.density
+        val radius = viewport.screenDistanceToPage(LINK_ICON_RADIUS_DP * density)
+        visibleLinkedNoteAnchors.forEach { anchor ->
+            val obj = page.getObject(anchor.noteObjectId) ?: return@forEach
+            val badge = linkedNoteBadgePoint(obj, radius)
+            val badgeX = badge[0]
+            val badgeY = badge[1]
+            canvas.drawCircle(badgeX, badgeY, radius, anchorBadgeFillPaint)
+            canvas.drawCircle(badgeX, badgeY, radius, anchorFramePaint)
+            drawLinkIcon(canvas, badgeX, badgeY, radius, viewport)
+        }
+    }
+
+    private fun drawLinkIcon(
+        canvas: Canvas,
+        centerX: Float,
+        centerY: Float,
+        radius: Float,
+        viewport: ViewportTransform
+    ) {
+        val oldWidth = linkIconPaint.strokeWidth
+        linkIconPaint.strokeWidth = viewport.screenDistanceToPage(2f * resources.displayMetrics.density)
+        val save = canvas.save()
+        canvas.rotate(-35f, centerX, centerY)
+        val halfHeight = radius * 0.22f
+        val round = radius * 0.24f
+        canvas.drawRoundRect(
+            centerX - radius * 0.64f, centerY - halfHeight,
+            centerX + radius * 0.08f, centerY + halfHeight,
+            round, round, linkIconPaint
+        )
+        canvas.drawRoundRect(
+            centerX - radius * 0.08f, centerY - halfHeight,
+            centerX + radius * 0.64f, centerY + halfHeight,
+            round, round, linkIconPaint
+        )
+        canvas.restoreToCount(save)
+        linkIconPaint.strokeWidth = oldWidth
+    }
+
+    private fun linkedNoteBadgePoint(obj: PageObject, radius: Float): FloatArray {
+        val bounds = obj.pageBounds
+        return floatArrayOf(
+            bounds.right.coerceIn(radius, (page.width - radius).coerceAtLeast(radius)),
+            bounds.top.coerceIn(radius, (page.height - radius).coerceAtLeast(radius))
+        )
+    }
+
+    private fun anchorBadgePoint(anchor: PdfAnchor, radius: Float): FloatArray {
+        val bounds = anchorPageBounds(anchor)
+        return floatArrayOf(
+            bounds.right.coerceIn(radius, (page.width - radius).coerceAtLeast(radius)),
+            bounds.top.coerceIn(radius, (page.height - radius).coerceAtLeast(radius))
+        )
+    }
+
+    fun beginPdfRegion(x: Float, y: Float): Boolean {
+        if (toolKind != ToolKind.LASSO) return false
+        setRomPenInkEnabled(false)
+        val point = screenToPage(x, y)
+        pdfRegionStart = point
+        pdfRegionEnd = point.copyOf()
+        postInvalidate()
+        return true
+    }
+
+    fun beginPdfNavigation(x: Float, y: Float, modifier: PenSideButton): Boolean {
+        if (toolKind != ToolKind.NAVIGATION || page.kind != PageKind.PDF_SOURCE) return false
+        navigationGesture = when (modifier) {
+            PenSideButton.SIDE_1 -> PdfNavigationGesture.PAN
+            PenSideButton.SIDE_2 -> PdfNavigationGesture.ZOOM
+            else -> return false
+        }
+        setRomPenInkEnabled(false)
+        navigationStartX = x
+        navigationStartY = y
+        navigationCurrentX = x
+        navigationCurrentY = y
+        navigationDeltaX = 0f
+        navigationDeltaY = 0f
+        navigationStartState = pdfViewportStates[page.id] ?: PdfViewportState()
+        navigationPreviewState = navigationStartState
+        return true
+    }
+
+    fun updatePdfNavigation(x: Float, y: Float) {
+        if (navigationGesture == PdfNavigationGesture.NONE) return
+        navigationCurrentX = x
+        navigationCurrentY = y
+        navigationDeltaX = x - navigationStartX
+        navigationDeltaY = y - navigationStartY
+        navigationPreviewState = when (navigationGesture) {
+            PdfNavigationGesture.PAN -> clampViewportState(
+                navigationStartState.copy(
+                    panX = navigationStartState.panX + navigationDeltaX,
+                    panY = navigationStartState.panY + navigationDeltaY
+                )
+            )
+            PdfNavigationGesture.ZOOM -> zoomStateAt(
+                navigationStartState,
+                (navigationStartState.zoom * exp((navigationStartY - y) / ZOOM_DRAG_DISTANCE)).coerceIn(1f, 4f),
+                navigationStartX,
+                navigationStartY
+            )
+            PdfNavigationGesture.NONE -> null
+        }
+        postInvalidate()
+    }
+
+    fun endPdfNavigation(cancelled: Boolean) {
+        val preview = navigationPreviewState
+        if (!cancelled && preview != null && preview != navigationStartState) {
+            pdfViewportStates[page.id] = preview.copy(revision = navigationStartState.revision + 1)
+            renderedPageId = null
+            redrawAll()
+        }
+        navigationGesture = PdfNavigationGesture.NONE
+        navigationPreviewState = null
+        navigationDeltaX = 0f
+        navigationDeltaY = 0f
+        setRomPenInkEnabled(true)
+        postInvalidate()
+    }
+
+    fun zoomPdf(factor: Float): Boolean {
+        if (page.kind != PageKind.PDF_SOURCE) return false
+        val previous = pdfViewportStates[page.id] ?: PdfViewportState()
+        val nextZoom = (previous.zoom * factor).coerceIn(1f, 4f)
+        if (nextZoom == previous.zoom) return false
+        pdfViewportStates[page.id] = previous.copy(zoom = nextZoom, revision = previous.revision + 1)
+        renderedPageId = null
+        redrawAll()
+        return true
+    }
+
+    fun fitPdf(): Boolean {
+        if (page.kind != PageKind.PDF_SOURCE) return false
+        val previous = pdfViewportStates[page.id] ?: PdfViewportState()
+        pdfViewportStates[page.id] = PdfViewportState(revision = previous.revision + 1)
+        renderedPageId = null
+        redrawAll()
+        return true
+    }
+
+    private fun viewportForState(state: PdfViewportState): ViewportTransform {
+        return PdfViewportMath.transform(state, page.width, page.height, width, height)
+    }
+
+    private fun clampViewportState(state: PdfViewportState): PdfViewportState {
+        return PdfViewportMath.clamp(state, page.width, page.height, width, height)
+    }
+
+    private fun zoomStateAt(
+        start: PdfViewportState,
+        nextZoom: Float,
+        focusX: Float,
+        focusY: Float
+    ): PdfViewportState {
+        return PdfViewportMath.zoomAt(
+            start, nextZoom, focusX, focusY,
+            page.width, page.height, width, height
+        )
+    }
+
+    private fun drawZoomSlider(canvas: Canvas) {
+        val zoom = navigationPreviewState?.zoom ?: navigationStartState.zoom
+        val density = resources.displayMetrics.density
+        val trackHeight = 120f * density
+        val x = (navigationCurrentX + 28f * density).coerceAtMost(width - 76f * density)
+        val top = (navigationCurrentY + 24f * density)
+            .coerceAtMost(height - trackHeight - 48f * density).coerceAtLeast(8f * density)
+        val bottom = top + trackHeight
+        zoomSliderPaint.textSize = 14f * density
+        zoomSliderPaint.strokeWidth = 2f * density
+        canvas.drawLine(x, top, x, bottom, zoomSliderPaint)
+        val thumbY = bottom - ((zoom - 1f) / 3f) * trackHeight
+        canvas.drawCircle(x, thumbY, 8f * density, zoomSliderPaint)
+        zoomSliderPaint.style = Paint.Style.FILL
+        canvas.drawText("${"%.2f".format(zoom)}×", x + 16f * density, thumbY + 5f * density, zoomSliderPaint)
+        zoomSliderPaint.style = Paint.Style.STROKE
+    }
+
+    fun updatePdfRegion(x: Float, y: Float) {
+        if (pdfRegionStart == null) return
+        pdfRegionEnd = screenToPage(x, y)
+        postInvalidate()
+    }
+
+    fun endPdfRegion(cancelled: Boolean) {
+        val start = pdfRegionStart
+        val end = pdfRegionEnd
+        pdfRegionStart = null
+        pdfRegionEnd = null
+        setRomPenInkEnabled(true)
+        postInvalidate()
+        if (cancelled || start == null || end == null || page.width <= 0f || page.height <= 0f) return
+        val bounds = Bounds(
+            minOf(start[0], end[0]).coerceIn(0f, page.width),
+            minOf(start[1], end[1]).coerceIn(0f, page.height),
+            maxOf(start[0], end[0]).coerceIn(0f, page.width),
+            maxOf(start[1], end[1]).coerceIn(0f, page.height)
+        )
+        val minSize = currentViewport().screenDistanceToPage(24f)
+        if (bounds.width < minSize || bounds.height < minSize) {
+            emitNotice("选区太小")
+            return
+        }
+        val selected = selectionTool.selectRectangle(bounds)
+        selectionTool.consumeCompletedRegion()
+        if (page.kind == PageKind.PDF_SOURCE) emitPdfSelection(bounds, selected)
+    }
+
+    private fun emitCompletedPdfSelection() {
+        val bounds = selectionTool.consumeCompletedRegion() ?: return
+        if (page.kind == PageKind.PDF_SOURCE) emitPdfSelection(bounds, selectionTool.currentSelection())
+    }
+
+    private fun emitPdfSelection(bounds: Bounds, selected: SelectionSet) {
+        if (page.width <= 0f || page.height <= 0f) return
+        val normalized = Bounds(
+            bounds.left / page.width, bounds.top / page.height,
+            bounds.right / page.width, bounds.bottom / page.height
+        )
+        onPdfRegionSelected?.invoke(
+            PdfRegionSelection(
+                sourcePageId = page.id,
+                normalizedBounds = normalized,
+                selectedObjectIds = selected.objectIds,
+                screenBounds = currentViewport().pageToScreen(bounds)
+            )
+        )
+    }
+
+    fun linkedNoteTargetsForCurrentPdfSource(): List<LinkedNoteTarget> {
+        if (page.kind != PageKind.PDF_SOURCE) return emptyList()
+        return notebook.allPageMetadata()
+            .filter { it.kind == PageKind.LINKED_NOTE && it.parentPdfPageId == page.id }
+            .mapIndexed { index, metadata -> LinkedNoteTarget(metadata.id, index + 1) }
+    }
+
+    fun hasPendingLinkedNotePlacement(): Boolean = pendingLinkedNotePlacement != null
+
+    /**
+     * Prepares the selected PDF region and opens the destination note page. The
+     * object is intentionally not created yet: the next ordinary page tap is
+     * its exact insertion point.
+     */
+    fun prepareLinkedNoteFromRegion(
+        normalizedBounds: Bounds,
+        content: LinkedNoteContent,
+        targetNotePageId: UUID?,
+        onComplete: (Result<UUID>) -> Unit
+    ) {
+        if (page.kind != PageKind.PDF_SOURCE) {
+            onComplete(Result.failure(IllegalStateException("当前页不是 PDF 源页")))
+            return
+        }
+        val sourcePageId = page.id
+        val sourceIndex = page.pdfSource?.sourcePageIndex
+            ?: return onComplete(Result.failure(IllegalStateException("PDF 页面信息缺失")))
+        val sourceNotebookId = notebook.id
+        val noteWidth = width.toFloat().coerceAtLeast(1f)
+        val noteHeight = height.toFloat().coerceAtLeast(1f)
+        materialize()
+        val sourceSnapshot = PageSnapshot.capture(page)
+        scheduleSave(DocumentChange.fullPage(notebook, page, "linked-note:before-create"))
+        notebookOperations.execute {
+            var linkedPageId: UUID? = targetNotePageId
+            var createdNotePage = false
+            var importedImage: ImportedImage? = null
+            val result = runCatching {
+                check(persistenceAvailable && autosave.flush()) { "保存当前 PDF 批注失败" }
+                val record = repository.pdfDocument(sourceNotebookId) ?: error("PDF 资源记录缺失")
+                val file = pdfAssets.resolve(record.assetPath) ?: error("PDF 资源文件缺失")
+                val selectedText: String?
+                val preparedImage: ImportedImage?
+                when (content) {
+                    LinkedNoteContent.REGION_IMAGE -> {
+                        val bitmap = renderCompositePdfRegion(
+                            file, sourceIndex, normalizedBounds, sourceSnapshot
+                        )
+                        try {
+                            preparedImage = imageAssets.commit(imageAssets.importPng(bitmap))
+                            importedImage = preparedImage
+                        } finally {
+                            bitmap.recycle()
+                        }
+                        selectedText = null
+                    }
+                    LinkedNoteContent.REGION_TEXT -> {
+                        selectedText = pdfEngine.extractText(file, sourceIndex, normalizedBounds)
+                            .takeIf(String::isNotBlank) ?: error("选区中没有可提取文字；公式或图片请使用截图")
+                        preparedImage = null
+                    }
+                }
+                val notePageId = targetNotePageId ?: repository.createLinkedNotePage(
+                    sourcePageId, noteWidth, noteHeight
+                ).also {
+                    linkedPageId = it
+                    createdNotePage = true
+                }
+                linkedPageId = notePageId
+                val loaded = repository.loadNotebook(sourceNotebookId) ?: error("无法重载 PDF 笔记本")
+                val notePage = repository.loadPage(notePageId) ?: error("无法加载夹纸页")
+                check(notePage.kind == PageKind.LINKED_NOTE && notePage.parentPdfPageId == sourcePageId) {
+                    "所选夹纸不属于当前 PDF 页面"
+                }
+                loaded.attachPage(notePage)
+                Pair(
+                    loaded,
+                    PendingLinkedNotePlacement(
+                        sourceNotebookId = sourceNotebookId,
+                        sourcePageId = sourcePageId,
+                        notePageId = notePageId,
+                        normalizedBounds = normalizedBounds,
+                        content = content,
+                        selectedText = selectedText,
+                        preparedImage = preparedImage,
+                        createdNotePage = createdNotePage
+                    )
+                )
+            }.onFailure {
+                if (createdNotePage) linkedPageId?.let { id ->
+                    runCatching { repository.deleteLinkedNotePage(id) }
+                }
+                importedImage?.let(imageAssets::discard)
+            }
+            post {
+                result.onSuccess { (loaded, pending) ->
+                    pendingLinkedNotePlacement?.preparedImage?.let(imageAssets::discard)
+                    pendingLinkedNotePlacement = pending
+                    installNotebook(loaded)
+                    switchToPage(pending.notePageId)
+                    onDocChanged?.invoke()
+                }.exceptionOrNull()?.let { emitNotice("准备夹纸失败：${it.message}") }
+                onComplete(result.map { it.second.notePageId })
+            }
+        }
+    }
+
+    /** Renders the visible PDF region without transient lasso/anchor/navigation overlays. */
+    private fun renderCompositePdfRegion(
+        file: File,
+        sourceIndex: Int,
+        normalizedBounds: Bounds,
+        snapshot: PageSnapshot
+    ): Bitmap {
+        val bitmap = pdfEngine.renderRegion(file, sourceIndex, normalizedBounds)
+        val metadata = snapshot.metadata
+        val pageRegion = Bounds(
+            normalizedBounds.left * metadata.width,
+            normalizedBounds.top * metadata.height,
+            normalizedBounds.right * metadata.width,
+            normalizedBounds.bottom * metadata.height
+        )
+        if (pageRegion.width <= 0f || pageRegion.height <= 0f) return bitmap
+        val canvas = Canvas(bitmap)
+        val save = canvas.save()
+        canvas.scale(bitmap.width / pageRegion.width, bitmap.height / pageRegion.height)
+        canvas.translate(-pageRegion.left, -pageRegion.top)
+        val renderContext = RenderContext()
+        snapshot.objects.asSequence()
+            .filter { it.pageBounds.intersects(pageRegion) }
+            .sortedBy(PageObject::zIndex)
+            .forEach { drawObject(canvas, it, renderContext) }
+        canvas.restoreToCount(save)
+        return bitmap
+    }
+
+    fun placePendingLinkedNote(
+        screenX: Float,
+        screenY: Float,
+        onComplete: (Result<UUID>) -> Unit
+    ) {
+        val pending = pendingLinkedNotePlacement
+            ?: return onComplete(Result.failure(IllegalStateException("没有待放置的夹纸内容")))
+        if (page.id != pending.notePageId) {
+            onComplete(Result.failure(IllegalStateException("请先回到目标夹纸页")))
+            return
+        }
+        val point = screenToPage(screenX, screenY)
+        val pageX = point[0].coerceIn(0f, page.width)
+        val pageY = point[1].coerceIn(0f, page.height)
+        val targetPageId = page.id
+        notebookOperations.execute {
+            val result = runCatching {
+                check(persistenceAvailable && autosave.flush()) { "保存夹纸失败" }
+                val loaded = repository.loadNotebook(pending.sourceNotebookId) ?: error("无法重载 PDF 笔记本")
+                val notePage = repository.loadPage(targetPageId) ?: error("无法加载目标夹纸")
+                check(notePage.kind == PageKind.LINKED_NOTE &&
+                    notePage.parentPdfPageId == pending.sourcePageId
+                ) { "目标夹纸与 PDF 锚点不匹配" }
+                loaded.attachPage(notePage)
+                val now = System.currentTimeMillis()
+                val zIndex = (notePage.scene.all().maxOfOrNull(PageObject::zIndex) ?: -1) + 1
+                val obj: PageObject = pending.preparedImage?.let { image ->
+                    val displayWidth = image.pixelWidth.toFloat()
+                    val displayHeight = image.pixelHeight.toFloat()
+                    val scale = minOf(
+                        notePage.width * 0.72f / displayWidth.coerceAtLeast(1f),
+                        notePage.height * 0.38f / displayHeight.coerceAtLeast(1f),
+                        1f
+                    )
+                    ImageObject(
+                        id = UUID.randomUUID(),
+                        transform = Transform2D(
+                            scale, 0f, 0f, scale,
+                            pageX - displayWidth * scale / 2f,
+                            pageY - displayHeight * scale / 2f
+                        ),
+                        zIndex = zIndex, createdAt = now, updatedAt = now,
+                        assetPath = image.relativePath, mimeType = image.mimeType,
+                        pixelWidth = image.pixelWidth, pixelHeight = image.pixelHeight
+                    )
+                } ?: run {
+                    val text = requireNotNull(pending.selectedText)
+                    val fontSize = 24f
+                    val bounds = measureTextBoundsOffThread(text, fontSize, notePage.width * 0.76f)
+                    TextObject(
+                        id = UUID.randomUUID(),
+                        transform = Transform2D.translate(pageX - bounds.width / 2f, pageY),
+                        zIndex = zIndex, createdAt = now, updatedAt = now,
+                        text = text, fontFamily = TextFontFamily.SANS_SERIF, fontSize = fontSize,
+                        localBounds = bounds
+                    )
+                }
+                notePage.addObject(obj)
+                loaded.refreshPageMetadata(notePage)
+                val ordinal = (repository.pdfAnchors(pending.sourcePageId)
+                    .maxOfOrNull(PdfAnchor::ordinal) ?: 0) + 1
+                repository.persistWithPdfAnchor(
+                    DocumentChange.fullPage(loaded, notePage, "linked-note:place-anchor-object"),
+                    PdfAnchor(
+                        sourcePageId = pending.sourcePageId,
+                        notePageId = pending.notePageId,
+                        noteObjectId = obj.id,
+                        kind = if (pending.content == LinkedNoteContent.REGION_IMAGE) {
+                            PdfAnchorKind.REGION_IMAGE
+                        } else {
+                            PdfAnchorKind.REGION_TEXT
+                        },
+                        normalizedBounds = pending.normalizedBounds,
+                        selectedText = pending.selectedText,
+                        ordinal = ordinal
+                    )
+                )
+                Triple(loaded, notePage.id, obj.id)
+            }
+            post {
+                result.onSuccess { (loaded, notePageId, _) ->
+                    pendingLinkedNotePlacement = null
+                    installNotebook(loaded)
+                    switchToPage(notePageId)
+                    selectedRichObjectId = null
+                    onDocChanged?.invoke()
+                }.exceptionOrNull()?.let { emitNotice("放置夹纸内容失败：${it.message}") }
+                onComplete(result.map { it.third })
+            }
+        }
+    }
+
+    fun cancelPendingLinkedNotePlacement() {
+        val pending = pendingLinkedNotePlacement ?: return
+        pendingLinkedNotePlacement = null
+        pending.preparedImage?.let(imageAssets::discard)
+        if (!pending.createdNotePage) {
+            onDocChanged?.invoke()
+            return
+        }
+        notebookOperations.execute {
+            runCatching { repository.deleteLinkedNotePage(pending.notePageId) }
+            val loaded = runCatching { repository.loadNotebook(pending.sourceNotebookId) }.getOrNull()
+            post {
+                if (loaded != null) {
+                    installNotebook(loaded)
+                    switchToPage(pending.sourcePageId)
+                } else {
+                    onDocChanged?.invoke()
+                }
+            }
+        }
+    }
+
+    private fun measureTextBoundsOffThread(text: String, fontSize: Float, maxWidth: Float): Bounds {
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            typeface = Typeface.create(TextFontFamily.SANS_SERIF.androidName, Typeface.NORMAL)
+            textSize = fontSize
+        }
+        val lines = text.lines().ifEmpty { listOf("") }
+        val width = lines.maxOfOrNull(paint::measureText)?.coerceAtMost(maxWidth)?.coerceAtLeast(1f) ?: 1f
+        val height = (paint.fontMetrics.descent - paint.fontMetrics.ascent) * lines.size
+        return Bounds(0f, 0f, width, height.coerceAtLeast(1f))
     }
 
     /**
@@ -1797,8 +2950,17 @@ class PenDrawView @JvmOverloads constructor(
     /** Rebuild the bitmap cache from the document objects (spec §2.1). */
     private fun redrawAll() {
         val canvas = bitmapCanvas ?: return
-        foreBitmap?.eraseColor(0)
+        foreBitmap?.eraseColor(android.graphics.Color.WHITE)
+        val viewport = currentViewport()
+        if (page.kind != PageKind.PDF_SOURCE) {
+            drawTemplateBackground(canvas, page.toMetadataForTemplate(), viewport)
+        }
+        val save = canvas.save()
+        canvas.translate(viewport.offsetX, viewport.offsetY)
+        canvas.scale(viewport.scale, viewport.scale)
         for (obj in page.scene.all()) drawObject(canvas, obj, viewRenderContext)
+        canvas.restoreToCount(save)
+        if (page.kind == PageKind.PDF_SOURCE) schedulePagePreRender(page.id)
         markCurrentPageRendered()
         postInvalidate()
     }
@@ -1806,10 +2968,12 @@ class PenDrawView @JvmOverloads constructor(
     private fun markCurrentPageRendered() {
         renderedPageId = page.id
         renderedContentRevision = page.contentRevision
+        renderedTemplateFingerprint = templateStore.visualFingerprint(page.templateId)
     }
 
     private fun isCurrentPageRendered(): Boolean =
-        renderedPageId == page.id && renderedContentRevision == page.contentRevision
+        renderedPageId == page.id && renderedContentRevision == page.contentRevision &&
+            renderedTemplateFingerprint == templateStore.visualFingerprint(page.templateId)
 
     /**
      * Materialize the document into our bitmap and drop the ROM's overlay ink.
@@ -1852,7 +3016,7 @@ class PenDrawView @JvmOverloads constructor(
         val pd = penDraw ?: return
         val servicePen = PenProfiles.servicePen(penStyle.penType)
         val serviceColor = PenProfiles.serviceColor(penStyle, HanvonHardware.isColorDevice)
-        val serviceWidth = penStyle.baseWidth.toInt().coerceAtLeast(1)
+        val serviceWidth = PenProfiles.serviceWidth(penStyle)
         pd.setPen(penDrawPt, servicePen)
         pd.setPenColor(penDrawPt, serviceColor)
         pd.setPenWidth(penDrawPt, serviceWidth)
@@ -1871,13 +3035,11 @@ class PenDrawView @JvmOverloads constructor(
         gestureOpen = false
         page.clear()
         notebook.refreshPageMetadata(page)
-        thumbnails.invalidate(page.id, page.contentRevision)
+        thumbnails.invalidate(page.id, page.contentRevision, templateStore.visualFingerprint(page.templateId))
         commandStack.clear()
         scheduleSave(DocumentChange.fullPage(notebook, page, "page:clear"))
-        foreBitmap?.eraseColor(0)
-        markCurrentPageRendered()
+        redrawAll()
         clearOverlayInk()
-        postInvalidate()
         onDocChanged?.invoke()
         EventLog.log(TAG, "clear")
     }
@@ -1941,6 +3103,11 @@ class PenDrawView @JvmOverloads constructor(
         private const val MAX_DECODE_DIMENSION = 1024
         private const val IMAGE_CACHE_BYTES = 32 * 1024 * 1024
         private const val PAGE_BITMAP_CACHE_BYTES = 24 * 1024 * 1024
+        private const val ZOOM_DRAG_DISTANCE = 320f
+        private const val MAX_DOCUMENT_HISTORY = 64
+        private const val ANCHOR_HIGHLIGHT_MS = 1_200L
+        private const val LINK_ICON_RADIUS_DP = 12f
+        private const val ANCHOR_HIT_RADIUS_DP = 22f
 
         /**
          * Observed raw pressure range on-device: batch logs consistently show

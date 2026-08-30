@@ -21,9 +21,15 @@ class PageControlOverlayView(
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 val effectiveButtons = event.buttonState or PenButtonTracker.currentButtonState
-                val modifier = PenFunctionKey.classifyClickModifier(toolType, effectiveButtons, event.source)
+                val eventModifier = PenFunctionKey.classifyClickModifier(toolType, effectiveButtons, event.source)
+                val modifier = eventModifier.takeUnless { it == PenSideButton.NONE }
+                    ?: PenButtonTracker.currentClickModifier()
                 val inPageZone = event.x >= width * PAGE_ZONE_START
                 armed = when {
+                    // Side2 belongs exclusively to PDF zoom while Navigation is
+                    // selected, including inside the right-hand page-turn zone.
+                    modifier == PenSideButton.SIDE_2 && pen.currentToolKind() == ToolKind.NAVIGATION ->
+                        PenSideButton.NONE
                     (modifier == PenSideButton.SIDE_2 || modifier == PenSideButton.SIDE_3) && inPageZone -> modifier
                     else -> PenSideButton.NONE
                 }

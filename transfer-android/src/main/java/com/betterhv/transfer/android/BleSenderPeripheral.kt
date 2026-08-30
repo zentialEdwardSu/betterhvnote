@@ -17,6 +17,7 @@ import android.content.Context
 import android.os.ParcelUuid
 import android.util.Log
 import com.betterhv.transfer.core.ContentKind
+import com.betterhv.transfer.core.ContentCounts
 import com.betterhv.transfer.core.BleTransportFrameCodec
 import com.betterhv.transfer.core.BleTransportReassembler
 import com.betterhv.transfer.core.NoteLinkAdvertisementCodec
@@ -29,7 +30,7 @@ class BleSenderPeripheral(
     context: Context,
     private val deviceId: String,
     private val deviceName: String,
-    private val counts: () -> Pair<Int, Int>,
+    private val counts: () -> ContentCounts,
     private val onCommand: (BluetoothDevice, ByteArray) -> ByteArray
 ) : AutoCloseable {
     private val appContext = context.applicationContext
@@ -215,15 +216,16 @@ class BleSenderPeripheral(
     }
 
     private fun advertisementBytes(): ByteArray {
-        val (images, texts) = counts()
+        val counts = counts()
         return NoteLinkAdvertisementCodec.encode(
-            TransferCrypto.sha256(deviceId.encodeToByteArray()), deviceName, images, texts
+            TransferCrypto.sha256(deviceId.encodeToByteArray()), deviceName,
+            counts.images, counts.texts, counts.pdfs
         )
     }
 
     private fun identityBytes(): ByteArray {
-        val (images, texts) = counts()
-        return BleIdentityCodec.encode(deviceId, deviceName, images, texts)
+        val counts = counts()
+        return BleIdentityCodec.encode(deviceId, deviceName, counts.images, counts.texts, counts.pdfs)
     }
 
     @SuppressLint("MissingPermission")

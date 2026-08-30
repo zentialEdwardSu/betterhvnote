@@ -6,6 +6,7 @@ import com.betterhv.transfer.android.ReceivedLease
 import com.betterhv.transfer.core.ContentKind
 import com.betterhv.transfer.core.RemotePayload
 import java.util.UUID
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -14,6 +15,16 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlin.coroutines.resume
+
+private inline fun <T> runCatchingCancellable(block: () -> T): Result<T> = try {
+    Result.success(block())
+} catch (cancelled: CancellationException) {
+    throw cancelled
+} catch (error: Throwable) {
+    Result.failure(error)
+}
 
 sealed interface InsertionState {
     data object Idle : InsertionState
@@ -66,7 +77,7 @@ class InsertionCoordinator(private val phone: PhoneTransferClient) : AutoCloseab
         cancel()
         val generation = requestGeneration
         val view = requireNotNull(penView)
-        runCatching { withContext(Dispatchers.IO) { view.importImage(uri) } }
+        runCatchingCancellable { withContext(Dispatchers.IO) { view.importImage(uri) } }
             .onSuccess {
                 if (generation == requestGeneration) mutableState.value = InsertionState.ImageReady(it, null)
                 else view.discardImportedImage(it)
@@ -84,7 +95,7 @@ class InsertionCoordinator(private val phone: PhoneTransferClient) : AutoCloseab
         if (generation != requestGeneration) return
         when (available.size) {
             0 -> mutableState.value = InsertionState.Error(
-                "没有发现包含${if (kind == ContentKind.IMAGE) "图片" else "文字"}的 NoteLink"
+                "没有发现包含${contentLabel(kind)}的 NoteLink"
             )
             1 -> remote(available.single().client.id, kind)
             else -> mutableState.value = InsertionState.ChoosingClient(kind, available)
@@ -95,16 +106,16 @@ class InsertionCoordinator(private val phone: PhoneTransferClient) : AutoCloseab
         cancel()
         val generation = requestGeneration
         mutableState.value = InsertionState.WaitingForPhone(kind)
-        runCatching { phone.requestNext(clientId, kind) }
+        runCatchingCancellable { phone.requestNext(clientId, kind) }
             .onSuccess { lease ->
                 try {
                     if (generation != requestGeneration) {
-                        (lease?.payload as? RemotePayload.Image)?.stagedFile?.delete()
+                        lease?.payload?.stagedFileOrNull()?.delete()
                         lease?.let { finishLease(it, commit = false) }
                         return@onSuccess
                     }
                     if (lease == null) {
-                        mutableState.value = InsertionState.Error("手机队列中没有${if (kind == ContentKind.IMAGE) "图片" else "文字"}")
+                        mutableState.value = InsertionState.Error("手机队列中没有${contentLabel(kind)}")
                         return@onSuccess
                     }
                     when (val payload = lease.payload) {
@@ -122,10 +133,23 @@ class InsertionCoordinator(private val phone: PhoneTransferClient) : AutoCloseab
                             }
                         }
                         is RemotePayload.Text -> mutableState.value = InsertionState.TextReady(payload.text, lease, clientId)
+                        is RemotePayload.Pdf -> {
+                            val imported = suspendCancellableCoroutine<Result<UUID>> { continuation ->
+                                requireNotNull(penView).importPdfFile(
+                                    payload.stagedFile,
+                                    payload.item.displayName ?: "NoteLink.pdf"
+                                ) { continuation.resume(it) }
+                            }
+                            imported.getOrThrow()
+                            payload.stagedFile.delete()
+                            finishLease(lease, commit = true)
+                            mutableState.value = InsertionState.Idle
+                        }
                     }
                 } catch (error: Throwable) {
-                    (lease?.payload as? RemotePayload.Image)?.stagedFile?.delete()
+                    lease?.payload?.stagedFileOrNull()?.delete()
                     lease?.let { finishLease(it, commit = false) }
+                    if (error is CancellationException) throw error
                     if (generation == requestGeneration) {
                         mutableState.value = InsertionState.Error(error.message ?: "手机传输失败")
                     }
@@ -184,7 +208,7 @@ class InsertionCoordinator(private val phone: PhoneTransferClient) : AutoCloseab
 
     private fun finishLease(lease: ReceivedLease, commit: Boolean) {
         leaseScope.launch {
-            runCatching {
+            runCatchingCancellable {
                 if (commit) lease.commitAndAwait() else lease.releaseAndAwait()
             }.onFailure { error ->
                 EventLog.log(
@@ -205,6 +229,18 @@ class InsertionCoordinator(private val phone: PhoneTransferClient) : AutoCloseab
         mutableState.value = InsertionState.Idle
         leaseScope.cancel()
         phone.close()
+    }
+
+    private fun RemotePayload.stagedFileOrNull() = when (this) {
+        is RemotePayload.Image -> stagedFile
+        is RemotePayload.Pdf -> stagedFile
+        is RemotePayload.Text -> null
+    }
+
+    private fun contentLabel(kind: ContentKind) = when (kind) {
+        ContentKind.IMAGE -> "图片"
+        ContentKind.TEXT -> "文字"
+        ContentKind.PDF -> "PDF"
     }
 
     companion object { const val PHONE_DEVICE_ID = "betterhv-phone" }

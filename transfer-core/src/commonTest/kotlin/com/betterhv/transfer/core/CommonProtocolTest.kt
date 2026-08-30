@@ -18,21 +18,24 @@ class CommonProtocolTest {
     }
 
     @Test fun identityRoundTripsAndPreservesCounts() {
-        val encoded = NoteLinkIdentityCodec.encode(DeviceId("00112233-4455-6677-8899-aabbccddeeff"), "工作电脑", 300, -1)
+        val encoded = NoteLinkIdentityCodec.encode(
+            DeviceId("00112233-4455-6677-8899-aabbccddeeff"), "工作电脑", 300, -1, 7
+        )
         val decoded = NoteLinkIdentityCodec.decode(encoded)
         assertEquals(255, decoded.imageCount)
         assertEquals(0, decoded.textCount)
+        assertEquals(7, decoded.pdfCount)
         assertEquals("工作电脑", decoded.deviceName)
     }
 
     @Test fun advertisementGoldenBytesRemainCompatibleAcrossPlatforms() {
         val encoded = NoteLinkAdvertisementCodec.encode(
-            byteArrayOf(0x10, 0x20, 0x30, 0x40, 0x50), "NoteLink", 2, 3
+            byteArrayOf(0x10, 0x20, 0x30, 0x40, 0x50), "NoteLink", 2, 3, 4
         )
 
         assertContentEquals(
             byteArrayOf(
-                2, 2, 3, 0x10, 0x20, 0x30, 0x40, 0x50,
+                3, 2, 3, 4, 0x10, 0x20, 0x30, 0x40, 0x50,
                 0x4e, 0x6f, 0x74, 0x65, 0x4c, 0x69, 0x6e, 0x6b
             ),
             encoded
@@ -41,6 +44,7 @@ class CommonProtocolTest {
         assertEquals(NoteLinkIdentityCodec.PROTOCOL_VERSION, decoded.protocolVersion)
         assertEquals(2, decoded.imageCount)
         assertEquals(3, decoded.textCount)
+        assertEquals(4, decoded.pdfCount)
         assertContentEquals(byteArrayOf(0x10, 0x20, 0x30, 0x40, 0x50), decoded.identityHash)
         assertEquals("NoteLink", decoded.deviceName)
     }

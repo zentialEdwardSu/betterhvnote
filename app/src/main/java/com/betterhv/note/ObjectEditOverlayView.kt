@@ -11,6 +11,7 @@ class ObjectEditOverlayView(context: Context, private val pen: PenDrawView) : Vi
 
     private var handling = false
     private var side1Selection = false
+    private var linkNavigation = false
     private var placement = false
     private var moved = false
     private var downX = 0f
@@ -23,11 +24,26 @@ class ObjectEditOverlayView(context: Context, private val pen: PenDrawView) : Vi
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 if (event.getToolType(0) == MotionEvent.TOOL_TYPE_ERASER) return false
-                val modifier = PenFunctionKey.classifyClickModifier(
+                if (pen.beginLinkedNavigationIconTap(event.x, event.y)) {
+                    handling = true
+                    linkNavigation = true
+                    return true
+                }
+                val eventModifier = PenFunctionKey.classifyClickModifier(
                     event.getToolType(0),
                     event.buttonState or PenButtonTracker.currentButtonState,
                     event.source
                 )
+                val modifier = eventModifier.takeUnless { it == PenSideButton.NONE }
+                    ?: PenButtonTracker.currentClickModifier()
+                if (onPlacementTap == null && pen.currentToolKind() == ToolKind.NAVIGATION) {
+                    return false
+                }
+                if (onPlacementTap == null && pen.currentToolKind() == ToolKind.LASSO &&
+                    pen.selectedRichObject() == null
+                ) {
+                    return false
+                }
                 if (modifier == PenSideButton.SIDE_2 || modifier == PenSideButton.SIDE_3) return false
                 downX = event.x
                 downY = event.y
@@ -51,6 +67,7 @@ class ObjectEditOverlayView(context: Context, private val pen: PenDrawView) : Vi
 
             MotionEvent.ACTION_MOVE -> {
                 if (!handling) return false
+                if (linkNavigation) return true
                 if (!side1Selection && !placement) {
                     if (hypot((event.x - downX).toDouble(), (event.y - downY).toDouble()) > TAP_SLOP) {
                         moved = true
@@ -63,6 +80,7 @@ class ObjectEditOverlayView(context: Context, private val pen: PenDrawView) : Vi
             MotionEvent.ACTION_UP -> {
                 if (!handling) return false
                 when {
+                    linkNavigation -> pen.endLinkedNavigationIconTap(event.x, event.y, cancelled = false)
                     side1Selection -> {
                         PenButtonTracker.consumeClickModifier()
                         pen.selectRichObjectAt(event.x, event.y)
@@ -88,7 +106,10 @@ class ObjectEditOverlayView(context: Context, private val pen: PenDrawView) : Vi
 
             MotionEvent.ACTION_CANCEL -> {
                 if (!handling) return false
-                if (!side1Selection && !placement) pen.endRichObjectGesture(cancelled = true)
+                when {
+                    linkNavigation -> pen.endLinkedNavigationIconTap(event.x, event.y, cancelled = true)
+                    !side1Selection && !placement -> pen.endRichObjectGesture(cancelled = true)
+                }
                 reset()
                 return true
             }
@@ -99,6 +120,7 @@ class ObjectEditOverlayView(context: Context, private val pen: PenDrawView) : Vi
     private fun reset() {
         handling = false
         side1Selection = false
+        linkNavigation = false
         placement = false
         moved = false
     }

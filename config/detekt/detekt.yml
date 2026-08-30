@@ -1,0 +1,43 @@
+build:
+  maxIssues: 0
+  excludeCorrectable: false
+
+config:
+  validation: true
+  warningsAsErrors: true
+
+complexity:
+  LongMethod:
+    active: true
+    threshold: 60
+  LongParameterList:
+    active: true
+    functionThreshold: 6
+    constructorThreshold: 8
+    ignoreDefaultParameters: false
+  TooManyFunctions:
+    active: true
+    thresholdInFiles: 20
+    thresholdInClasses: 15
+  LargeClass:
+    active: true
+    threshold: 600
+
+style:
+  MagicNumber:
+    active: true
+  WildcardImport:
+    active: true
+  ForbiddenComment:
+    active: true
+    comments: ["TODO", "FIXME", "STOPSHIP"]
+
+naming:
+  FunctionNaming:
+    active: true
+    ignoreAnnotated: ["Composable"]
+
+formatting:
+  active: true
+  android: true
+  autoCorrect: false

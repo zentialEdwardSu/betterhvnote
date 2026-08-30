@@ -4,12 +4,15 @@ import android.content.ContentValues
 import android.content.Context
 import android.database.sqlite.SQLiteDatabase
 import com.betterhv.note.storage.SQLiteStore
+import com.betterhv.note.doc.PageKind
+import com.betterhv.note.template.TemplateStore
 import java.io.File
 import java.util.UUID
 
 class ExportTaskRepository(context: Context) : AutoCloseable {
     private val documentsDir = File(context.filesDir, "documents").also(File::mkdirs)
     private val store = SQLiteStore(context.applicationContext, File(documentsDir, "default.inknote"))
+    private val templates = TemplateStore.get(context.applicationContext)
 
     @Synchronized
     fun createTask(
@@ -103,15 +106,22 @@ class ExportTaskRepository(context: Context) : AutoCloseable {
             else -> task.pageIds
         }
         if (requested.isEmpty()) return emptyList()
-        val revisions = HashMap<UUID, Long>()
+        data class Revision(val content: Long, val background: String)
+        val revisions = HashMap<UUID, Revision>()
         store.readableDatabase.query(
-            "pages", arrayOf("id", "content_revision"), "notebook_id=?",
+            "pages", arrayOf("id", "content_revision", "kind", "template_id"), "notebook_id=?",
             arrayOf(task.notebookId.toString()), null, null, null
         ).use { cursor ->
-            while (cursor.moveToNext()) revisions[UUID.fromString(cursor.getString(0))] = cursor.getLong(1)
+            while (cursor.moveToNext()) {
+                val kind = runCatching { PageKind.valueOf(cursor.getString(2)) }.getOrDefault(PageKind.BLANK)
+                val background = if (kind == PageKind.PDF_SOURCE) "pdf" else {
+                    templates.visualFingerprint(if (cursor.isNull(3)) null else cursor.getString(3))
+                }
+                revisions[UUID.fromString(cursor.getString(0))] = Revision(cursor.getLong(1), background)
+            }
         }
         return requested.mapIndexedNotNull { index, id ->
-            revisions[id]?.let { ExportPageSource(id, it, index) }
+            revisions[id]?.let { ExportPageSource(id, it.content, index, it.background) }
         }
     }
 
@@ -134,7 +144,9 @@ class ExportTaskRepository(context: Context) : AutoCloseable {
         null, null, null
     ).use { cursor ->
         if (!cursor.moveToFirst() || cursor.getLong(0) != source.contentRevision) null
-        else File(cursor.getString(1)).takeIf(File::isFile)
+        else File(cursor.getString(1)).takeIf {
+            it.isFile && it.name == pageCacheFileName(source)
+        }
     }
 
     @Synchronized
@@ -322,5 +334,14 @@ class ExportTaskRepository(context: Context) : AutoCloseable {
         val createdAt: Long?, val lastError: String?
     )
 
-    companion object { const val RENDERER_VERSION = 2 }
+    companion object {
+        const val RENDERER_VERSION = 5
+
+        fun pageCacheFileName(source: ExportPageSource): String =
+            "${source.id}-r${source.contentRevision}-b${backgroundHash(source.backgroundRevision)}-v$RENDERER_VERSION.pdf"
+
+        private fun backgroundHash(value: String): String =
+            java.security.MessageDigest.getInstance("SHA-256").digest(value.encodeToByteArray())
+                .take(6).joinToString("") { "%02x".format(it) }
+    }
 }

@@ -3,7 +3,19 @@ package com.betterhv.transfer.core
 import java.io.File
 import java.util.UUID
 
-enum class ContentKind { IMAGE, TEXT }
+enum class ContentKind { IMAGE, TEXT, PDF }
+
+data class ContentCounts(
+    val images: Int,
+    val texts: Int,
+    val pdfs: Int = 0
+) {
+    fun forKind(kind: ContentKind): Int = when (kind) {
+        ContentKind.IMAGE -> images
+        ContentKind.TEXT -> texts
+        ContentKind.PDF -> pdfs
+    }
+}
 
 data class ExportTransferOffer(
     val artifactId: UUID,
@@ -65,6 +77,7 @@ sealed interface RemotePayload {
 
     data class Image(override val item: QueueItem, val stagedFile: File) : RemotePayload
     data class Text(override val item: QueueItem, val text: String) : RemotePayload
+    data class Pdf(override val item: QueueItem, val stagedFile: File) : RemotePayload
 }
 
 sealed interface TransferState {
@@ -95,6 +108,7 @@ object TransferLimits {
     const val MAX_IMAGE_BYTES: Long = 64L * 1024L * 1024L
     const val MAX_IMAGE_PIXELS: Long = 100_000_000L
     const val MAX_TEXT_BYTES: Int = 256 * 1024
+    const val MAX_PDF_BYTES: Long = 512L * 1024L * 1024L
     const val INLINE_TEXT_BYTES: Int = 32 * 1024
     const val HEARTBEAT_MILLIS: Long = 15_000L
     const val LEASE_TIMEOUT_MILLIS: Long = 60_000L

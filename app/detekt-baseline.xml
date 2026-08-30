@@ -1,0 +1,897 @@
+<?xml version="1.0" ?>
+<SmellBaseline>
+  <ManuallySuppressedIssues/>
+  <CurrentIssues>
+    <ID>AnnotationOnSeparateLine:PageManagerPanel.kt$@Suppress("UNUSED_VARIABLE")</ID>
+    <ID>ArgumentListWrapping:ExportDownloads.kt$ExportDownloads$( Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), "BetterHvNote" )</ID>
+    <ID>ArgumentListWrapping:ExportDownloads.kt$ExportDownloads$( temp.toPath(), target.toPath(), StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING )</ID>
+    <ID>ArgumentListWrapping:ExportEngine.kt$ExportEngine$( snapshot, (snapshot.metadata.width * 2f).toInt(), (snapshot.metadata.height * 2f).toInt() )</ID>
+    <ID>ArgumentListWrapping:ExportEngine.kt$ExportEngine$( source.toPath(), target.toPath(), StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING )</ID>
+    <ID>ArgumentListWrapping:ExportPanel.kt$( "${summary.notebookTitle} · ${summary.pageCount} 页 · ${summary.task.format.name}", color = ExportMuted, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis )</ID>
+    <ID>ArgumentListWrapping:ExportPanel.kt$("全部页面", scope == ExportScope.ALL_PAGES)</ID>
+    <ID>ArgumentListWrapping:ExportPanel.kt$(state.notebooks.firstOrNull { it.id == initialNotebookId }?.id ?: state.notebooks.firstOrNull()?.id)</ID>
+    <ID>ArgumentListWrapping:ExportPanel.kt$(taskTitle(summary), fontSize = 16.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)</ID>
+    <ID>ArgumentListWrapping:ExportTaskRepository.kt$ExportTaskRepository$( "export_page_cache", "task_id=? AND page_id NOT IN ($placeholders)", args.toTypedArray() )</ID>
+    <ID>ArgumentListWrapping:ExportTaskRepository.kt$ExportTaskRepository$( "export_page_cache", arrayOf("cache_path"), "task_id=? AND page_id=?", arrayOf(taskId.toString(), source.id.toString()), null, null, null )</ID>
+    <ID>ArgumentListWrapping:ExportTaskRepository.kt$ExportTaskRepository$( "export_page_cache", arrayOf("cache_path"), "task_id=?", arrayOf(id.toString()), null, null, null )</ID>
+    <ID>ArgumentListWrapping:ExportTaskRepository.kt$ExportTaskRepository$( "export_page_cache", arrayOf("cache_path"), null, null, null, null, null )</ID>
+    <ID>ArgumentListWrapping:ExportTaskRepository.kt$ExportTaskRepository$( "export_page_cache", arrayOf("content_revision", "cache_path"), "task_id=? AND page_id=?", arrayOf(taskId.toString(), source.id.toString()), null, null, null )</ID>
+    <ID>ArgumentListWrapping:ExportTaskRepository.kt$ExportTaskRepository$( "export_page_cache", arrayOf("page_id", "cache_path"), "task_id=?", arrayOf(taskId.toString()), null, null, null )</ID>
+    <ID>ArgumentListWrapping:ExportTaskRepository.kt$ExportTaskRepository$( "export_page_cache", null, it, SQLiteDatabase.CONFLICT_REPLACE )</ID>
+    <ID>ArgumentListWrapping:ExportTaskRepository.kt$ExportTaskRepository$( "export_task_pages", arrayOf("task_id", "page_id", "position"), null, null, null, null, "task_id, position" )</ID>
+    <ID>ArgumentListWrapping:ExportTaskRepository.kt$ExportTaskRepository$( "export_tasks", arrayOf("artifact_id", "artifact_path", "artifact_fingerprint", "artifact_sha256", "artifact_created_at", "last_error"), "id=?", arrayOf(taskId.toString()), null, null, null )</ID>
+    <ID>ArgumentListWrapping:ExportTaskRepository.kt$ExportTaskRepository$( "export_tasks", arrayOf("artifact_path"), "artifact_path IS NOT NULL", null, null, null, null )</ID>
+    <ID>ArgumentListWrapping:ExportTaskRepository.kt$ExportTaskRepository$( "export_tasks", arrayOf("id", "notebook_id", "scope", "format", "created_at", "last_used_at"), null, null, null, null, "last_used_at DESC, created_at DESC" )</ID>
+    <ID>ArgumentListWrapping:ExportTaskRepository.kt$ExportTaskRepository$( "notebooks", arrayOf("id"), "id=?", arrayOf(id.toString()), null, null, null )</ID>
+    <ID>ArgumentListWrapping:ExportTaskRepository.kt$ExportTaskRepository$( "notebooks", arrayOf("id", "title"), null, null, null, null, "updated_at DESC" )</ID>
+    <ID>ArgumentListWrapping:ExportTaskRepository.kt$ExportTaskRepository$( "notebooks", arrayOf("title"), "id=?", arrayOf(id.toString()), null, null, null )</ID>
+    <ID>ArgumentListWrapping:ExportTaskRepository.kt$ExportTaskRepository$( "page_order", arrayOf("page_id"), "notebook_id=?", arrayOf(notebookId.toString()), null, null, "position" )</ID>
+    <ID>ArgumentListWrapping:ExportTaskRepository.kt$ExportTaskRepository$( "pages", arrayOf("id", "content_revision", "kind", "template_id"), "notebook_id=?", arrayOf(task.notebookId.toString()), null, null, null )</ID>
+    <ID>ArgumentListWrapping:ExportTaskRepository.kt$ExportTaskRepository$( cursor.getString(0)?.let(UUID::fromString), cursor.getString(1), cursor.getString(2), cursor.getBlob(3), if (cursor.isNull(4)) null else cursor.getLong(4), cursor.getString(5) )</ID>
+    <ID>ArgumentListWrapping:ExportTaskRepository.kt$ExportTaskRepository$( id, UUID.fromString(cursor.getString(1)), ExportScope.valueOf(cursor.getString(2)), ExportFormat.valueOf(cursor.getString(3)), pages[id].orEmpty().sortedBy { it.first }.map { it.second }, cursor.getLong(4), cursor.getLong(5) )</ID>
+    <ID>ArgumentListWrapping:ExportTaskRepository.kt$ExportTaskRepository$( missing, fileExists, record?.fingerprint, currentFingerprint, record?.lastError != null )</ID>
+    <ID>ArgumentListWrapping:ExportTaskRepository.kt$ExportTaskRepository$("artifact_id", "artifact_path", "artifact_fingerprint", "artifact_sha256", "artifact_created_at", "last_error")</ID>
+    <ID>ArgumentListWrapping:ExportTaskRepository.kt$ExportTaskRepository.Companion$(source.backgroundRevision)</ID>
+    <ID>ArgumentListWrapping:HitTest.kt$HitTest$( ax, ay, bx, by, polygon[j * 2], polygon[j * 2 + 1], polygon[i * 2], polygon[i * 2 + 1] )</ID>
+    <ID>ArgumentListWrapping:InsertionCoordinator.kt$InsertionCoordinator$( text, x, y, requireNotNull(ready.sourceDeviceId), ready.lease.offer.item.id )</ID>
+    <ID>ArgumentListWrapping:MainActivity.kt$( request.selection.normalizedBounds, LinkedNoteContent.REGION_IMAGE, targetPageId )</ID>
+    <ID>ArgumentListWrapping:MainActivity.kt$("NoteLinkPairing", "failed device=${candidate.deviceId} error=${it.message}")</ID>
+    <ID>ArgumentListWrapping:MainActivity.kt$("NoteLinkPairing", "start device=${candidate.deviceId} address=${candidate.bluetoothAddress}")</ID>
+    <ID>ArgumentListWrapping:MainActivity.kt$('_', ' ')</ID>
+    <ID>ArgumentListWrapping:MainActivity.kt$(16.dp)</ID>
+    <ID>ArgumentListWrapping:MainActivity.kt$(20.dp)</ID>
+    <ID>ArgumentListWrapping:MainActivity.kt$(Modifier.fillMaxWidth(), horizontalArrangement = androidx.compose.foundation.layout.Arrangement.End)</ID>
+    <ID>ArgumentListWrapping:MainActivity.kt$(Modifier.padding(20.dp), verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(16.dp))</ID>
+    <ID>ArgumentListWrapping:MainActivity.kt$(snapshot.phase.name.replace('_', ' '), snapshot.mode?.name, "SSID ${snapshot.ssidMatch.name}")</ID>
+    <ID>ArgumentListWrapping:NotebookRepository.kt$NotebookRepository$( "images", arrayOf("asset_path"), null, null, null, null, null )</ID>
+    <ID>ArgumentListWrapping:NotebookRepository.kt$NotebookRepository$( "images", arrayOf("asset_path", "mime_type", "pixel_width", "pixel_height", "exif_orientation"), "object_id=?", arrayOf(id.toString()), null, null, null )</ID>
+    <ID>ArgumentListWrapping:NotebookRepository.kt$NotebookRepository$( "metadata", arrayOf("value"), "key=?", arrayOf(key), null, null, null )</ID>
+    <ID>ArgumentListWrapping:NotebookRepository.kt$NotebookRepository$( "notebooks", arrayOf("id"), "id=?", arrayOf(id.toString()), null, null, null, "1" )</ID>
+    <ID>ArgumentListWrapping:NotebookRepository.kt$NotebookRepository$( "notebooks", arrayOf("id"), null, null, null, null, "updated_at DESC", "1" )</ID>
+    <ID>ArgumentListWrapping:NotebookRepository.kt$NotebookRepository$( "notebooks", arrayOf("id", "title", "kind", "created_at", "updated_at"), "id=?", arrayOf(notebookId.toString()), null, null, null, "1" )</ID>
+    <ID>ArgumentListWrapping:NotebookRepository.kt$NotebookRepository$( "notebooks", arrayOf("id", "title", "kind", "updated_at"), null, null, null, null, "updated_at DESC" )</ID>
+    <ID>ArgumentListWrapping:NotebookRepository.kt$NotebookRepository$( "notebooks", arrayOf("kind"), "id=?", arrayOf(notebookId.toString()), null, null, null, "1" )</ID>
+    <ID>ArgumentListWrapping:NotebookRepository.kt$NotebookRepository$( "objects", "id=? AND page_id=?", arrayOf(id, snapshot.metadata.id.toString()) )</ID>
+    <ID>ArgumentListWrapping:NotebookRepository.kt$NotebookRepository$( "objects", arrayOf("id"), "id=? AND page_id=?", arrayOf(objectId.toString(), pageId.toString()), null, null, null, "1" )</ID>
+    <ID>ArgumentListWrapping:NotebookRepository.kt$NotebookRepository$( "objects", arrayOf("id"), "page_id=?", arrayOf(snapshot.metadata.id.toString()), null, null, null )</ID>
+    <ID>ArgumentListWrapping:NotebookRepository.kt$NotebookRepository$( "page_order", arrayOf("page_id"), "notebook_id=?", arrayOf(notebookId.toString()), null, null, "position" )</ID>
+    <ID>ArgumentListWrapping:NotebookRepository.kt$NotebookRepository$( "pages", arrayOf( "width", "height", "bookmarked", "content_revision", "created_at", "updated_at", "kind", "parent_pdf_page_id", "pdf_page_index", "pdf_bound_left", "pdf_bound_top", "pdf_bound_right", "pdf_bound_bottom", "pdf_a", "pdf_b", "pdf_c", "pdf_d", "pdf_tx", "pdf_ty", "template_id" ), "id=?", arrayOf(id.toString()), null, null, null )</ID>
+    <ID>ArgumentListWrapping:NotebookRepository.kt$NotebookRepository$( "pages", arrayOf("notebook_id", "kind"), "id=?", arrayOf(pageId.toString()), null, null, null, "1" )</ID>
+    <ID>ArgumentListWrapping:NotebookRepository.kt$NotebookRepository$( "pages", arrayOf("parent_pdf_page_id"), "id=?", arrayOf(pageId.toString()), null, null, null, "1" )</ID>
+    <ID>ArgumentListWrapping:NotebookRepository.kt$NotebookRepository$( "pages", arrayOf("width", "height"), "id=?", arrayOf(pageId.toString()), null, null, null, "1" )</ID>
+    <ID>ArgumentListWrapping:NotebookRepository.kt$NotebookRepository$( "pdf_anchors", arrayOf( "id", "source_page_id", "note_object_id", "kind", "normalized_left", "normalized_top", "normalized_right", "normalized_bottom", "selected_text", "ordinal", "created_at" ), "note_page_id=?", arrayOf(notePageId.toString()), null, null, "ordinal" )</ID>
+    <ID>ArgumentListWrapping:NotebookRepository.kt$NotebookRepository$( "pdf_anchors", arrayOf( "id", "source_page_id", "note_page_id", "kind", "normalized_left", "normalized_top", "normalized_right", "normalized_bottom", "selected_text", "ordinal", "created_at" ), "note_object_id=?", arrayOf(noteObjectId.toString()), null, null, null, "1" )</ID>
+    <ID>ArgumentListWrapping:NotebookRepository.kt$NotebookRepository$( "pdf_anchors", arrayOf("id", "note_page_id", "note_object_id", "kind", "normalized_left", "normalized_top", "normalized_right", "normalized_bottom", "selected_text", "ordinal", "created_at"), "source_page_id=?", arrayOf(sourcePageId.toString()), null, null, "ordinal" )</ID>
+    <ID>ArgumentListWrapping:NotebookRepository.kt$NotebookRepository$( "pdf_documents", arrayOf("asset_path"), null, null, null, null, null )</ID>
+    <ID>ArgumentListWrapping:NotebookRepository.kt$NotebookRepository$( "pdf_documents", arrayOf("asset_path", "display_name", "mime_type", "byte_length", "sha256", "page_count", "created_at"), "notebook_id=?", arrayOf(notebookId.toString()), null, null, null, "1" )</ID>
+    <ID>ArgumentListWrapping:NotebookRepository.kt$NotebookRepository$( "strokes", arrayOf("base_width", "color", "pressure_a", "pressure_gamma", "pen_type", "points_blob"), "object_id=?", arrayOf(id.toString()), null, null, null )</ID>
+    <ID>ArgumentListWrapping:NotebookRepository.kt$NotebookRepository$( "texts", arrayOf("content", "font_family", "font_size"), "object_id=?", arrayOf(id.toString()), null, null, null )</ID>
+    <ID>ArgumentListWrapping:NotebookRepository.kt$NotebookRepository$( "transfer_receipts", arrayOf("object_id"), "source_device_id=? AND item_id=?", arrayOf(sourceDeviceId, itemId.toString()), null, null, null )</ID>
+    <ID>ArgumentListWrapping:NotebookRepository.kt$NotebookRepository$( "transfer_receipts", null, values, SQLiteDatabase.CONFLICT_IGNORE )</ID>
+    <ID>ArgumentListWrapping:NotebookRepository.kt$NotebookRepository$( cursor.getFloat(13), cursor.getFloat(14), cursor.getFloat(15), cursor.getFloat(16), cursor.getFloat(17), cursor.getFloat(18) )</ID>
+    <ID>ArgumentListWrapping:NotebookRepository.kt$NotebookRepository$( cursor.getFloat(14), cursor.getFloat(15), cursor.getFloat(16), cursor.getFloat(17), cursor.getFloat(18), cursor.getFloat(19) )</ID>
+    <ID>ArgumentListWrapping:NotebookRepository.kt$NotebookRepository$( cursor.getFloat(2), cursor.getFloat(3), cursor.getFloat(4), cursor.getFloat(5), cursor.getFloat(6), cursor.getFloat(7) )</ID>
+    <ID>ArgumentListWrapping:NotebookRepository.kt$NotebookRepository$( cursor.getFloat(8), cursor.getFloat(9), cursor.getFloat(10), cursor.getFloat(11) )</ID>
+    <ID>ArgumentListWrapping:NotebookRepository.kt$NotebookRepository$( db, objectId, transform, zIndex, createdAt, updatedAt, localBounds )</ID>
+    <ID>ArgumentListWrapping:NotebookRepository.kt$NotebookRepository$( db, replacementId, sourceNotebookId, sourceSize.first, sourceSize.second, now )</ID>
+    <ID>ArgumentListWrapping:NotebookRepository.kt$NotebookRepository$( notebookId, cursor.getString(0), cursor.getString(1), cursor.getString(2), cursor.getLong(3), cursor.getString(4), cursor.getInt(5), cursor.getLong(6) )</ID>
+    <ID>ArgumentListWrapping:NotebookRepository.kt$NotebookRepository$("created_at", anchor.createdAt)</ID>
+    <ID>ArgumentListWrapping:NotebookRepository.kt$NotebookRepository$("objects", "id=? AND page_id=?", arrayOf(mutation.objectId.toString(), mutation.pageId.toString()))</ID>
+    <ID>ArgumentListWrapping:NotebookRepository.kt$NotebookRepository$("ordinal", anchor.ordinal)</ID>
+    <ID>ArgumentListWrapping:NotebookRepository.kt$NotebookRepository$("selected_text", anchor.selectedText)</ID>
+    <ID>ArgumentListWrapping:NotebookRepository.kt$NotebookRepository$(0)</ID>
+    <ID>ArgumentListWrapping:NotebookRepository.kt$NotebookRepository$(1)</ID>
+    <ID>ArgumentListWrapping:NotebookRepository.kt$NotebookRepository$(2)</ID>
+    <ID>ArgumentListWrapping:NotebookRepository.kt$NotebookRepository$(3)</ID>
+    <ID>ArgumentListWrapping:NotebookRepository.kt$NotebookRepository$(4)</ID>
+    <ID>ArgumentListWrapping:NotebookRepository.kt$NotebookRepository$(c.getFloat(0), c.getInt(1), PressureCurve(c.getFloat(2), c.getFloat(3)), PenType.valueOf(c.getString(4)))</ID>
+    <ID>ArgumentListWrapping:NotebookRepository.kt$NotebookRepository$(c.getFloat(2), c.getFloat(3))</ID>
+    <ID>ArgumentListWrapping:NotebookRepository.kt$NotebookRepository$(c.getString(1))</ID>
+    <ID>ArgumentListWrapping:NotebookRepository.kt$NotebookRepository$(c.getString(4))</ID>
+    <ID>ArgumentListWrapping:NotebookRepository.kt$NotebookRepository$(mutation.objectId.toString(), mutation.pageId.toString())</ID>
+    <ID>ArgumentListWrapping:PageManagerPanel.kt$( tool, event.buttonState or PenButtonTracker.currentButtonState, event.source )</ID>
+    <ID>ArgumentListWrapping:PageRenderer.kt$PageRenderer$( bitmap, null, RectF(0f, 0f, obj.pixelWidth.toFloat(), obj.pixelHeight.toFloat()), Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG) )</ID>
+    <ID>ArgumentListWrapping:PageRenderer.kt$PageRenderer$(when (orientation) { 2 -&gt; floatArrayOf(-1f, 0f, width, 0f, 1f, 0f, 0f, 0f, 1f) 3 -&gt; floatArrayOf(-1f, 0f, width, 0f, -1f, height, 0f, 0f, 1f) 4 -&gt; floatArrayOf(1f, 0f, 0f, 0f, -1f, height, 0f, 0f, 1f) 5 -&gt; floatArrayOf(0f, 1f, 0f, 1f, 0f, 0f, 0f, 0f, 1f) 6 -&gt; floatArrayOf(0f, -1f, height, 1f, 0f, 0f, 0f, 0f, 1f) 7 -&gt; floatArrayOf(0f, -1f, height, -1f, 0f, width, 0f, 0f, 1f) 8 -&gt; floatArrayOf(0f, 1f, 0f, -1f, 0f, width, 0f, 0f, 1f) else -&gt; floatArrayOf(1f, 0f, 0f, 0f, 1f, 0f, 0f, 0f, 1f) })</ID>
+    <ID>ArgumentListWrapping:PdfAssetStore.kt$PdfAssetStore$( "pdf-incoming/${temp.name}", sanitizeDisplayName(displayName), total, digest.digest().joinToString("") { "%02x".format(it) } )</ID>
+    <ID>ArgumentListWrapping:PdfAssetStore.kt$PdfAssetStore$( uri, arrayOf(OpenableColumns.SIZE), null, null, null )</ID>
+    <ID>ArgumentListWrapping:PdfViewportMathTest.kt$PdfViewportMathTest$( PdfViewportState(zoom = 10f, panX = 100_000f, panY = -100_000f), 1000f, 1400f, 1000, 1000 )</ID>
+    <ID>ArgumentListWrapping:PdfViewportMathTest.kt$PdfViewportMathTest$( PdfViewportState(zoom = 1f, panX = 10_000f, panY = -10_000f), 1000f, 1400f, 1000, 1000 )</ID>
+    <ID>ArgumentListWrapping:PdfViewportMathTest.kt$PdfViewportMathTest$( PdfViewportState(zoom = 1f, panX = 200f, panY = -200f), 1000f, 1400f, 1000, 1000 )</ID>
+    <ID>ArgumentListWrapping:PdfViewportMathTest.kt$PdfViewportMathTest$( start, 2f, focusX, focusY, 1000f, 1400f, 1000, 1000 )</ID>
+    <ID>ArgumentListWrapping:PenDrawView.kt$PenDrawView$( (pageX - richGestureAnchorX).toDouble(), (pageY - richGestureAnchorY).toDouble() )</ID>
+    <ID>ArgumentListWrapping:PenDrawView.kt$PenDrawView$( b.left to b.top, b.right to b.top, b.left to b.bottom, b.right to b.bottom )</ID>
+    <ID>ArgumentListWrapping:PenDrawView.kt$PenDrawView$( bounds.left / page.width, bounds.top / page.height, bounds.right / page.width, bounds.bottom / page.height )</ID>
+    <ID>ArgumentListWrapping:PenDrawView.kt$PenDrawView$( centerX - radius * 0.08f, centerY - halfHeight, centerX + radius * 0.64f, centerY + halfHeight, round, round, linkIconPaint )</ID>
+    <ID>ArgumentListWrapping:PenDrawView.kt$PenDrawView$( centerX - radius * 0.64f, centerY - halfHeight, centerX + radius * 0.08f, centerY + halfHeight, round, round, linkIconPaint )</ID>
+    <ID>ArgumentListWrapping:PenDrawView.kt$PenDrawView$( context.cacheDir, java.io.File(context.filesDir, "documents") )</ID>
+    <ID>ArgumentListWrapping:PenDrawView.kt$PenDrawView$( corner.first - h, corner.second - h, corner.first + h, corner.second + h, handlePaint )</ID>
+    <ID>ArgumentListWrapping:PenDrawView.kt$PenDrawView$( dirty.left.toFloat(), dirty.top.toFloat(), dirty.right.toFloat(), dirty.bottom.toFloat() )</ID>
+    <ID>ArgumentListWrapping:PenDrawView.kt$PenDrawView$( displayTarget.left, displayTarget.top, displayTarget.right, displayTarget.bottom, renderContext.placeholderPaint )</ID>
+    <ID>ArgumentListWrapping:PenDrawView.kt$PenDrawView$( displayTarget.right, displayTarget.top, displayTarget.left, displayTarget.bottom, renderContext.placeholderPaint )</ID>
+    <ID>ArgumentListWrapping:PenDrawView.kt$PenDrawView$( file, sourceIndex, normalizedBounds, sourceSnapshot )</ID>
+    <ID>ArgumentListWrapping:PenDrawView.kt$PenDrawView$( notebook.id, target.id, target.contentRevision, backgroundRevision(target.toMetadataForTemplate()), width, height, pdfViewportStates[target.id]?.revision ?: 0 )</ID>
+    <ID>ArgumentListWrapping:PenDrawView.kt$PenDrawView$( notebookId, id, metadata.contentRevision, backgroundRevision(metadata), renderWidth, renderHeight, viewportRevision )</ID>
+    <ID>ArgumentListWrapping:PenDrawView.kt$PenDrawView$( obj.localBounds.left, obj.localBounds.top, obj.localBounds.right, obj.localBounds.bottom )</ID>
+    <ID>ArgumentListWrapping:PenDrawView.kt$PenDrawView$( obj.transform.mapPoint(b.left, b.top), obj.transform.mapPoint(b.right, b.top), obj.transform.mapPoint(b.left, b.bottom), obj.transform.mapPoint(b.right, b.bottom) )</ID>
+    <ID>ArgumentListWrapping:PenDrawView.kt$PenDrawView$( richGestureAnchorX, richGestureAnchorY, (distance / richGestureStartValue).coerceIn(0.1f, 10f) )</ID>
+    <ID>ArgumentListWrapping:PenDrawView.kt$PenDrawView$( richGestureAnchorX, richGestureAnchorY, atan2(pageY - richGestureAnchorY, pageX - richGestureAnchorX) - richGestureStartValue )</ID>
+    <ID>ArgumentListWrapping:PenDrawView.kt$PenDrawView$( scale, 0f, 0f, scale, centerX - displayWidth * scale / 2f, centerY - displayHeight * scale / 2f )</ID>
+    <ID>ArgumentListWrapping:PenDrawView.kt$PenDrawView$( start, nextZoom, focusX, focusY, page.width, page.height, width, height )</ID>
+    <ID>ArgumentListWrapping:PenDrawView.kt$PenDrawView$( sysX, sysY, loc[0], loc[1], rotation, originPos, screenW, screenH )</ID>
+    <ID>ArgumentListWrapping:PenDrawView.kt$PenDrawView$( width = width.toFloat(), height = height.toFloat(), kind = PageKind.LINKED_NOTE, parentPdfPageId = parentPdfPageId, templateId = newTemplateId )</ID>
+    <ID>ArgumentListWrapping:PenDrawView.kt$PenDrawView$(notePage.kind == PageKind.LINKED_NOTE &amp;&amp; notePage.parentPdfPageId == pending.sourcePageId )</ID>
+    <ID>ArgumentListWrapping:PhoneTransferClient.kt$PhoneTransferClient$( TransferErrorCode.INTERNAL, error.message ?: "传输失败", true, mutableSnapshot.value.mode )</ID>
+    <ID>ArgumentListWrapping:PhoneTransferClient.kt$PhoneTransferClient$( artifact.id, artifact.displayName, artifact.mimeType, artifact.byteLength, artifact.sha256 )</ID>
+    <ID>ArgumentListWrapping:PhoneTransferClient.kt$PhoneTransferClient$( incoming, item.id, fileKey, probeKey = if (mode == TransferMode.LAN) probeKey else null, progress = { done, total -&gt; updateProgress(item.id, done, total, meter) }, onListening = { activeListeningSocket = it } )</ID>
+    <ID>ArgumentListWrapping:PhoneTransferClient.kt$PhoneTransferClient$( session, clientId, BleCommand.PrepareFileTransfer(artifact.id, mode, receiverEndpoint, nonce) )</ID>
+    <ID>ArgumentListWrapping:PhoneTransferClient.kt$PhoneTransferClient$( session, clientId, BleCommand.PrepareFileTransfer(item.id, mode, receiverEndpoint, nonce) )</ID>
+    <ID>ArgumentListWrapping:PhoneTransferClient.kt$PhoneTransferClient$( session, clientId, artifact, pairingKey, TransferMode.WIFI_DIRECT, NetworkEndpoint(joined.groupOwnerAddress, wifi.port), progressCallback )</ID>
+    <ID>ArgumentListWrapping:PhoneTransferClient.kt$PhoneTransferClient$( session, pairedPhoneId, item, incoming, key, TransferMode.WIFI_DIRECT, receiverEndpoint )</ID>
+    <ID>ArgumentListWrapping:PhoneTransferClient.kt$PhoneTransferClient$( wifiEndpoint.deviceAddress, "NoteLink", wifiEndpoint.networkName, wifiEndpoint.passphrase )</ID>
+    <ID>ArgumentListWrapping:PhoneTransferClient.kt$PhoneTransferClient$(artifact.id)</ID>
+    <ID>ArgumentListWrapping:PhoneTransferClient.kt$PhoneTransferClient$(exchange(session, paired.id, BleCommand.Capabilities(localCapabilities(key))) is BleResponse.Capabilities)</ID>
+    <ID>ArgumentListWrapping:PhoneTransferClient.kt$PhoneTransferClient$(failedSession, authenticatedId, BleCommand.Release(itemId))</ID>
+    <ID>ArgumentListWrapping:PhoneTransferClient.kt$PhoneTransferClient$(itemId)</ID>
+    <ID>ArgumentListWrapping:PhoneTransferClient.kt$PhoneTransferClient$(key)</ID>
+    <ID>ArgumentListWrapping:PhoneTransferClient.kt$PhoneTransferClient$(localCapabilities(key))</ID>
+    <ID>ArgumentListWrapping:PhoneTransferClient.kt$PhoneTransferClient$(session, authenticatedId, BleCommand.PushStatus(artifact.id))</ID>
+    <ID>ArgumentListWrapping:PhoneTransferClient.kt$PhoneTransferClient$(session, paired.id, BleCommand.Capabilities(localCapabilities(key)))</ID>
+    <ID>ArgumentListWrapping:RichPageObjectTest.kt$RichPageObjectTest$( UUID.randomUUID(), assetPath = "assets/example.png", mimeType = "image/png", pixelWidth = 100, pixelHeight = 50 )</ID>
+    <ID>ArgumentListWrapping:RichPageObjectTest.kt$RichPageObjectTest$( UUID.randomUUID(), assetPath = "assets/portrait.jpg", mimeType = "image/jpeg", pixelWidth = 4000, pixelHeight = 3000, exifOrientation = 6 )</ID>
+    <ID>ArgumentListWrapping:RichPageObjectTest.kt$RichPageObjectTest$( id = UUID.randomUUID(), text = "hello", fontSize = 24f, localBounds = Bounds(0f, 0f, 60f, 30f) )</ID>
+    <ID>ArgumentListWrapping:SelectionTool.kt$SelectionTool$( b.left to b.top, b.right to b.top, b.left to b.bottom, b.right to b.bottom )</ID>
+    <ID>ArgumentListWrapping:SelectionTool.kt$SelectionTool$( bounds.left, bounds.top, bounds.right, bounds.top, bounds.right, bounds.bottom, bounds.left, bounds.bottom )</ID>
+    <ID>ArgumentListWrapping:SelectionToolTest.kt$SelectionToolTest$( UUID.randomUUID(), stroke = Stroke(listOf(point(20f, 20f), point(80f, 80f)), PenStyle()) )</ID>
+    <ID>ArgumentListWrapping:SelectionToolTest.kt$SelectionToolTest$( UUID.randomUUID(), transform = Transform2D.translate(30f, 30f), text = "note", localBounds = Bounds(0f, 0f, 40f, 20f) )</ID>
+    <ID>ArgumentListWrapping:SelectionToolTest.kt$SelectionToolTest$( UUID.randomUUID(), transform = Transform2D.translate(60f, 50f), assetPath = "assets/test.png", mimeType = "image/png", pixelWidth = 20, pixelHeight = 20 )</ID>
+    <ID>ArgumentListWrapping:SettingsScreen.kt$( "最近使用 ${DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT).format(Date(client.lastUsedAt))}", fontSize = 12.sp, color = Color.DarkGray )</ID>
+    <ID>ArgumentListWrapping:SettingsScreen.kt$( transferSnapshot, transferEvents, transferEndpointName, showRecentTransferEvents, onCancelTransfer )</ID>
+    <ID>ArgumentListWrapping:SettingsScreen.kt$("BLE", snapshot.phase.name.replace('_', ' '), snapshot.mode?.name, "SSID ${snapshot.ssidMatch.name}")</ID>
+    <ID>ArgumentListWrapping:SettingsScreen.kt$("授予权限")</ID>
+    <ID>ArgumentListWrapping:SettingsScreen.kt$('_', ' ')</ID>
+    <ID>ArgumentListWrapping:SettingsScreen.kt$(Date(client.lastUsedAt))</ID>
+    <ID>ArgumentListWrapping:SettingsScreen.kt$(DateFormat.SHORT, DateFormat.SHORT)</ID>
+    <ID>ArgumentListWrapping:SettingsScreen.kt$(client.lastUsedAt)</ID>
+    <ID>ArgumentListWrapping:SettingsScreen.kt$(if (client.legacy) "旧配对，连接后自动识别" else client.id, fontSize = 12.sp, color = Color.DarkGray)</ID>
+    <ID>ArgumentListWrapping:SettingsScreen.kt$(onClick = onTransferPermissions)</ID>
+    <ID>ArgumentListWrapping:StrokeGeometry.kt$StrokeGeometry$( point.x - halfWidth, point.y + halfWidth, point.x + halfWidth, point.y + halfWidth )</ID>
+    <ID>ArgumentListWrapping:StrokeGeometry.kt$StrokeGeometry$( point.x - halfWidth, point.y - halfWidth, point.x + halfWidth, point.y + halfWidth )</ID>
+    <ID>ArgumentListWrapping:StrokeGeometry.kt$StrokeGeometry$( point.x - halfWidth, point.y - halfWidth, point.x + halfWidth, point.y - halfWidth )</ID>
+    <ID>ArgumentListWrapping:TemplateManifestCodecTest.kt$TemplateManifestCodecTest$( TemplateManifestEntry("id", "Name", "Description", "file.svg", 3, 4), file, "hash", TemplateAvailability.AVAILABLE )</ID>
+    <ID>ArgumentListWrapping:TemplateStore.kt$TemplateStore$( entry, cached, sha256(cached), TemplateAvailability.CACHED, "外部来源不可用，正在使用最后可用版本" )</ID>
+    <ID>ArgumentListWrapping:TemplateStore.kt$TemplateStore$( entry, null, "unavailable:${entry.id}", TemplateAvailability.INVALID, "模板文件缺失或损坏" )</ID>
+    <ID>ArgumentListWrapping:TemplateStore.kt$TemplateStore$( temporary.toPath(), target.toPath(), StandardCopyOption.REPLACE_EXISTING )</ID>
+    <ID>ArgumentListWrapping:TemplateUi.kt$( Modifier.fillMaxWidth(), shape = RectangleShape, color = Color(0xFFF2F2F2) )</ID>
+    <ID>ArgumentListWrapping:TemplateUi.kt$( definition?.description.orEmpty(), color = Color(0xFF666666), fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis )</ID>
+    <ID>ArgumentListWrapping:TemplateUi.kt$( if (catalog.directoryUri == null) "正在使用内置模板 · 尚未连接公共目录" else "公共目录已连接 · 返回应用或点击刷新可同步外部修改", color = Color(0xFF666666), fontSize = 12.sp )</ID>
+    <ID>ArgumentListWrapping:TemplateUi.kt$(0xFF8B0000)</ID>
+    <ID>ArgumentListWrapping:TemplateUi.kt$(definition.error, color = Color(0xFF8B0000), fontSize = 11.sp)</ID>
+    <ID>ArgumentListWrapping:ThumbnailManager.kt$ThumbnailManager$( image, null, RectF(0f, 0f, obj.pixelWidth.toFloat(), obj.pixelHeight.toFloat()), Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG) )</ID>
+    <ID>ArgumentListWrapping:ThumbnailManager.kt$ThumbnailManager$(when (obj.exifOrientation) { 2 -&gt; floatArrayOf(-1f, 0f, w, 0f, 1f, 0f, 0f, 0f, 1f) 3 -&gt; floatArrayOf(-1f, 0f, w, 0f, -1f, h, 0f, 0f, 1f) 4 -&gt; floatArrayOf(1f, 0f, 0f, 0f, -1f, h, 0f, 0f, 1f) 5 -&gt; floatArrayOf(0f, 1f, 0f, 1f, 0f, 0f, 0f, 0f, 1f) 6 -&gt; floatArrayOf(0f, -1f, h, 1f, 0f, 0f, 0f, 0f, 1f) 7 -&gt; floatArrayOf(0f, -1f, h, -1f, 0f, w, 0f, 0f, 1f) 8 -&gt; floatArrayOf(0f, 1f, 0f, -1f, 0f, w, 0f, 0f, 1f) else -&gt; floatArrayOf(1f, 0f, 0f, 0f, 1f, 0f, 0f, 0f, 1f) })</ID>
+    <ID>ArgumentListWrapping:Toolbar.kt$( "Marker", painterResource(R.drawable.ic_ink_highlighter), PenType.Marker, settings, onSettingsChange )</ID>
+    <ID>ArgumentListWrapping:Toolbar.kt$( "Pen", rememberVectorPainter(Icons.Filled.Edit), PenType.NormalPen, settings, onSettingsChange )</ID>
+    <ID>ArgumentListWrapping:Toolbar.kt$( "Pencil", painterResource(R.drawable.ic_ink_pen), PenType.Pencil, settings, onSettingsChange )</ID>
+    <ID>ArgumentListWrapping:Toolbar.kt$( 0, (containerSize.height - toolbarSize.height).coerceAtLeast(0) )</ID>
+    <ID>ArgumentListWrapping:Toolbar.kt$( 0, (containerSize.width - toolbarSize.width).coerceAtLeast(0) )</ID>
+    <ID>ArgumentListWrapping:Toolbar.kt$( 0f, (containerSize.height - toolbarSize.height).coerceAtLeast(0).toFloat() )</ID>
+    <ID>ArgumentListWrapping:Toolbar.kt$( 0f, (containerSize.width - toolbarSize.width).coerceAtLeast(0).toFloat() )</ID>
+    <ID>ArgumentListWrapping:Toolbar.kt$("局部擦除", onClick = { if (eraserMode != EraserMode.POINT) onToggle() }, selected = eraserMode == EraserMode.POINT)</ID>
+    <ID>ArgumentListWrapping:Toolbar.kt$("整笔擦除", onClick = { if (eraserMode != EraserMode.WHOLE_STROKE) onToggle() }, selected = eraserMode == EraserMode.WHOLE_STROKE)</ID>
+    <ID>ArgumentListWrapping:Toolbar.kt$(if (resolvedHeaderWidth == null) Modifier.fillMaxWidth() else Modifier.width(resolvedHeaderWidth))</ID>
+    <ID>ArgumentListWrapping:Toolbar.kt$(modifier.size(44.dp).clickable(onClick = onClick), contentAlignment = when (edge) { DockEdge.START -&gt; Alignment.CenterStart DockEdge.END -&gt; Alignment.CenterEnd DockEdge.TOP -&gt; Alignment.TopCenter DockEdge.BOTTOM -&gt; Alignment.BottomCenter })</ID>
+    <ID>ArgumentListWrapping:Toolbar.kt$(resolvedHeaderWidth)</ID>
+    <ID>ArgumentListWrapping:Transform2D.kt$Transform2D.Companion$( a = cos, b = sin, c = -sin, d = cos, tx = centerX - cos * centerX + sin * centerY, ty = centerY - sin * centerX - cos * centerY )</ID>
+    <ID>ArgumentListWrapping:Transform2D.kt$Transform2D.Companion$( a = scale, b = 0f, c = 0f, d = scale, tx = centerX - scale * centerX, ty = centerY - scale * centerY )</ID>
+    <ID>ArgumentListWrapping:ViewportTransform.kt$PdfViewportMath$( start.copy( zoom = boundedZoom, panX = focusX - pagePoint[0] * nextScale - centerX, panY = focusY - pagePoint[1] * nextScale - centerY ), pageWidth, pageHeight, viewWidth, viewHeight )</ID>
+    <ID>ArgumentListWrapping:ViewportTransform.kt$PdfViewportMath$(centerX - viewWidth * FIT_PAN_FRACTION, centerX + viewWidth * FIT_PAN_FRACTION)</ID>
+    <ID>ArgumentListWrapping:ViewportTransform.kt$PdfViewportMath$(centerY - viewHeight * FIT_PAN_FRACTION, centerY + viewHeight * FIT_PAN_FRACTION)</ID>
+    <ID>ComplexCondition:ExportTaskRepository.kt$ExportTaskRepository$!file.isFile || record.id == null || record.sha256 == null || record.createdAt == null</ID>
+    <ID>ComplexCondition:HitTest.kt$HitTest$((abC &gt; EPSILON &amp;&amp; abD &lt; -EPSILON) || (abC &lt; -EPSILON &amp;&amp; abD &gt; EPSILON)) &amp;&amp; ((cdA &gt; EPSILON &amp;&amp; cdB &lt; -EPSILON) || (cdA &lt; -EPSILON &amp;&amp; cdB &gt; EPSILON))</ID>
+    <ID>ComplexCondition:Page.kt$Page$width &lt;= 0f || height &lt;= 0f || (this.width == width &amp;&amp; this.height == height)</ID>
+    <ID>ComplexCondition:PenDrawView.kt$PenDrawView$!pagePreRenderClosed &amp;&amp; desiredWarmNotebookId == notebookId &amp;&amp; currentMetadata?.contentRevision == key.contentRevision &amp;&amp; currentMetadata?.let(::backgroundRevision) == key.backgroundRevision &amp;&amp; id in desiredWarmPageIds</ID>
+    <ID>ComplexCondition:PenDrawView.kt$PenDrawView$cancelled || start == null || end == null || page.width &lt;= 0f || page.height &lt;= 0f</ID>
+    <ID>ComplexCondition:PenDrawView.kt$PenDrawView$obj != null &amp;&amp; !cancelled &amp;&amp; obj.transform != richGestureBefore &amp;&amp; command != null</ID>
+    <ID>ComplexCondition:PenDrawView.kt$PenDrawView$pagePreRenderClosed || desiredWarmNotebookId != notebookId || snapshot.metadata.contentRevision != key.contentRevision || id !in desiredWarmPageIds</ID>
+    <ID>ComplexCondition:PenDrawView.kt$PenDrawView$uiInputBlocked || toolbarDragBlocked || width &lt;= 0 || height &lt;= 0</ID>
+    <ID>ComplexCondition:PenDrawView.kt$PenDrawView$width &gt; 0 &amp;&amp; height &gt; 0 &amp;&amp; (page.width &lt;= 0f || page.height &lt;= 0f)</ID>
+    <ID>ComplexCondition:ViewportTransform.kt$ViewportTransform.Companion$pageWidth &lt;= 0f || pageHeight &lt;= 0f || viewWidth &lt;= 0 || viewHeight &lt;= 0</ID>
+    <ID>CyclomaticComplexMethod:HitTest.kt$HitTest$private fun segmentsIntersect( ax: Float, ay: Float, bx: Float, by: Float, cx: Float, cy: Float, dx: Float, dy: Float ): Boolean</ID>
+    <ID>CyclomaticComplexMethod:InsertionCoordinator.kt$InsertionCoordinator$suspend fun remote(clientId: String, kind: ContentKind)</ID>
+    <ID>CyclomaticComplexMethod:LassoOverlayView.kt$LassoOverlayView$override fun onTouchEvent(event: MotionEvent): Boolean</ID>
+    <ID>CyclomaticComplexMethod:MainActivity.kt$@OptIn(ExperimentalMaterial3Api::class) @Composable private fun AppRoot( onView: (PenDrawView) -&gt; Unit, onTransientInputGuardReleaseReady: ((() -&gt; Unit)?) -&gt; Unit, onHardwareKeyHandlerReady: (((HardwareKeyId) -&gt; Unit)?) -&gt; Unit, skipTemplateDirectoryPrompt: Boolean )</ID>
+    <ID>CyclomaticComplexMethod:ObjectEditOverlayView.kt$ObjectEditOverlayView$override fun onTouchEvent(event: MotionEvent): Boolean</ID>
+    <ID>CyclomaticComplexMethod:PageManagerPanel.kt$@OptIn(ExperimentalComposeUiApi::class) @Composable fun PageManagerPanel( modifier: Modifier, dockEdge: DockEdge, thumbnailSize: DpSize, pages: List&lt;PageUiInfo&gt;, currentPageId: UUID?, thumbnail: (UUID) -&gt; android.graphics.Bitmap?, requestThumbnails: (List&lt;UUID&gt;) -&gt; Unit, onSelect: (UUID) -&gt; Unit, onAddAfter: (UUID) -&gt; UUID, onDelete: (UUID) -&gt; Boolean, onMove: (UUID, Int) -&gt; Boolean, onNotice: (String) -&gt; Unit )</ID>
+    <ID>CyclomaticComplexMethod:PdfInkAppearance.kt$PdfInkAppearance$fun buildAppearance(bounds: PdfInkBounds): PdfInkAppearanceContent</ID>
+    <ID>CyclomaticComplexMethod:PenButtonTracker.kt$PenButtonTracker$fun observeMotion(event: MotionEvent, channel: String)</ID>
+    <ID>CyclomaticComplexMethod:PenDrawView.kt$PenDrawView$fun prepareLinkedNoteFromRegion( normalizedBounds: Bounds, content: LinkedNoteContent, targetNotePageId: UUID?, onComplete: (Result&lt;UUID&gt;) -&gt; Unit )</ID>
+    <ID>CyclomaticComplexMethod:PenDrawView.kt$PenDrawView$private fun drawToolOverlay(c: Canvas)</ID>
+    <ID>CyclomaticComplexMethod:PenDrawView.kt$PenDrawView$private fun schedulePagePreRender(id: UUID)</ID>
+    <ID>CyclomaticComplexMethod:PenGeometry.kt$PenGeometry$fun getPenDrawArea(rect: Rect, rotation: Int, orgPos: Int, screenWidth: Int, screenHeight: Int): Rect</ID>
+    <ID>CyclomaticComplexMethod:PenGeometry.kt$PenGeometry$fun getPenOrientation(a: Int, b: Int): Int</ID>
+    <ID>CyclomaticComplexMethod:PenGeometry.kt$PenGeometry$fun pointSysToClient( x: Float, y: Float, locationX: Int, locationY: Int, rotation: Int, orgPos: Int, screenWidth: Int, screenHeight: Int ): FloatArray</ID>
+    <ID>CyclomaticComplexMethod:PenSettings.kt$PenProfiles$private fun widthRange(type: PenType, model: String): Pair&lt;Float, Float&gt;</ID>
+    <ID>CyclomaticComplexMethod:PhoneTransferClient.kt$PhoneTransferClient$suspend fun requestNext(clientId: String, kind: ContentKind): ReceivedLease?</ID>
+    <ID>CyclomaticComplexMethod:PhoneTransferClient.kt$PhoneTransferClient$suspend fun sendExport( clientId: String, artifact: ExportArtifact, progress: (Long, Long) -&gt; Unit = { _, _ -&gt; } )</ID>
+    <ID>CyclomaticComplexMethod:SettingsScreen.kt$@Composable fun SettingsScreen( state: SettingsState, actions: SettingsActions, )</ID>
+    <ID>CyclomaticComplexMethod:SettingsScreen.kt$@Composable private fun TransferDiagnostics( snapshot: TransferSnapshot, events: List&lt;TransferLogEntry&gt;, endpointName: String?, showRecentEvents: Boolean, onCancel: () -&gt; Unit )</ID>
+    <ID>CyclomaticComplexMethod:StrokeGeometry.kt$StrokeGeometry$fun buildRange(all: List&lt;InkPoint&gt;, fromIndex: Int, style: PenStyle): StrokeOutline</ID>
+    <ID>CyclomaticComplexMethod:StylusClickResolver.kt$@OptIn(ExperimentalComposeUiApi::class) internal fun Modifier.stylusModifiedClickable( onSide1Click: (() -&gt; Unit)? = null, onSide2Click: (() -&gt; Unit)? = null, onSide3Click: (() -&gt; Unit)? = null ): Modifier</ID>
+    <ID>CyclomaticComplexMethod:TemplateManifestCodec.kt$TemplateManifestCodec$fun parse(json: String): TemplateManifestResult</ID>
+    <ID>CyclomaticComplexMethod:TemplateStore.kt$TemplateStore$private fun seedBuiltins(uri: Uri)</ID>
+    <ID>CyclomaticComplexMethod:ThumbnailManager.kt$ThumbnailManager$fun request( key: ThumbnailKey, snapshotProvider: () -&gt; PageSnapshot?, backgroundProvider: (() -&gt; Bitmap?)? = null, onReady: (ThumbnailKey) -&gt; Unit = {} )</ID>
+    <ID>CyclomaticComplexMethod:ThumbnailManager.kt$ThumbnailManager$private fun render(snapshot: PageSnapshot, background: Bitmap?): Bitmap</ID>
+    <ID>CyclomaticComplexMethod:Toolbar.kt$@Composable private fun ToolbarContent( state: EditorToolbarState, actions: EditorToolbarActions, onHandleDrag: (Offset) -&gt; Unit, onHandleDragStart: () -&gt; Unit, onHandleDragEnd: () -&gt; Unit, onHandleClick: () -&gt; Unit, )</ID>
+    <ID>CyclomaticComplexMethod:Toolbar.kt$@OptIn(ExperimentalFoundationApi::class, ExperimentalComposeUiApi::class) @Composable private fun SquarePainterButton( icon: Painter, contentDescription: String, enabled: Boolean, selected: Boolean, onFunctionClick: (() -&gt; Unit)? = null, onSide2Click: (() -&gt; Unit)? = null, onSide3Click: (() -&gt; Unit)? = null, onDoubleClick: (() -&gt; Unit)? = null, onClick: () -&gt; Unit )</ID>
+    <ID>EmptyFunctionBlock:StrokeSmoother.kt$NoopSmoother${}</ID>
+    <ID>ImportOrdering:DeleteObjectsCommandTest.kt$import com.betterhv.note.doc.Page import com.betterhv.note.doc.StrokeObject import com.betterhv.note.doc.Transform2D import com.betterhv.note.ink.InkPoint import com.betterhv.note.ink.PenStyle import com.betterhv.note.ink.Stroke import org.junit.Assert.assertEquals import org.junit.Assert.assertNull import org.junit.Assert.assertNotNull import org.junit.Test import java.util.UUID</ID>
+    <ID>ImportOrdering:EinkModalOverlay.kt$import androidx.activity.compose.BackHandler import androidx.compose.foundation.background import androidx.compose.foundation.border import androidx.compose.foundation.clickable import androidx.compose.foundation.interaction.MutableInteractionSource import androidx.compose.foundation.layout.Box import androidx.compose.foundation.layout.BoxScope import androidx.compose.foundation.layout.fillMaxSize import androidx.compose.foundation.layout.fillMaxWidth import androidx.compose.foundation.layout.Arrangement import androidx.compose.foundation.layout.Column import androidx.compose.foundation.layout.padding import androidx.compose.foundation.layout.widthIn import androidx.compose.material3.Surface import androidx.compose.material3.Text import androidx.compose.runtime.Composable import androidx.compose.runtime.remember import androidx.compose.ui.Alignment import androidx.compose.ui.Modifier import androidx.compose.ui.graphics.Color import androidx.compose.ui.zIndex import androidx.compose.ui.graphics.RectangleShape import androidx.compose.ui.unit.dp</ID>
+    <ID>ImportOrdering:EventLog.kt$import androidx.compose.runtime.mutableStateListOf import android.os.Handler import android.os.Looper import java.text.SimpleDateFormat import java.util.Date import java.util.Locale</ID>
+    <ID>ImportOrdering:ExportDownloads.kt$import android.content.ContentValues import android.content.ContentUris import android.content.Context import android.net.Uri import android.os.Build import android.os.Environment import android.provider.MediaStore import java.io.File import java.io.FileInputStream import java.io.FileOutputStream import java.nio.file.Files import java.nio.file.StandardCopyOption</ID>
+    <ID>ImportOrdering:ExportEngine.kt$import android.graphics.Bitmap import com.betterhv.note.storage.NotebookRepository import com.betterhv.note.storage.PageSnapshot import com.betterhv.note.doc.PageKind import com.betterhv.note.pdf.MuPdfEngine import kotlinx.coroutines.CancellationException import kotlinx.coroutines.Dispatchers import kotlinx.coroutines.ensureActive import kotlinx.coroutines.withContext import java.io.File import java.io.FileInputStream import java.io.FileOutputStream import java.nio.file.Files import java.nio.file.StandardCopyOption import java.security.MessageDigest import java.util.UUID import kotlin.coroutines.coroutineContext</ID>
+    <ID>ImportOrdering:ExportFileNamesTest.kt$import com.betterhv.transfer.core.TransferLimits import java.util.UUID import org.junit.Assert.assertEquals import org.junit.Assert.assertFalse import org.junit.Assert.assertTrue import org.junit.Test</ID>
+    <ID>ImportOrdering:ExportPanel.kt$import android.graphics.Bitmap import androidx.compose.foundation.background import androidx.compose.foundation.border import androidx.compose.foundation.clickable import androidx.compose.foundation.rememberScrollState import androidx.compose.foundation.verticalScroll import androidx.compose.foundation.layout.Arrangement import androidx.compose.foundation.layout.Box import androidx.compose.foundation.layout.Column import androidx.compose.foundation.layout.Row import androidx.compose.foundation.layout.Spacer import androidx.compose.foundation.layout.fillMaxSize import androidx.compose.foundation.layout.fillMaxWidth import androidx.compose.foundation.layout.height import androidx.compose.foundation.layout.heightIn import androidx.compose.foundation.layout.padding import androidx.compose.foundation.layout.size import androidx.compose.foundation.layout.width import androidx.compose.foundation.lazy.LazyColumn import androidx.compose.foundation.lazy.items import androidx.compose.material.icons.Icons import androidx.compose.material.icons.automirrored.filled.ArrowBack import androidx.compose.material.icons.automirrored.filled.Send import androidx.compose.material.icons.filled.Add import androidx.compose.material.icons.filled.Check import androidx.compose.material.icons.filled.Delete import androidx.compose.material.icons.filled.Download import androidx.compose.material.icons.filled.ExpandMore import androidx.compose.material3.CircularProgressIndicator import androidx.compose.material3.HorizontalDivider import androidx.compose.material3.Icon import androidx.compose.material3.IconButton import androidx.compose.material3.LinearProgressIndicator import androidx.compose.material3.Surface import androidx.compose.material3.Text import androidx.compose.runtime.Composable import androidx.compose.runtime.LaunchedEffect import androidx.compose.runtime.collectAsState import androidx.compose.runtime.getValue import androidx.compose.runtime.mutableStateOf import androidx.compose.runtime.remember import androidx.compose.runtime.setValue import androidx.compose.ui.Alignment import androidx.compose.ui.Modifier import androidx.compose.ui.graphics.Color import androidx.compose.ui.graphics.RectangleShape import androidx.compose.ui.layout.onSizeChanged import androidx.compose.ui.platform.LocalDensity import androidx.compose.ui.text.font.FontWeight import androidx.compose.ui.text.style.TextOverflow import androidx.compose.ui.unit.IntOffset import androidx.compose.ui.unit.dp import androidx.compose.ui.unit.sp import androidx.compose.ui.window.Popup import androidx.compose.ui.window.PopupProperties import com.betterhv.note.export.ExportArtifact import com.betterhv.note.export.ExportActionAvailability import com.betterhv.note.export.ExportFormat import com.betterhv.note.export.ExportManagerState import com.betterhv.note.export.ExportNotebookOption import com.betterhv.note.export.ExportProgress import com.betterhv.note.export.ExportScope import com.betterhv.note.export.ExportTaskState import com.betterhv.note.export.ExportTaskSummary import com.betterhv.note.export.ExportViewModel import com.betterhv.transfer.core.PairedDevice import java.text.DateFormat import java.util.Date import java.util.UUID</ID>
+    <ID>ImportOrdering:ExportRevisionTest.kt$import java.util.UUID import org.junit.Assert.assertEquals import org.junit.Assert.assertNotEquals import org.junit.Test</ID>
+    <ID>ImportOrdering:ExportTaskRepository.kt$import android.content.ContentValues import android.content.Context import android.database.sqlite.SQLiteDatabase import com.betterhv.note.storage.SQLiteStore import com.betterhv.note.doc.PageKind import com.betterhv.note.template.TemplateStore import java.io.File import java.util.UUID</ID>
+    <ID>ImportOrdering:ExportViewModel.kt$import android.app.Application import androidx.lifecycle.AndroidViewModel import androidx.lifecycle.viewModelScope import com.betterhv.note.storage.NotebookRepository import com.betterhv.note.template.TemplateStore import java.io.File import java.util.UUID import kotlinx.coroutines.Dispatchers import kotlinx.coroutines.Job import kotlinx.coroutines.flow.MutableStateFlow import kotlinx.coroutines.flow.StateFlow import kotlinx.coroutines.flow.asStateFlow import kotlinx.coroutines.launch import kotlinx.coroutines.withContext</ID>
+    <ID>ImportOrdering:ImageAssetStore.kt$import android.content.Context import android.graphics.BitmapFactory import android.graphics.Bitmap import android.media.ExifInterface import android.net.Uri import java.io.File import java.io.FileInputStream import java.util.UUID</ID>
+    <ID>ImportOrdering:InsertionCoordinator.kt$import android.net.Uri import com.betterhv.note.storage.ImportedImage import com.betterhv.transfer.android.ReceivedLease import com.betterhv.transfer.core.ContentKind import com.betterhv.transfer.core.RemotePayload import java.util.UUID import kotlinx.coroutines.CancellationException import kotlinx.coroutines.CoroutineScope import kotlinx.coroutines.Dispatchers import kotlinx.coroutines.SupervisorJob import kotlinx.coroutines.cancel import kotlinx.coroutines.flow.MutableStateFlow import kotlinx.coroutines.flow.StateFlow import kotlinx.coroutines.launch import kotlinx.coroutines.withContext import kotlinx.coroutines.suspendCancellableCoroutine import kotlin.coroutines.resume</ID>
+    <ID>ImportOrdering:MainActivity.kt$import android.os.Bundle import android.os.Build import android.bluetooth.BluetoothManager import android.content.Context import android.content.pm.PackageManager import android.net.wifi.WifiManager import android.view.KeyEvent import android.view.MotionEvent import androidx.activity.compose.rememberLauncherForActivityResult import androidx.activity.result.contract.ActivityResultContracts import androidx.activity.ComponentActivity import androidx.activity.compose.BackHandler import androidx.activity.compose.setContent import androidx.compose.foundation.background import androidx.compose.foundation.border import androidx.compose.foundation.layout.Box import androidx.compose.foundation.layout.Column import androidx.compose.foundation.layout.Row import androidx.compose.foundation.layout.Arrangement import androidx.compose.foundation.layout.height import androidx.compose.foundation.layout.fillMaxHeight import androidx.compose.foundation.layout.fillMaxSize import androidx.compose.foundation.layout.fillMaxWidth import androidx.compose.foundation.layout.padding import androidx.compose.foundation.layout.offset import androidx.compose.foundation.layout.width import androidx.compose.foundation.layout.size import androidx.compose.foundation.lazy.LazyColumn import androidx.compose.foundation.lazy.items import androidx.compose.foundation.lazy.rememberLazyListState import androidx.compose.material3.Button import androidx.compose.material3.ExperimentalMaterial3Api import androidx.compose.material3.OutlinedTextField import androidx.compose.material3.TextButton import androidx.compose.material3.Icon import androidx.compose.material3.IconButton import androidx.compose.material3.LinearProgressIndicator import androidx.compose.material3.SnackbarDuration import androidx.compose.material3.SnackbarHost import androidx.compose.material3.SnackbarHostState import androidx.compose.material3.Surface import androidx.compose.material3.Text import androidx.compose.material.icons.Icons import androidx.compose.material.icons.filled.Bookmark import androidx.compose.material.icons.filled.Check import androidx.compose.material.icons.filled.Cancel import androidx.compose.material.icons.filled.Delete import androidx.compose.material.icons.filled.Edit import androidx.compose.material.icons.filled.MoveToInbox import androidx.compose.runtime.LaunchedEffect import androidx.compose.runtime.Composable import androidx.compose.runtime.DisposableEffect import androidx.compose.runtime.collectAsState import androidx.compose.runtime.getValue import androidx.compose.runtime.mutableIntStateOf import androidx.compose.runtime.mutableStateOf import androidx.compose.runtime.remember import androidx.compose.runtime.rememberCoroutineScope import androidx.compose.runtime.saveable.rememberSaveable import androidx.compose.runtime.setValue import androidx.compose.ui.Alignment import androidx.compose.ui.Modifier import androidx.compose.ui.focus.FocusRequester import androidx.compose.ui.focus.focusRequester import androidx.compose.ui.graphics.Color import androidx.compose.ui.graphics.RectangleShape import androidx.compose.ui.platform.LocalSoftwareKeyboardController import androidx.compose.ui.text.font.FontFamily import androidx.compose.ui.unit.dp import androidx.compose.ui.unit.sp import androidx.compose.ui.viewinterop.AndroidView import androidx.compose.ui.platform.LocalContext import androidx.compose.ui.platform.LocalConfiguration import androidx.compose.ui.platform.LocalDensity import androidx.lifecycle.compose.LocalLifecycleOwner import androidx.lifecycle.Lifecycle import androidx.lifecycle.LifecycleEventObserver import androidx.lifecycle.viewmodel.compose.viewModel import androidx.compose.ui.unit.DpSize import androidx.compose.ui.unit.IntOffset import com.betterhv.note.doc.ImageObject import com.betterhv.note.doc.TextFontFamily import com.betterhv.note.doc.TextObject import com.betterhv.note.ink.Bounds import com.betterhv.note.storage.ImportedImage import com.betterhv.transfer.android.TransferPermissions import com.betterhv.transfer.core.ContentKind import com.betterhv.transfer.core.TransferPhase import com.betterhv.transfer.core.TransferSnapshot import com.betterhv.transfer.core.isActiveTransferPhase import kotlinx.coroutines.Dispatchers import kotlinx.coroutines.launch import kotlinx.coroutines.withContext import com.betterhv.note.storage.StartupBehavior import com.betterhv.note.export.ExportViewModel import com.betterhv.note.template.TemplateStore import com.betterhv.note.doc.PageKind import java.util.UUID</ID>
+    <ID>ImportOrdering:NotebookManagerScreen.kt$import android.graphics.Bitmap import android.net.Uri import android.os.SystemClock import androidx.compose.foundation.Image import androidx.compose.foundation.background import androidx.compose.foundation.border import androidx.compose.foundation.clickable import androidx.compose.foundation.layout.Arrangement import androidx.compose.foundation.layout.Box import androidx.compose.foundation.layout.Column import androidx.compose.foundation.layout.Row import androidx.compose.foundation.layout.Spacer import androidx.compose.foundation.layout.aspectRatio import androidx.compose.foundation.layout.fillMaxHeight import androidx.compose.foundation.layout.fillMaxSize import androidx.compose.foundation.layout.fillMaxWidth import androidx.compose.foundation.layout.height import androidx.compose.foundation.layout.padding import androidx.compose.foundation.layout.size import androidx.compose.foundation.layout.width import androidx.compose.foundation.lazy.grid.GridCells import androidx.compose.foundation.lazy.grid.LazyVerticalGrid import androidx.compose.foundation.lazy.grid.items import androidx.compose.material.icons.Icons import androidx.compose.material.icons.automirrored.filled.ArrowBack import androidx.compose.material.icons.filled.Add import androidx.compose.material.icons.filled.Check import androidx.compose.material.icons.filled.ContentCut import androidx.compose.material.icons.filled.Delete import androidx.compose.material.icons.filled.IosShare import androidx.compose.material.icons.filled.PictureAsPdf import androidx.compose.material.icons.filled.Workspaces import androidx.compose.material3.HorizontalDivider import androidx.compose.material3.Icon import androidx.compose.material3.Surface import androidx.compose.material3.Text import androidx.activity.compose.rememberLauncherForActivityResult import androidx.activity.result.contract.ActivityResultContracts import androidx.compose.runtime.Composable import androidx.compose.runtime.LaunchedEffect import androidx.compose.runtime.getValue import androidx.compose.runtime.mutableLongStateOf import androidx.compose.runtime.mutableStateOf import androidx.compose.runtime.remember import androidx.compose.runtime.setValue import androidx.compose.ui.Alignment import androidx.compose.ui.Modifier import androidx.compose.ui.graphics.Color import androidx.compose.ui.graphics.RectangleShape import androidx.compose.ui.graphics.asImageBitmap import androidx.compose.ui.graphics.vector.ImageVector import androidx.compose.ui.layout.ContentScale import androidx.compose.ui.text.font.FontWeight import androidx.compose.ui.text.style.TextOverflow import androidx.compose.ui.unit.Dp import androidx.compose.ui.unit.DpSize import androidx.compose.ui.unit.dp import androidx.compose.ui.unit.sp import com.betterhv.note.storage.NotebookSummary import kotlinx.coroutines.delay import java.util.UUID</ID>
+    <ID>ImportOrdering:NotebookNameDialog.kt$import androidx.compose.foundation.layout.Arrangement import androidx.compose.foundation.layout.Column import androidx.compose.foundation.layout.Row import androidx.compose.foundation.layout.fillMaxWidth import androidx.compose.foundation.layout.padding import androidx.compose.material3.OutlinedTextField import androidx.compose.material3.Text import androidx.compose.runtime.Composable import androidx.compose.runtime.LaunchedEffect import androidx.compose.runtime.getValue import androidx.compose.runtime.mutableStateOf import androidx.compose.runtime.remember import androidx.compose.runtime.setValue import androidx.compose.ui.Alignment import androidx.compose.ui.Modifier import androidx.compose.ui.focus.FocusRequester import androidx.compose.ui.focus.focusRequester import androidx.compose.ui.graphics.RectangleShape import androidx.compose.ui.platform.LocalSoftwareKeyboardController import androidx.compose.ui.unit.dp import androidx.compose.ui.unit.sp import android.graphics.Bitmap import com.betterhv.note.doc.DEFAULT_TEMPLATE_ID import com.betterhv.note.template.TemplateCatalogSnapshot</ID>
+    <ID>ImportOrdering:NotebookRepository.kt$import android.content.ContentValues import android.content.Context import android.database.sqlite.SQLiteDatabase import com.betterhv.note.doc.Notebook import com.betterhv.note.doc.NotebookKind import com.betterhv.note.doc.DEFAULT_TEMPLATE_ID import com.betterhv.note.doc.PageKind import com.betterhv.note.doc.PdfAnchor import com.betterhv.note.doc.PdfAnchorKind import com.betterhv.note.doc.PdfDocumentRecord import com.betterhv.note.doc.PdfPageSource import com.betterhv.note.doc.ImageObject import com.betterhv.note.doc.Page import com.betterhv.note.doc.PageObject import com.betterhv.note.doc.StrokeObject import com.betterhv.note.doc.TextFontFamily import com.betterhv.note.doc.TextObject import com.betterhv.note.doc.Transform2D import com.betterhv.note.ink.Bounds import com.betterhv.note.ink.PenStyle import com.betterhv.note.ink.PenType import com.betterhv.note.ink.PressureCurve import com.betterhv.note.ink.Stroke import java.io.File import java.util.UUID</ID>
+    <ID>ImportOrdering:PageBookmarkRevisionTest.kt$import com.betterhv.note.doc.commands.SetPageBookmarkCommand import com.betterhv.note.doc.commands.AddObjectCommand import com.betterhv.note.ink.InkPoint import com.betterhv.note.ink.PenStyle import com.betterhv.note.ink.Stroke import org.junit.Assert.assertEquals import org.junit.Assert.assertFalse import org.junit.Assert.assertTrue import org.junit.Test import java.util.UUID</ID>
+    <ID>ImportOrdering:PageManagerPanel.kt$import android.os.SystemClock import android.view.MotionEvent import androidx.compose.foundation.Image import androidx.compose.foundation.background import androidx.compose.foundation.border import androidx.compose.foundation.clickable import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress import androidx.compose.foundation.horizontalScroll import androidx.compose.foundation.layout.Box import androidx.compose.foundation.layout.Column import androidx.compose.foundation.layout.Row import androidx.compose.foundation.layout.fillMaxHeight import androidx.compose.foundation.layout.fillMaxSize import androidx.compose.foundation.layout.fillMaxWidth import androidx.compose.foundation.layout.height import androidx.compose.foundation.layout.padding import androidx.compose.foundation.layout.size import androidx.compose.foundation.layout.width import androidx.compose.foundation.rememberScrollState import androidx.compose.foundation.verticalScroll import androidx.compose.material.icons.Icons import androidx.compose.material.icons.filled.Bookmark import androidx.compose.material.icons.filled.Layers import androidx.compose.material3.Icon import androidx.compose.material3.Surface import androidx.compose.material3.Text import androidx.compose.runtime.Composable import androidx.compose.runtime.LaunchedEffect import androidx.compose.runtime.getValue import androidx.compose.runtime.mutableFloatStateOf import androidx.compose.runtime.mutableLongStateOf import androidx.compose.runtime.mutableStateOf import androidx.compose.runtime.remember import androidx.compose.runtime.setValue import androidx.compose.ui.Alignment import androidx.compose.ui.ExperimentalComposeUiApi import androidx.compose.ui.Modifier import androidx.compose.ui.geometry.Offset import androidx.compose.ui.graphics.Color import androidx.compose.ui.graphics.asImageBitmap import androidx.compose.ui.input.pointer.pointerInput import androidx.compose.ui.layout.ContentScale import androidx.compose.ui.layout.onSizeChanged import androidx.compose.ui.input.pointer.pointerInteropFilter import androidx.compose.ui.unit.DpSize import androidx.compose.ui.unit.dp import kotlinx.coroutines.delay import java.util.UUID import kotlin.math.floor</ID>
+    <ID>ImportOrdering:PageRenderer.kt$import android.graphics.Bitmap import android.graphics.BitmapFactory import android.graphics.Canvas import android.graphics.Color import android.graphics.Matrix import android.graphics.Paint import android.graphics.RectF import android.graphics.Typeface import android.graphics.pdf.PdfDocument import com.betterhv.note.doc.ImageObject import com.betterhv.note.doc.PageObject import com.betterhv.note.doc.StrokeObject import com.betterhv.note.doc.TextObject import com.betterhv.note.doc.Transform2D import com.betterhv.note.ink.InkRenderer import com.betterhv.note.storage.PageSnapshot import com.betterhv.note.doc.PageKind import com.betterhv.note.template.TemplateStore import java.io.File import java.io.FileOutputStream import kotlin.math.roundToInt</ID>
+    <ID>ImportOrdering:PdfImportCoordinator.kt$import android.content.Context import android.net.Uri import com.betterhv.note.storage.NotebookRepository import com.betterhv.note.storage.PdfImportCommit import kotlinx.coroutines.Dispatchers import kotlinx.coroutines.withContext import java.util.UUID import java.io.File</ID>
+    <ID>ImportOrdering:PdfInkAppearanceTest.kt$import com.betterhv.note.doc.StrokeObject import com.betterhv.note.doc.Transform2D import com.betterhv.note.ink.InkPoint import com.betterhv.note.ink.PenStyle import com.betterhv.note.ink.PenType import com.betterhv.note.ink.PressureCurve import com.betterhv.note.ink.Stroke import java.util.UUID import org.junit.Assert.assertEquals import org.junit.Assert.assertTrue import org.junit.Test</ID>
+    <ID>ImportOrdering:PenDrawView.kt$import android.content.Context import android.graphics.Bitmap import android.graphics.BitmapFactory import android.graphics.Canvas import android.graphics.DashPathEffect import android.graphics.Matrix import android.graphics.Paint import android.graphics.RectF import android.graphics.Typeface import android.net.Uri import android.os.Build import android.os.Handler import android.os.HvPenDrawListener import android.os.HvPenDrawManager import android.os.Looper import android.os.Message import android.util.AttributeSet import android.view.MotionEvent import android.view.View import com.betterhv.note.doc.CommandStack import com.betterhv.note.doc.ImageObject import com.betterhv.note.doc.Notebook import com.betterhv.note.doc.NotebookKind import com.betterhv.note.doc.Page import com.betterhv.note.doc.PageKind import com.betterhv.note.doc.DEFAULT_TEMPLATE_ID import com.betterhv.note.doc.inheritedTemplateId import com.betterhv.note.doc.PdfAnchor import com.betterhv.note.doc.PdfAnchorKind import com.betterhv.note.doc.PageObject import com.betterhv.note.doc.SelectionSet import com.betterhv.note.doc.StrokeObject import com.betterhv.note.doc.TextFontFamily import com.betterhv.note.doc.TextObject import com.betterhv.note.doc.Transform2D import com.betterhv.note.doc.commands.AddPageCommand import com.betterhv.note.doc.commands.AddObjectCommand import com.betterhv.note.doc.commands.DeletePageCommand import com.betterhv.note.doc.commands.DeleteObjectsCommand import com.betterhv.note.doc.commands.MovePageCommand import com.betterhv.note.doc.commands.SetPageBookmarkCommand import com.betterhv.note.doc.commands.SetPageTemplateCommand import com.betterhv.note.doc.commands.TransformObjectsCommand import com.betterhv.note.doc.commands.UpdateObjectCommand import com.betterhv.note.ink.Bounds import com.betterhv.note.ink.InkPoint import com.betterhv.note.ink.InkRenderer import com.betterhv.note.ink.PenStyle import com.betterhv.note.tool.EraserTool import com.betterhv.note.tool.PenTool import com.betterhv.note.tool.PointEraserTool import com.betterhv.note.tool.SelectionTool import com.betterhv.note.tool.StrokeEraserTool import com.betterhv.note.tool.Tool import com.betterhv.note.tool.ToolHost import com.betterhv.note.storage.AutosaveController import com.betterhv.note.storage.DocumentChange import com.betterhv.note.storage.ImageAssetStore import com.betterhv.note.storage.ImportedImage import com.betterhv.note.storage.NotebookRepository import com.betterhv.note.storage.NotebookSummary import com.betterhv.note.storage.StartupBehavior import com.betterhv.note.storage.PageCache import com.betterhv.note.storage.PageSnapshot import com.betterhv.note.storage.ThumbnailManager import com.betterhv.note.storage.ThumbnailKey import com.betterhv.note.storage.TransferReceipt import com.betterhv.note.pdf.PdfAssetStore import com.betterhv.note.pdf.PdfImportCoordinator import com.betterhv.note.pdf.MuPdfEngine import com.betterhv.note.template.TemplateCatalogSnapshot import com.betterhv.note.template.TemplateStore import java.io.File import java.util.ArrayDeque import java.util.UUID import java.util.concurrent.ConcurrentHashMap import java.util.concurrent.Executors import java.util.concurrent.TimeUnit import kotlinx.coroutines.Dispatchers import kotlinx.coroutines.withContext import kotlin.math.atan2 import kotlin.math.exp import kotlin.math.hypot</ID>
+    <ID>ImportOrdering:PhoneTransferClient.kt$import android.content.Context import android.os.Looper import android.os.SystemClock import android.util.Log import com.betterhv.transfer.android.AndroidPairingController import com.betterhv.transfer.android.AndroidNetworkInfoProvider import com.betterhv.transfer.android.BleGattSession import com.betterhv.transfer.android.BleIdentity import com.betterhv.transfer.android.BleReceiverScanner import com.betterhv.transfer.android.BleReplayCache import com.betterhv.transfer.android.BleSecureEnvelope import com.betterhv.transfer.android.EncryptedFileTransfer import com.betterhv.transfer.android.DiscoveredSender import com.betterhv.transfer.android.ReceivedLease import com.betterhv.transfer.android.WifiDirectController import com.betterhv.transfer.core.ContentKind import com.betterhv.transfer.core.BleCommand import com.betterhv.transfer.core.BleQueueProtocol import com.betterhv.transfer.core.BleResponse import com.betterhv.transfer.core.ExportTransferOffer import com.betterhv.transfer.core.RemotePayload import com.betterhv.transfer.core.TransferCrypto import com.betterhv.transfer.core.TransferOffer import com.betterhv.transfer.core.TransferState import com.betterhv.transfer.core.CapabilityNegotiation import com.betterhv.transfer.core.DeviceCapabilities import com.betterhv.transfer.core.NetworkEndpoint import com.betterhv.transfer.core.SsidMatch import com.betterhv.transfer.core.TransferChannelException import com.betterhv.transfer.core.TransferErrorCode import com.betterhv.transfer.core.TransferEvent import com.betterhv.transfer.core.TransferEventLog import com.betterhv.transfer.core.TransferFailure import com.betterhv.transfer.core.TransferLogEntry import com.betterhv.transfer.core.TransferMode import com.betterhv.transfer.core.TransferModes import com.betterhv.transfer.core.TransferNetworkSecurity import com.betterhv.transfer.core.TransferObservable import com.betterhv.transfer.core.TransferPhase import com.betterhv.transfer.core.TransferProgressMeter import com.betterhv.transfer.core.TransferSnapshot import com.betterhv.transfer.core.PairedDevice import com.betterhv.note.export.ExportArtifact import java.io.File import java.security.MessageDigest import java.util.Collections import java.util.UUID import java.util.concurrent.ConcurrentHashMap import java.util.concurrent.atomic.AtomicBoolean import java.net.ServerSocket import kotlinx.coroutines.Dispatchers import kotlinx.coroutines.async import kotlinx.coroutines.coroutineScope import kotlinx.coroutines.delay import kotlinx.coroutines.flow.MutableStateFlow import kotlinx.coroutines.flow.MutableSharedFlow import kotlinx.coroutines.flow.SharedFlow import kotlinx.coroutines.flow.StateFlow import kotlinx.coroutines.flow.asSharedFlow import kotlinx.coroutines.flow.asStateFlow import kotlinx.coroutines.currentCoroutineContext import kotlinx.coroutines.Job import kotlinx.coroutines.runBlocking import kotlinx.coroutines.TimeoutCancellationException import kotlinx.coroutines.sync.Mutex import kotlinx.coroutines.sync.withLock import kotlinx.coroutines.withContext import kotlinx.coroutines.CancellationException import kotlinx.coroutines.withTimeout</ID>
+    <ID>ImportOrdering:SelectionToolTest.kt$import com.betterhv.note.doc.CommandStack import com.betterhv.note.doc.Page import com.betterhv.note.doc.ImageObject import com.betterhv.note.doc.SelectionSet import com.betterhv.note.doc.StrokeObject import com.betterhv.note.doc.TextObject import com.betterhv.note.doc.Transform2D import com.betterhv.note.ink.Bounds import com.betterhv.note.ink.InkPoint import com.betterhv.note.ink.PenStyle import com.betterhv.note.ink.Stroke import java.util.UUID import org.junit.Assert.assertEquals import org.junit.Assert.assertFalse import org.junit.Assert.assertTrue import org.junit.Test</ID>
+    <ID>ImportOrdering:SettingsScreen.kt$import androidx.compose.foundation.clickable import androidx.compose.foundation.border import androidx.compose.foundation.layout.Arrangement import androidx.compose.foundation.layout.Box import androidx.compose.foundation.layout.Column import androidx.compose.foundation.layout.Row import androidx.compose.foundation.layout.Spacer import androidx.compose.foundation.layout.fillMaxSize import androidx.compose.foundation.layout.fillMaxWidth import androidx.compose.foundation.layout.height import androidx.compose.foundation.layout.heightIn import androidx.compose.foundation.layout.padding import androidx.compose.foundation.rememberScrollState import androidx.compose.foundation.verticalScroll import androidx.compose.material.icons.Icons import androidx.compose.material.icons.automirrored.filled.ArrowBack import androidx.compose.material3.AlertDialog import androidx.compose.material3.Button import androidx.compose.material3.HorizontalDivider import androidx.compose.material3.Icon import androidx.compose.material3.IconButton import androidx.compose.material3.LinearProgressIndicator import androidx.compose.material3.OutlinedButton import androidx.compose.material3.OutlinedTextField import androidx.compose.material3.RadioButton import androidx.compose.material3.Surface import androidx.compose.material3.Switch import androidx.compose.material3.Tab import androidx.compose.material3.TabRow import androidx.compose.material3.Text import androidx.compose.material3.TextButton import androidx.compose.runtime.LaunchedEffect import androidx.compose.runtime.Composable import androidx.compose.runtime.getValue import androidx.compose.runtime.mutableStateOf import androidx.compose.runtime.remember import androidx.compose.runtime.setValue import androidx.compose.runtime.saveable.rememberSaveable import androidx.compose.ui.Alignment import androidx.compose.ui.Modifier import androidx.compose.ui.graphics.Color import androidx.compose.ui.platform.LocalUriHandler import androidx.compose.ui.unit.dp import androidx.compose.ui.unit.sp import com.betterhv.note.storage.StartupBehavior import com.betterhv.transfer.core.PairedDevice import com.betterhv.transfer.core.TransferPhase import com.betterhv.transfer.core.TransferLogEntry import com.betterhv.transfer.core.TransferLogLevel import com.betterhv.transfer.core.TransferModes import com.betterhv.transfer.core.TransferSnapshot import java.text.DateFormat import java.util.Date</ID>
+    <ID>ImportOrdering:StylusClickResolver.kt$import android.view.MotionEvent import androidx.compose.runtime.getValue import androidx.compose.runtime.DisposableEffect import androidx.compose.runtime.mutableStateOf import androidx.compose.runtime.remember import androidx.compose.runtime.rememberUpdatedState import androidx.compose.runtime.setValue import androidx.compose.ui.ExperimentalComposeUiApi import androidx.compose.ui.Modifier import androidx.compose.ui.composed import androidx.compose.ui.input.pointer.pointerInteropFilter</ID>
+    <ID>ImportOrdering:Toolbar.kt$import androidx.compose.foundation.Canvas import androidx.compose.foundation.ExperimentalFoundationApi import androidx.compose.foundation.background import androidx.compose.foundation.border import androidx.compose.foundation.clickable import androidx.compose.foundation.combinedClickable import androidx.compose.foundation.gestures.detectDragGestures import androidx.compose.foundation.horizontalScroll import androidx.compose.foundation.rememberScrollState import androidx.compose.foundation.verticalScroll import androidx.compose.foundation.layout.Arrangement import androidx.compose.foundation.layout.Box import androidx.compose.foundation.layout.Column import androidx.compose.foundation.layout.Row import androidx.compose.foundation.layout.Spacer import androidx.compose.foundation.layout.IntrinsicSize import androidx.compose.foundation.layout.height import androidx.compose.foundation.layout.fillMaxWidth import androidx.compose.foundation.layout.padding import androidx.compose.foundation.layout.offset import androidx.compose.foundation.layout.size import androidx.compose.foundation.layout.width import androidx.compose.material.icons.Icons import androidx.compose.material.icons.automirrored.filled.Redo import androidx.compose.material.icons.automirrored.filled.Undo import androidx.compose.material.icons.filled.Check import androidx.compose.material.icons.filled.BugReport import androidx.compose.material.icons.filled.Clear import androidx.compose.material.icons.filled.CropFree import androidx.compose.material.icons.filled.Delete import androidx.compose.material.icons.filled.Edit import androidx.compose.material.icons.filled.AddPhotoAlternate import androidx.compose.material.icons.filled.IosShare import androidx.compose.material.icons.filled.PostAdd import androidx.compose.material.icons.filled.TextFields import androidx.compose.material.icons.filled.Menu import androidx.compose.material.icons.filled.Navigation import androidx.compose.material.icons.filled.Layers import androidx.compose.material.icons.filled.OpenWith import androidx.compose.material.icons.filled.RemoveCircleOutline import androidx.compose.material.icons.filled.Settings import androidx.compose.material3.Icon import androidx.compose.material3.Surface import androidx.compose.material3.Text import androidx.compose.runtime.Composable import androidx.compose.runtime.DisposableEffect import androidx.compose.runtime.LaunchedEffect import androidx.compose.runtime.getValue import androidx.compose.runtime.mutableStateOf import androidx.compose.runtime.remember import androidx.compose.runtime.setValue import androidx.compose.ui.Alignment import androidx.compose.ui.ExperimentalComposeUiApi import androidx.compose.ui.Modifier import androidx.compose.ui.geometry.Offset import androidx.compose.ui.graphics.Color import androidx.compose.ui.graphics.RectangleShape import androidx.compose.ui.graphics.painter.Painter import androidx.compose.ui.graphics.vector.ImageVector import androidx.compose.ui.graphics.vector.rememberVectorPainter import androidx.compose.ui.platform.LocalDensity import androidx.compose.ui.res.painterResource import androidx.compose.ui.semantics.contentDescription import androidx.compose.ui.semantics.semantics import androidx.compose.ui.input.pointer.pointerInteropFilter import androidx.compose.ui.input.pointer.pointerInput import androidx.compose.ui.layout.onSizeChanged import androidx.compose.ui.unit.IntOffset import androidx.compose.ui.unit.IntRect import androidx.compose.ui.unit.IntSize import androidx.compose.ui.unit.LayoutDirection import androidx.compose.ui.unit.Dp import androidx.compose.ui.unit.dp import androidx.compose.ui.text.font.FontWeight import androidx.compose.ui.window.Popup import androidx.compose.ui.window.PopupPositionProvider import androidx.compose.ui.window.PopupProperties import android.view.MotionEvent import com.betterhv.note.ink.PenType</ID>
+    <ID>Indentation:ExportPanel.kt$ </ID>
+    <ID>Indentation:MainActivity.kt$ </ID>
+    <ID>Indentation:TemplateRenderer.kt$TemplateRenderer$ </ID>
+    <ID>Indentation:Toolbar.kt$ </ID>
+    <ID>InstanceOfCheckForException:InsertionCoordinator.kt$InsertionCoordinator$error is CancellationException</ID>
+    <ID>LargeClass:NotebookRepository.kt$NotebookRepository : AutoCloseable</ID>
+    <ID>LargeClass:PenDrawView.kt$PenDrawView : ViewHvPenDrawListenerToolHost</ID>
+    <ID>LargeClass:PhoneTransferClient.kt$PhoneTransferClient : AutoCloseableTransferObservable</ID>
+    <ID>LongMethod:ExportPanel.kt$@Composable fun ExportManagerScreen( viewModel: ExportViewModel, initialNotebookId: UUID, creationRequest: Long, currentNotebookId: UUID, pairedClients: List&lt;PairedDevice&gt;, pageBitmap: (UUID) -&gt; Bitmap?, requestThumbnails: (List&lt;UUID&gt;) -&gt; Unit, beforeExport: suspend (UUID) -&gt; Boolean, sendToNoteLink: suspend (String, ExportArtifact, (Long, Long) -&gt; Unit) -&gt; Unit, onNotice: (String) -&gt; Unit, onClose: () -&gt; Unit )</ID>
+    <ID>LongMethod:ExportPanel.kt$@Composable private fun ExportTaskCreator( state: ExportManagerState, initialNotebookId: UUID, currentNotebookId: UUID, pageBitmap: (UUID) -&gt; Bitmap?, requestThumbnails: (List&lt;UUID&gt;) -&gt; Unit, onCreate: (UUID, ExportScope, ExportFormat, List&lt;UUID&gt;) -&gt; Unit, onBack: () -&gt; Unit )</ID>
+    <ID>LongMethod:LassoOverlayView.kt$LassoOverlayView$override fun onTouchEvent(event: MotionEvent): Boolean</ID>
+    <ID>LongMethod:MainActivity.kt$@OptIn(ExperimentalMaterial3Api::class) @Composable private fun AppRoot( onView: (PenDrawView) -&gt; Unit, onTransientInputGuardReleaseReady: ((() -&gt; Unit)?) -&gt; Unit, onHardwareKeyHandlerReady: (((HardwareKeyId) -&gt; Unit)?) -&gt; Unit, skipTemplateDirectoryPrompt: Boolean )</ID>
+    <ID>LongMethod:MigrationManager.kt$MigrationManager$fun create(db: SQLiteDatabase)</ID>
+    <ID>LongMethod:NotebookManagerScreen.kt$@Composable fun NotebookManagerScreen( state: NotebookManagerState, actions: NotebookManagerActions, )</ID>
+    <ID>LongMethod:NotebookManagerScreen.kt$@Composable private fun NotebookSummaryCard( summary: NotebookSummary, bitmap: Bitmap?, thumbnailSize: DpSize, enabled: Boolean, pendingDelete: Boolean, onClick: () -&gt; Unit, onDelete: () -&gt; Unit, onExport: () -&gt; Unit )</ID>
+    <ID>LongMethod:NotebookManagerScreen.kt$@Composable private fun NotebookTopBar( selecting: Boolean, notebookCount: Int, selectedCount: Int, busy: Boolean, canCreateCurrentToEnd: Boolean, canSelectPages: Boolean, onBack: () -&gt; Unit, onCreateCurrentToEnd: () -&gt; Unit, onSelectPages: () -&gt; Unit, onCreateBlank: () -&gt; Unit, onImportPdf: () -&gt; Unit, onConfirmSelection: () -&gt; Unit )</ID>
+    <ID>LongMethod:NotebookRepository.kt$NotebookRepository$@Synchronized fun loadPage(id: UUID): Page?</ID>
+    <ID>LongMethod:ObjectEditOverlayView.kt$ObjectEditOverlayView$override fun onTouchEvent(event: MotionEvent): Boolean</ID>
+    <ID>LongMethod:PageManagerPanel.kt$@OptIn(ExperimentalComposeUiApi::class) @Composable fun PageManagerPanel( modifier: Modifier, dockEdge: DockEdge, thumbnailSize: DpSize, pages: List&lt;PageUiInfo&gt;, currentPageId: UUID?, thumbnail: (UUID) -&gt; android.graphics.Bitmap?, requestThumbnails: (List&lt;UUID&gt;) -&gt; Unit, onSelect: (UUID) -&gt; Unit, onAddAfter: (UUID) -&gt; UUID, onDelete: (UUID) -&gt; Boolean, onMove: (UUID, Int) -&gt; Boolean, onNotice: (String) -&gt; Unit )</ID>
+    <ID>LongMethod:PdfInkAppearance.kt$PdfInkAppearance$fun buildAppearance(bounds: PdfInkBounds): PdfInkAppearanceContent</ID>
+    <ID>LongMethod:PenDrawView.kt$PenDrawView$fun placePendingLinkedNote( screenX: Float, screenY: Float, onComplete: (Result&lt;UUID&gt;) -&gt; Unit )</ID>
+    <ID>LongMethod:PenDrawView.kt$PenDrawView$fun prepareLinkedNoteFromRegion( normalizedBounds: Bounds, content: LinkedNoteContent, targetNotePageId: UUID?, onComplete: (Result&lt;UUID&gt;) -&gt; Unit )</ID>
+    <ID>LongMethod:PenDrawView.kt$PenDrawView$private fun drawToolOverlay(c: Canvas)</ID>
+    <ID>LongMethod:PenDrawView.kt$PenDrawView$private fun schedulePagePreRender(id: UUID)</ID>
+    <ID>LongMethod:PhoneTransferClient.kt$PhoneTransferClient$suspend fun requestNext(clientId: String, kind: ContentKind): ReceivedLease?</ID>
+    <ID>LongMethod:PhoneTransferClient.kt$PhoneTransferClient$suspend fun sendExport( clientId: String, artifact: ExportArtifact, progress: (Long, Long) -&gt; Unit = { _, _ -&gt; } )</ID>
+    <ID>LongMethod:SettingsScreen.kt$@Composable fun SettingsScreen( state: SettingsState, actions: SettingsActions, )</ID>
+    <ID>LongMethod:SettingsScreen.kt$@Composable private fun TransferDiagnostics( snapshot: TransferSnapshot, events: List&lt;TransferLogEntry&gt;, endpointName: String?, showRecentEvents: Boolean, onCancel: () -&gt; Unit )</ID>
+    <ID>LongMethod:StrokeGeometry.kt$StrokeGeometry$fun buildRange(all: List&lt;InkPoint&gt;, fromIndex: Int, style: PenStyle): StrokeOutline</ID>
+    <ID>LongMethod:StrokeSimplifier.kt$RamerDouglasPeuckerSimplifier$override fun simplify(points: List&lt;InkPoint&gt;): List&lt;InkPoint&gt;</ID>
+    <ID>LongMethod:ThumbnailManager.kt$ThumbnailManager$private fun render(snapshot: PageSnapshot, background: Bitmap?): Bitmap</ID>
+    <ID>LongMethod:Toolbar.kt$@Composable fun EditorToolbar( modifier: Modifier = Modifier, state: EditorToolbarState, actions: EditorToolbarActions, )</ID>
+    <ID>LongMethod:Toolbar.kt$@Composable private fun PenSettingsMenu( expanded: Boolean, onDismiss: () -&gt; Unit, dockEdge: DockEdge, settings: PenSettings, onSettingsChange: (PenSettings) -&gt; Unit )</ID>
+    <ID>LongMethod:Toolbar.kt$@Composable private fun ToolbarContent( state: EditorToolbarState, actions: EditorToolbarActions, onHandleDrag: (Offset) -&gt; Unit, onHandleDragStart: () -&gt; Unit, onHandleDragEnd: () -&gt; Unit, onHandleClick: () -&gt; Unit, )</ID>
+    <ID>LongParameterList:ExportPanel.kt$( state: ExportManagerState, initialNotebookId: UUID, currentNotebookId: UUID, pageBitmap: (UUID) -&gt; Bitmap?, requestThumbnails: (List&lt;UUID&gt;) -&gt; Unit, onCreate: (UUID, ExportScope, ExportFormat, List&lt;UUID&gt;) -&gt; Unit, onBack: () -&gt; Unit )</ID>
+    <ID>LongParameterList:ExportPanel.kt$( summary: ExportTaskSummary, active: Boolean, busy: Boolean, phoneTransferAvailable: Boolean, progress: ExportProgress?, onSave: () -&gt; Unit, onSend: () -&gt; Unit, onDelete: () -&gt; Unit )</ID>
+    <ID>LongParameterList:ExportPanel.kt$( viewModel: ExportViewModel, initialNotebookId: UUID, creationRequest: Long, currentNotebookId: UUID, pairedClients: List&lt;PairedDevice&gt;, pageBitmap: (UUID) -&gt; Bitmap?, requestThumbnails: (List&lt;UUID&gt;) -&gt; Unit, beforeExport: suspend (UUID) -&gt; Boolean, sendToNoteLink: suspend (String, ExportArtifact, (Long, Long) -&gt; Unit) -&gt; Unit, onNotice: (String) -&gt; Unit, onClose: () -&gt; Unit )</ID>
+    <ID>LongParameterList:HitTest.kt$HitTest$( ax: Float, ay: Float, bx: Float, by: Float, cx: Float, cy: Float, dx: Float, dy: Float )</ID>
+    <ID>LongParameterList:HitTest.kt$HitTest$( ax: Float, ay: Float, bx: Float, by: Float, px: Float, py: Float )</ID>
+    <ID>LongParameterList:HitTest.kt$HitTest$( px: Float, py: Float, ax: Float, ay: Float, bx: Float, by: Float )</ID>
+    <ID>LongParameterList:MainActivity.kt$( text: TextObject, modifier: Modifier = Modifier, onFont: (TextFontFamily) -&gt; Unit, onSize: (Float) -&gt; Unit, onEdit: () -&gt; Unit, onDelete: () -&gt; Unit, onClose: () -&gt; Unit )</ID>
+    <ID>LongParameterList:NotebookManagerScreen.kt$( icon: ImageVector, contentDescription: String, enabled: Boolean, modifier: Modifier = Modifier, size: Dp = 40.dp, outlined: Boolean = false, active: Boolean = false, onClick: () -&gt; Unit )</ID>
+    <ID>LongParameterList:NotebookManagerScreen.kt$( selecting: Boolean, notebookCount: Int, selectedCount: Int, busy: Boolean, canCreateCurrentToEnd: Boolean, canSelectPages: Boolean, onBack: () -&gt; Unit, onCreateCurrentToEnd: () -&gt; Unit, onSelectPages: () -&gt; Unit, onCreateBlank: () -&gt; Unit, onImportPdf: () -&gt; Unit, onConfirmSelection: () -&gt; Unit )</ID>
+    <ID>LongParameterList:NotebookManagerScreen.kt$( summaries: List&lt;NotebookSummary&gt;, thumbnailSize: DpSize, coverBitmap: (NotebookSummary) -&gt; Bitmap?, busy: Boolean, pendingDeleteId: UUID?, onOpen: (NotebookSummary) -&gt; Unit, onDelete: (NotebookSummary) -&gt; Unit, onExport: (NotebookSummary) -&gt; Unit )</ID>
+    <ID>LongParameterList:NotebookManagerScreen.kt$( summary: NotebookSummary, bitmap: Bitmap?, thumbnailSize: DpSize, enabled: Boolean, pendingDelete: Boolean, onClick: () -&gt; Unit, onDelete: () -&gt; Unit, onExport: () -&gt; Unit )</ID>
+    <ID>LongParameterList:NotebookNameDialog.kt$( catalog: TemplateCatalogSnapshot, pageWidth: Float, pageHeight: Float, preview: (String, Int, Int) -&gt; Bitmap?, onConnectDirectory: () -&gt; Unit, onRefresh: () -&gt; Unit, templateEnabled: Boolean = true, onConfirm: (String, String) -&gt; Unit, onDismiss: () -&gt; Unit )</ID>
+    <ID>LongParameterList:NotebookRepository.kt$NotebookRepository$( db: SQLiteDatabase, id: UUID, notebookId: UUID, sourcePageId: UUID, width: Float, height: Float, now: Long )</ID>
+    <ID>LongParameterList:NotebookRepository.kt$NotebookRepository$( db: SQLiteDatabase, id: UUID, notebookId: UUID, width: Float, height: Float, now: Long, templateId: String = DEFAULT_TEMPLATE_ID )</ID>
+    <ID>LongParameterList:NotebookRepository.kt$NotebookRepository$( db: SQLiteDatabase, id: UUID, transform: Transform2D, z: Int, created: Long, updated: Long )</ID>
+    <ID>LongParameterList:NotebookRepository.kt$NotebookRepository$( db: SQLiteDatabase, id: UUID, transform: Transform2D, z: Int, created: Long, updated: Long, bounds: Bounds )</ID>
+    <ID>LongParameterList:Page.kt$Page$( val id: UUID = UUID.randomUUID(), width: Float = 0f, height: Float = 0f, val kind: PageKind = PageKind.BLANK, val parentPdfPageId: UUID? = null, val pdfSource: PdfPageSource? = null, templateId: String? = if (kind == PageKind.PDF_SOURCE) null else DEFAULT_TEMPLATE_ID, bookmarked: Boolean = false, contentRevision: Long = 0L, val createdAt: Long = System.currentTimeMillis(), updatedAt: Long = createdAt )</ID>
+    <ID>LongParameterList:PageManagerPanel.kt$( modifier: Modifier, dockEdge: DockEdge, thumbnailSize: DpSize, pages: List&lt;PageUiInfo&gt;, currentPageId: UUID?, thumbnail: (UUID) -&gt; android.graphics.Bitmap?, requestThumbnails: (List&lt;UUID&gt;) -&gt; Unit, onSelect: (UUID) -&gt; Unit, onAddAfter: (UUID) -&gt; UUID, onDelete: (UUID) -&gt; Boolean, onMove: (UUID, Int) -&gt; Boolean, onNotice: (String) -&gt; Unit )</ID>
+    <ID>LongParameterList:PageManagerPanel.kt$( modifier: Modifier, info: PageUiInfo, bitmap: android.graphics.Bitmap?, current: Boolean, pendingDelete: Boolean, dragging: Boolean, onNormalClick: () -&gt; Unit, onSide2Click: () -&gt; Unit, onSide3Click: () -&gt; Unit )</ID>
+    <ID>LongParameterList:PdfInkAppearance.kt$PdfInkAppearance$( val source: StrokeObject, val samples: List&lt;PdfInkSample&gt;, val inkList: List&lt;PdfInkPoint&gt;, val borderWidth: Float, val red: Float, val green: Float, val blue: Float, val opacity: Float, private val normalLeft: List&lt;PdfInkPoint&gt;, private val normalRight: List&lt;PdfInkPoint&gt; )</ID>
+    <ID>LongParameterList:PenGeometry.kt$PenGeometry$( x: Float, y: Float, locationX: Int, locationY: Int, rotation: Int, orgPos: Int, screenWidth: Int, screenHeight: Int )</ID>
+    <ID>LongParameterList:PhoneTransferClient.kt$PhoneTransferClient$( session: BleGattSession, clientId: String, artifact: ExportArtifact, negotiation: CapabilityNegotiation, pairingKey: ByteArray, progressCallback: (Long, Long) -&gt; Unit )</ID>
+    <ID>LongParameterList:PhoneTransferClient.kt$PhoneTransferClient$( session: BleGattSession, clientId: String, artifact: ExportArtifact, pairingKey: ByteArray, mode: TransferMode, receiverEndpoint: NetworkEndpoint, progressCallback: (Long, Long) -&gt; Unit )</ID>
+    <ID>LongParameterList:PhoneTransferClient.kt$PhoneTransferClient$( session: BleGattSession, clientId: String, item: com.betterhv.transfer.core.QueueItem, incoming: File, pairingKey: ByteArray, mode: TransferMode, receiverEndpoint: NetworkEndpoint )</ID>
+    <ID>LongParameterList:TemplateUi.kt$( catalog: TemplateCatalogSnapshot, selectedId: String?, pageWidth: Float, pageHeight: Float, preview: (String, Int, Int) -&gt; Bitmap?, onSelect: (String) -&gt; Unit, onConnectDirectory: () -&gt; Unit, onRefresh: () -&gt; Unit, onDismiss: () -&gt; Unit )</ID>
+    <ID>LongParameterList:Toolbar.kt$( expanded: Boolean, onDismiss: () -&gt; Unit, dockEdge: DockEdge, debugMode: Boolean, hiddenItems: List&lt;ToolbarItem&gt;, onHiddenItem: (ToolbarItem) -&gt; Unit, onDocumentSettings: () -&gt; Unit, onSettings: () -&gt; Unit, onDebugToggle: () -&gt; Unit )</ID>
+    <ID>LongParameterList:Toolbar.kt$( expanded: Boolean, onDismiss: () -&gt; Unit, dockEdge: DockEdge, onFit: () -&gt; Unit, onModeToggle: () -&gt; Unit, studyMode: Boolean )</ID>
+    <ID>LongParameterList:Toolbar.kt$( icon: ImageVector, contentDescription: String, enabled: Boolean, selected: Boolean, onFunctionClick: (() -&gt; Unit)? = null, onSide2Click: (() -&gt; Unit)? = null, onSide3Click: (() -&gt; Unit)? = null, onDoubleClick: (() -&gt; Unit)? = null, onClick: () -&gt; Unit )</ID>
+    <ID>LongParameterList:Toolbar.kt$( icon: Painter, contentDescription: String, enabled: Boolean, selected: Boolean, onFunctionClick: (() -&gt; Unit)? = null, onSide2Click: (() -&gt; Unit)? = null, onSide3Click: (() -&gt; Unit)? = null, onDoubleClick: (() -&gt; Unit)? = null, onClick: () -&gt; Unit )</ID>
+    <ID>LongParameterList:Toolbar.kt$( state: EditorToolbarState, actions: EditorToolbarActions, onHandleDrag: (Offset) -&gt; Unit, onHandleDragStart: () -&gt; Unit, onHandleDragEnd: () -&gt; Unit, onHandleClick: () -&gt; Unit, )</ID>
+    <ID>LongParameterList:Toolbar.kt$( title: String, dockEdge: DockEdge, modifier: Modifier = Modifier, compactHeaderWidth: Dp? = null, wrapContentWidth: Boolean = true, content: @Composable () -&gt; Unit )</ID>
+    <ID>LongParameterList:ViewportTransform.kt$PdfViewportMath$( start: PdfViewportState, nextZoom: Float, focusX: Float, focusY: Float, pageWidth: Float, pageHeight: Float, viewWidth: Int, viewHeight: Int )</ID>
+    <ID>LoopWithTooManyJumpStatements:PenDrawView.kt$PenDrawView$while</ID>
+    <ID>LoopWithTooManyJumpStatements:PointEraserTool.kt$PointEraserTool$for</ID>
+    <ID>LoopWithTooManyJumpStatements:StrokeEraserTool.kt$StrokeEraserTool$for</ID>
+    <ID>MagicNumber:AppSettingsStore.kt$AppSettingsStore$0.5f</ID>
+    <ID>MagicNumber:AutosaveController.kt$AutosaveController$10</ID>
+    <ID>MagicNumber:EditorInteraction.kt$HardwareKeyId.K3$3</ID>
+    <ID>MagicNumber:EditorInteraction.kt$HardwareKeyId.K4$4</ID>
+    <ID>MagicNumber:EditorInteraction.kt$HardwareKeyId.K5$5</ID>
+    <ID>MagicNumber:EditorInteraction.kt$HardwareKeyId.K6$6</ID>
+    <ID>MagicNumber:EditorInteraction.kt$HardwareKeyId.K7$7</ID>
+    <ID>MagicNumber:EditorInteraction.kt$HardwareKeyId.K8$8</ID>
+    <ID>MagicNumber:EinkModalOverlay.kt$0xFFE8E8E8</ID>
+    <ID>MagicNumber:EinkModalOverlay.kt$1000f</ID>
+    <ID>MagicNumber:EinkRefreshController.kt$EinkRefreshController$34</ID>
+    <ID>MagicNumber:ExportDownloads.kt$ExportDownloads$1024</ID>
+    <ID>MagicNumber:ExportDownloads.kt$ExportDownloads$29</ID>
+    <ID>MagicNumber:ExportDownloads.kt$ExportDownloads$64</ID>
+    <ID>MagicNumber:ExportEngine.kt$ExportEngine$100</ID>
+    <ID>MagicNumber:ExportEngine.kt$ExportEngine$1024</ID>
+    <ID>MagicNumber:ExportEngine.kt$ExportEngine$64</ID>
+    <ID>MagicNumber:ExportPanel.kt$0xFF2E7D32</ID>
+    <ID>MagicNumber:ExportPanel.kt$0xFF787774</ID>
+    <ID>MagicNumber:ExportPanel.kt$0xFFB00020</ID>
+    <ID>MagicNumber:ExportPanel.kt$0xFFE3E3E1</ID>
+    <ID>MagicNumber:ExportTaskRepository.kt$ExportTaskRepository$3</ID>
+    <ID>MagicNumber:ExportTaskRepository.kt$ExportTaskRepository$4</ID>
+    <ID>MagicNumber:ExportTaskRepository.kt$ExportTaskRepository$5</ID>
+    <ID>MagicNumber:ExportTaskRepository.kt$ExportTaskRepository.Companion$6</ID>
+    <ID>MagicNumber:HitTest.kt$HitTest$1e-6f</ID>
+    <ID>MagicNumber:HitTest.kt$HitTest$3</ID>
+    <ID>MagicNumber:ImageAssetStore.kt$ImageAssetStore$100</ID>
+    <ID>MagicNumber:ImageAssetStore.kt$ImageAssetStore$100_000_000L</ID>
+    <ID>MagicNumber:ImageAssetStore.kt$ImageAssetStore$1024L</ID>
+    <ID>MagicNumber:ImageAssetStore.kt$ImageAssetStore$64L</ID>
+    <ID>MagicNumber:ImageAssetStore.kt$ImageAssetStore$8</ID>
+    <ID>MagicNumber:InkRenderer.kt$InkRenderer$0.35f</ID>
+    <ID>MagicNumber:InkRenderer.kt$InkRenderer$0.45f</ID>
+    <ID>MagicNumber:InkRenderer.kt$InkRenderer$0.5f</ID>
+    <ID>MagicNumber:InkRenderer.kt$InkRenderer$0x00FFFFFF</ID>
+    <ID>MagicNumber:InkRenderer.kt$InkRenderer$0xFF</ID>
+    <ID>MagicNumber:InkRenderer.kt$InkRenderer$24</ID>
+    <ID>MagicNumber:InkRenderer.kt$InkRenderer$255</ID>
+    <ID>MagicNumber:InkRenderer.kt$InkRenderer.Companion$0.5f</ID>
+    <ID>MagicNumber:MainActivity.kt$0xCCFFFFFF</ID>
+    <ID>MagicNumber:MainActivity.kt$0xDDF2F2F2</ID>
+    <ID>MagicNumber:MainActivity.kt$0xFF4E5F70</ID>
+    <ID>MagicNumber:MainActivity.kt$0xFFF2F2F2</ID>
+    <ID>MagicNumber:MainActivity.kt$1000</ID>
+    <ID>MagicNumber:MainActivity.kt$16f</ID>
+    <ID>MagicNumber:MainActivity.kt$1860f</ID>
+    <ID>MagicNumber:MainActivity.kt$2414f</ID>
+    <ID>MagicNumber:MainActivity.kt$24f</ID>
+    <ID>MagicNumber:MainActivity.kt$32f</ID>
+    <ID>MagicNumber:MainActivity.kt$3_000L</ID>
+    <ID>MagicNumber:MainActivity.kt$48f</ID>
+    <ID>MagicNumber:MainActivity.kt$56f</ID>
+    <ID>MagicNumber:MainActivity.kt$64f</ID>
+    <ID>MagicNumber:MigrationManager.kt$MigrationManager$3</ID>
+    <ID>MagicNumber:MigrationManager.kt$MigrationManager$4</ID>
+    <ID>MagicNumber:MigrationManager.kt$MigrationManager$5</ID>
+    <ID>MagicNumber:MigrationManager.kt$MigrationManager$6</ID>
+    <ID>MagicNumber:MigrationManager.kt$MigrationManager$7</ID>
+    <ID>MagicNumber:ModelerStrokeSmoother.kt$ModelerStrokeSmoother$3</ID>
+    <ID>MagicNumber:N10ProHardwareKeys.kt$N10ProHardwareKeys$489</ID>
+    <ID>MagicNumber:N10ProHardwareKeys.kt$N10ProHardwareKeys$496</ID>
+    <ID>MagicNumber:N10ProHardwareKeys.kt$N10ProHardwareKeys$516</ID>
+    <ID>MagicNumber:N10ProHardwareKeys.kt$N10ProHardwareKeys$519</ID>
+    <ID>MagicNumber:N10ProHardwareKeys.kt$N10ProHardwareKeys$522</ID>
+    <ID>MagicNumber:N10ProHardwareKeys.kt$N10ProHardwareKeys$524</ID>
+    <ID>MagicNumber:N10ProHardwareKeys.kt$N10ProHardwareKeys$525</ID>
+    <ID>MagicNumber:N10ProHardwareKeys.kt$N10ProHardwareKeys$526</ID>
+    <ID>MagicNumber:N10ProHardwareKeys.kt$N10ProHardwareKeys$527</ID>
+    <ID>MagicNumber:N10ProHardwareKeys.kt$N10ProHardwareKeys$531</ID>
+    <ID>MagicNumber:NativeSelfTest.kt$NativeSelfTest$0.5f</ID>
+    <ID>MagicNumber:NativeSelfTest.kt$NativeSelfTest$12f</ID>
+    <ID>MagicNumber:NativeSelfTest.kt$NativeSelfTest$1_000L</ID>
+    <ID>MagicNumber:NativeSelfTest.kt$NativeSelfTest$6f</ID>
+    <ID>MagicNumber:NativeSelfTest.kt$NativeSelfTest$8</ID>
+    <ID>MagicNumber:NotebookIcons.kt$0.59f</ID>
+    <ID>MagicNumber:NotebookIcons.kt$0.82f</ID>
+    <ID>MagicNumber:NotebookIcons.kt$1.41f</ID>
+    <ID>MagicNumber:NotebookIcons.kt$11f</ID>
+    <ID>MagicNumber:NotebookIcons.kt$13.5f</ID>
+    <ID>MagicNumber:NotebookIcons.kt$16f</ID>
+    <ID>MagicNumber:NotebookIcons.kt$18f</ID>
+    <ID>MagicNumber:NotebookIcons.kt$2.59f</ID>
+    <ID>MagicNumber:NotebookIcons.kt$20f</ID>
+    <ID>MagicNumber:NotebookIcons.kt$21.41f</ID>
+    <ID>MagicNumber:NotebookIcons.kt$22f</ID>
+    <ID>MagicNumber:NotebookIcons.kt$3.17f</ID>
+    <ID>MagicNumber:NotebookIcons.kt$4.59f</ID>
+    <ID>MagicNumber:NotebookIcons.kt$4f</ID>
+    <ID>MagicNumber:NotebookIcons.kt$5.18f</ID>
+    <ID>MagicNumber:NotebookIcons.kt$5f</ID>
+    <ID>MagicNumber:NotebookIcons.kt$6f</ID>
+    <ID>MagicNumber:NotebookIcons.kt$7f</ID>
+    <ID>MagicNumber:NotebookIcons.kt$9.5f</ID>
+    <ID>MagicNumber:NotebookIcons.kt$9f</ID>
+    <ID>MagicNumber:NotebookManagerScreen.kt$0.55f</ID>
+    <ID>MagicNumber:NotebookManagerScreen.kt$0x66FFFFFF</ID>
+    <ID>MagicNumber:NotebookManagerScreen.kt$0xFF787774</ID>
+    <ID>MagicNumber:NotebookManagerScreen.kt$0xFFB00020</ID>
+    <ID>MagicNumber:NotebookManagerScreen.kt$0xFFB3B3B1</ID>
+    <ID>MagicNumber:NotebookManagerScreen.kt$0xFFE3E3E1</ID>
+    <ID>MagicNumber:NotebookManagerScreen.kt$0xFFF7F7F5</ID>
+    <ID>MagicNumber:NotebookRepository.kt$NotebookRepository$10</ID>
+    <ID>MagicNumber:NotebookRepository.kt$NotebookRepository$11</ID>
+    <ID>MagicNumber:NotebookRepository.kt$NotebookRepository$12</ID>
+    <ID>MagicNumber:NotebookRepository.kt$NotebookRepository$13</ID>
+    <ID>MagicNumber:NotebookRepository.kt$NotebookRepository$14</ID>
+    <ID>MagicNumber:NotebookRepository.kt$NotebookRepository$15</ID>
+    <ID>MagicNumber:NotebookRepository.kt$NotebookRepository$16</ID>
+    <ID>MagicNumber:NotebookRepository.kt$NotebookRepository$17</ID>
+    <ID>MagicNumber:NotebookRepository.kt$NotebookRepository$18</ID>
+    <ID>MagicNumber:NotebookRepository.kt$NotebookRepository$19</ID>
+    <ID>MagicNumber:NotebookRepository.kt$NotebookRepository$20</ID>
+    <ID>MagicNumber:NotebookRepository.kt$NotebookRepository$3</ID>
+    <ID>MagicNumber:NotebookRepository.kt$NotebookRepository$4</ID>
+    <ID>MagicNumber:NotebookRepository.kt$NotebookRepository$5</ID>
+    <ID>MagicNumber:NotebookRepository.kt$NotebookRepository$6</ID>
+    <ID>MagicNumber:NotebookRepository.kt$NotebookRepository$7</ID>
+    <ID>MagicNumber:NotebookRepository.kt$NotebookRepository$8</ID>
+    <ID>MagicNumber:NotebookRepository.kt$NotebookRepository$9</ID>
+    <ID>MagicNumber:PageCache.kt$PageCache$0.75f</ID>
+    <ID>MagicNumber:PageManagerPanel.kt$0xDFFFFFFF</ID>
+    <ID>MagicNumber:PageManagerPanel.kt$0xFF808080</ID>
+    <ID>MagicNumber:PageManagerPanel.kt$0xFF888888</ID>
+    <ID>MagicNumber:PageManagerPanel.kt$0xFFB00020</ID>
+    <ID>MagicNumber:PageManagerPanel.kt$0xFFD0D0D0</ID>
+    <ID>MagicNumber:PageManagerPanel.kt$0xFFE5E5E5</ID>
+    <ID>MagicNumber:PageObject.kt$ImageObject$5</ID>
+    <ID>MagicNumber:PageObject.kt$ImageObject$8</ID>
+    <ID>MagicNumber:PageRenderer.kt$PageRenderer$3</ID>
+    <ID>MagicNumber:PageRenderer.kt$PageRenderer$4</ID>
+    <ID>MagicNumber:PageRenderer.kt$PageRenderer$5</ID>
+    <ID>MagicNumber:PageRenderer.kt$PageRenderer$6</ID>
+    <ID>MagicNumber:PageRenderer.kt$PageRenderer$7</ID>
+    <ID>MagicNumber:PageRenderer.kt$PageRenderer$8</ID>
+    <ID>MagicNumber:PageSelectionGrid.kt$0.75f</ID>
+    <ID>MagicNumber:PageSelectionGrid.kt$0xFFE3E3E1</ID>
+    <ID>MagicNumber:PdfAssetStore.kt$PdfAssetStore$160</ID>
+    <ID>MagicNumber:PdfInkAnnotationWriter.kt$PdfInkAnnotationWriter$100f</ID>
+    <ID>MagicNumber:PdfInkAppearance.kt$PdfInkAppearance$0.00005f</ID>
+    <ID>MagicNumber:PdfInkAppearance.kt$PdfInkAppearance$0.5f</ID>
+    <ID>MagicNumber:PdfInkAppearance.kt$PdfInkAppearance.Companion$0.00005f</ID>
+    <ID>MagicNumber:PdfInkAppearance.kt$PdfInkAppearance.Companion$0.35f</ID>
+    <ID>MagicNumber:PdfInkAppearance.kt$PdfInkAppearance.Companion$0.45f</ID>
+    <ID>MagicNumber:PdfInkAppearance.kt$PdfInkAppearance.Companion$100</ID>
+    <ID>MagicNumber:PdfInkAppearance.kt$PdfInkAppearance.Companion$100f</ID>
+    <ID>MagicNumber:PenButtonTracker.kt$PenButtonTracker$16</ID>
+    <ID>MagicNumber:PenDrawView.kt$PenDrawView$0.08f</ID>
+    <ID>MagicNumber:PenDrawView.kt$PenDrawView$0.1f</ID>
+    <ID>MagicNumber:PenDrawView.kt$PenDrawView$0.22f</ID>
+    <ID>MagicNumber:PenDrawView.kt$PenDrawView$0.24f</ID>
+    <ID>MagicNumber:PenDrawView.kt$PenDrawView$0.38f</ID>
+    <ID>MagicNumber:PenDrawView.kt$PenDrawView$0.4f</ID>
+    <ID>MagicNumber:PenDrawView.kt$PenDrawView$0.64f</ID>
+    <ID>MagicNumber:PenDrawView.kt$PenDrawView$0.72f</ID>
+    <ID>MagicNumber:PenDrawView.kt$PenDrawView$0.75f</ID>
+    <ID>MagicNumber:PenDrawView.kt$PenDrawView$0.76f</ID>
+    <ID>MagicNumber:PenDrawView.kt$PenDrawView$1.35f</ID>
+    <ID>MagicNumber:PenDrawView.kt$PenDrawView$10</ID>
+    <ID>MagicNumber:PenDrawView.kt$PenDrawView$10f</ID>
+    <ID>MagicNumber:PenDrawView.kt$PenDrawView$120f</ID>
+    <ID>MagicNumber:PenDrawView.kt$PenDrawView$12f</ID>
+    <ID>MagicNumber:PenDrawView.kt$PenDrawView$14f</ID>
+    <ID>MagicNumber:PenDrawView.kt$PenDrawView$16</ID>
+    <ID>MagicNumber:PenDrawView.kt$PenDrawView$16f</ID>
+    <ID>MagicNumber:PenDrawView.kt$PenDrawView$24f</ID>
+    <ID>MagicNumber:PenDrawView.kt$PenDrawView$28f</ID>
+    <ID>MagicNumber:PenDrawView.kt$PenDrawView$3</ID>
+    <ID>MagicNumber:PenDrawView.kt$PenDrawView$3.0f</ID>
+    <ID>MagicNumber:PenDrawView.kt$PenDrawView$35f</ID>
+    <ID>MagicNumber:PenDrawView.kt$PenDrawView$3f</ID>
+    <ID>MagicNumber:PenDrawView.kt$PenDrawView$4</ID>
+    <ID>MagicNumber:PenDrawView.kt$PenDrawView$48f</ID>
+    <ID>MagicNumber:PenDrawView.kt$PenDrawView$4f</ID>
+    <ID>MagicNumber:PenDrawView.kt$PenDrawView$5</ID>
+    <ID>MagicNumber:PenDrawView.kt$PenDrawView$5f</ID>
+    <ID>MagicNumber:PenDrawView.kt$PenDrawView$6</ID>
+    <ID>MagicNumber:PenDrawView.kt$PenDrawView$7</ID>
+    <ID>MagicNumber:PenDrawView.kt$PenDrawView$76f</ID>
+    <ID>MagicNumber:PenDrawView.kt$PenDrawView$8</ID>
+    <ID>MagicNumber:PenDrawView.kt$PenDrawView$8f</ID>
+    <ID>MagicNumber:PenDrawView.kt$PenDrawView$96f</ID>
+    <ID>MagicNumber:PenGeometry.kt$PenGeometry$10</ID>
+    <ID>MagicNumber:PenGeometry.kt$PenGeometry$11</ID>
+    <ID>MagicNumber:PenGeometry.kt$PenGeometry$12</ID>
+    <ID>MagicNumber:PenGeometry.kt$PenGeometry$13</ID>
+    <ID>MagicNumber:PenGeometry.kt$PenGeometry$14</ID>
+    <ID>MagicNumber:PenGeometry.kt$PenGeometry$3</ID>
+    <ID>MagicNumber:PenGeometry.kt$PenGeometry$4</ID>
+    <ID>MagicNumber:PenGeometry.kt$PenGeometry$5</ID>
+    <ID>MagicNumber:PenGeometry.kt$PenGeometry$6</ID>
+    <ID>MagicNumber:PenGeometry.kt$PenGeometry$7</ID>
+    <ID>MagicNumber:PenGeometry.kt$PenGeometry$8</ID>
+    <ID>MagicNumber:PenGeometry.kt$PenGeometry$9</ID>
+    <ID>MagicNumber:PenSettings.kt$PenProfiles$0x00FFFFFF</ID>
+    <ID>MagicNumber:PenSettings.kt$PenProfiles$0x4D005FFF</ID>
+    <ID>MagicNumber:PenSettings.kt$PenProfiles$0x4D008000</ID>
+    <ID>MagicNumber:PenSettings.kt$PenProfiles$0x4DFF0000</ID>
+    <ID>MagicNumber:PenSettings.kt$PenProfiles$0x66000000</ID>
+    <ID>MagicNumber:PenSettings.kt$PenProfiles$0x66737373</ID>
+    <ID>MagicNumber:PenSettings.kt$PenProfiles$0x66EDED05</ID>
+    <ID>MagicNumber:PenSettings.kt$PenProfiles$0x66FFFFFF</ID>
+    <ID>MagicNumber:PenSettings.kt$PenProfiles$10</ID>
+    <ID>MagicNumber:PenSettings.kt$PenProfiles$15</ID>
+    <ID>MagicNumber:PenSettings.kt$PenProfiles$15f</ID>
+    <ID>MagicNumber:PenSettings.kt$PenProfiles$19f</ID>
+    <ID>MagicNumber:PenSettings.kt$PenProfiles$20</ID>
+    <ID>MagicNumber:PenSettings.kt$PenProfiles$21f</ID>
+    <ID>MagicNumber:PenSettings.kt$PenProfiles$22f</ID>
+    <ID>MagicNumber:PenSettings.kt$PenProfiles$26f</ID>
+    <ID>MagicNumber:PenSettings.kt$PenProfiles$3</ID>
+    <ID>MagicNumber:PenSettings.kt$PenProfiles$30f</ID>
+    <ID>MagicNumber:PenSettings.kt$PenProfiles$36f</ID>
+    <ID>MagicNumber:PenSettings.kt$PenProfiles$3f</ID>
+    <ID>MagicNumber:PenSettings.kt$PenProfiles$4</ID>
+    <ID>MagicNumber:PenSettings.kt$PenProfiles$4f</ID>
+    <ID>MagicNumber:PenSettings.kt$PenProfiles$5</ID>
+    <ID>MagicNumber:PenSettings.kt$PenProfiles$54f</ID>
+    <ID>MagicNumber:PenSettings.kt$PenProfiles$6</ID>
+    <ID>MagicNumber:PenSettings.kt$PenProfiles$60f</ID>
+    <ID>MagicNumber:PenSettings.kt$PenProfiles$7</ID>
+    <ID>MagicNumber:PenSettings.kt$PenProfiles$80f</ID>
+    <ID>MagicNumber:PhoneTransferClient.kt$PhoneTransferClient$250L</ID>
+    <ID>MagicNumber:PhoneTransferClient.kt$PhoneTransferClient$30_000L</ID>
+    <ID>MagicNumber:PhoneTransferClient.kt$PhoneTransferClient$5_000L</ID>
+    <ID>MagicNumber:PhoneTransferClient.kt$PhoneTransferClient$8_000L</ID>
+    <ID>MagicNumber:PointEraserTool.kt$PointEraserTool$0.5f</ID>
+    <ID>MagicNumber:PointEraserTool.kt$PointEraserTool$1e-3f</ID>
+    <ID>MagicNumber:SelectionTool.kt$SelectionTool$1e-3f</ID>
+    <ID>MagicNumber:SelectionTool.kt$SelectionTool$6</ID>
+    <ID>MagicNumber:SelectionTool.kt$SelectionTool$8</ID>
+    <ID>MagicNumber:SettingsScreen.kt$0xFF246B3A</ID>
+    <ID>MagicNumber:SettingsScreen.kt$0xFF6A4A00</ID>
+    <ID>MagicNumber:SettingsScreen.kt$0xFF8A1C1C</ID>
+    <ID>MagicNumber:SettingsScreen.kt$0xFFB0B0B0</ID>
+    <ID>MagicNumber:SettingsScreen.kt$1_000</ID>
+    <ID>MagicNumber:SettingsScreen.kt$1_024</ID>
+    <ID>MagicNumber:SettingsScreen.kt$1_024.0</ID>
+    <ID>MagicNumber:SettingsScreen.kt$1_048_576</ID>
+    <ID>MagicNumber:SettingsScreen.kt$1_048_576.0</ID>
+    <ID>MagicNumber:SettingsScreen.kt$1_073_741_824</ID>
+    <ID>MagicNumber:SettingsScreen.kt$1_073_741_824.0</ID>
+    <ID>MagicNumber:SettingsScreen.kt$6</ID>
+    <ID>MagicNumber:SettingsScreen.kt$60</ID>
+    <ID>MagicNumber:SettingsScreen.kt$8</ID>
+    <ID>MagicNumber:Stroke.kt$Stroke$0.5f</ID>
+    <ID>MagicNumber:StrokeEraserTool.kt$StrokeEraserTool$1e-3f</ID>
+    <ID>MagicNumber:StrokeGeometry.kt$StrokeGeometry$0.5f</ID>
+    <ID>MagicNumber:StrokeGeometry.kt$StrokeGeometry$1e-6f</ID>
+    <ID>MagicNumber:StrokeRenderer.kt$StrokeRenderer$0x22</ID>
+    <ID>MagicNumber:StrokeRenderer.kt$StrokeRenderer$12</ID>
+    <ID>MagicNumber:StrokeRenderer.kt$StrokeRenderer$3</ID>
+    <ID>MagicNumber:StrokeRenderer.kt$StrokeRenderer$4</ID>
+    <ID>MagicNumber:StrokeSimplifier.kt$RamerDouglasPeuckerSimplifier$1e-6f</ID>
+    <ID>MagicNumber:TemplateRenderer.kt$TemplateRenderer.&lt;no name provided&gt;$1024</ID>
+    <ID>MagicNumber:TemplateRenderer.kt$TemplateRenderer.&lt;no name provided&gt;$24</ID>
+    <ID>MagicNumber:TemplateStore.kt$TemplateStore$3</ID>
+    <ID>MagicNumber:TemplateStore.kt$TemplateStore$4</ID>
+    <ID>MagicNumber:TemplateUi.kt$0xFF666666</ID>
+    <ID>MagicNumber:TemplateUi.kt$0xFF8B0000</ID>
+    <ID>MagicNumber:TemplateUi.kt$0xFF8B5A00</ID>
+    <ID>MagicNumber:TemplateUi.kt$0xFFB7B7B7</ID>
+    <ID>MagicNumber:TemplateUi.kt$0xFFC8C8C8</ID>
+    <ID>MagicNumber:TemplateUi.kt$0xFFD0D0D0</ID>
+    <ID>MagicNumber:TemplateUi.kt$0xFFF2F2F2</ID>
+    <ID>MagicNumber:TemplateUi.kt$180</ID>
+    <ID>MagicNumber:TemplateUi.kt$240</ID>
+    <ID>MagicNumber:ThumbnailManager.kt$ThumbnailManager$3</ID>
+    <ID>MagicNumber:ThumbnailManager.kt$ThumbnailManager$4</ID>
+    <ID>MagicNumber:ThumbnailManager.kt$ThumbnailManager$5</ID>
+    <ID>MagicNumber:ThumbnailManager.kt$ThumbnailManager$6</ID>
+    <ID>MagicNumber:ThumbnailManager.kt$ThumbnailManager$7</ID>
+    <ID>MagicNumber:ThumbnailManager.kt$ThumbnailManager$8</ID>
+    <ID>MagicNumber:ThumbnailManager.kt$ThumbnailManager$90</ID>
+    <ID>MagicNumber:ThumbnailManager.kt$ThumbnailManager.&lt;no name provided&gt;$0.75f</ID>
+    <ID>MagicNumber:ThumbnailManager.kt$ThumbnailManager.&lt;no name provided&gt;$12</ID>
+    <ID>MagicNumber:Toolbar.kt$0xFF2B579A</ID>
+    <ID>MagicNumber:Toolbar.kt$0xFF516780</ID>
+    <ID>MagicNumber:Toolbar.kt$0xFF555555</ID>
+    <ID>MagicNumber:Toolbar.kt$0xFF707070</ID>
+    <ID>MagicNumber:Toolbar.kt$0xFF9A9A9A</ID>
+    <ID>MagicNumber:Toolbar.kt$0xFFB0B0B0</ID>
+    <ID>MagicNumber:Toolbar.kt$0xFFB0C4DE</ID>
+    <ID>MagicNumber:Toolbar.kt$0xFFEFEFEF</ID>
+    <ID>MagicNumber:Toolbar.kt$0xFFF2F2F2</ID>
+    <ID>MagicNumber:Toolbar.kt$0xFFF5F5F5</ID>
+    <ID>MagicNumber:Toolbar.kt$1.5f</ID>
+    <ID>MagicNumber:Toolbar.kt$12f</ID>
+    <ID>MagicNumber:Toolbar.kt$3f</ID>
+    <ID>MagicNumber:Toolbar.kt$4</ID>
+    <ID>MagicNumber:Toolbar.kt$5f</ID>
+    <ID>MagicNumber:Toolbar.kt$8f</ID>
+    <ID>MagicNumber:Transform2D.kt$Transform2D$1e-9f</ID>
+    <ID>MagicNumber:ViewportTransform.kt$PdfViewportMath$4f</ID>
+    <ID>MatchingDeclarationName:EinkModalOverlay.kt$EinkModalPosition</ID>
+    <ID>MaxLineLength:ExportPanel.kt$ScopeButton("全部页面", scope == ExportScope.ALL_PAGES) { scope = ExportScope.ALL_PAGES; format = ExportFormat.PDF }</ID>
+    <ID>MaxLineLength:ExportPanel.kt$mutableStateOf(state.notebooks.firstOrNull { it.id == initialNotebookId }?.id ?: state.notebooks.firstOrNull()?.id)</ID>
+    <ID>MaxLineLength:ExportTaskRepository.kt$ExportTaskRepository$arrayOf("artifact_id", "artifact_path", "artifact_fingerprint", "artifact_sha256", "artifact_created_at", "last_error")</ID>
+    <ID>MaxLineLength:ExportTaskRepository.kt$ExportTaskRepository.Companion$"${source.id}-r${source.contentRevision}-b${backgroundHash(source.backgroundRevision)}-v$RENDERER_VERSION.pdf"</ID>
+    <ID>MaxLineLength:ExportViewModel.kt$ExportViewModel$is ExportResult.Failure -&gt; mutableState.value = mutableState.value.copy(message = "导出失败：${result.error}")</ID>
+    <ID>MaxLineLength:InsertionCoordinator.kt$InsertionCoordinator$is RemotePayload.Text -&gt; mutableState.value = InsertionState.TextReady(payload.text, lease, clientId)</ID>
+    <ID>MaxLineLength:MainActivity.kt$Column</ID>
+    <ID>MaxLineLength:MainActivity.kt$EventLog.log("NoteLinkPairing", "failed device=${candidate.deviceId} error=${it.message}")</ID>
+    <ID>MaxLineLength:MainActivity.kt$EventLog.log("NoteLinkPairing", "start device=${candidate.deviceId} address=${candidate.bluetoothAddress}")</ID>
+    <ID>MaxLineLength:MainActivity.kt$Row</ID>
+    <ID>MaxLineLength:MainActivity.kt$listOfNotNull(snapshot.phase.name.replace('_', ' '), snapshot.mode?.name, "SSID ${snapshot.ssidMatch.name}")</ID>
+    <ID>MaxLineLength:MainActivity.kt$textEditorRequest != null || insertionState !is InsertionState.Idle || pendingNotebookCreation != null</ID>
+    <ID>MaxLineLength:MainActivity.kt$val id = pv.pageIds().getOrNull(pv.currentPageIndex()) ?: return@PageManagerShortcutContext false</ID>
+    <ID>MaxLineLength:NotebookRepository.kt$NotebookRepository$ImageObject(id, transform, z, created, updated, c.getString(0), c.getString(1), c.getInt(2), c.getInt(3), c.getInt(4))</ID>
+    <ID>MaxLineLength:NotebookRepository.kt$NotebookRepository$TextObject(id, transform, z, created, updated, c.getString(0), TextFontFamily.valueOf(c.getString(1)), c.getFloat(2), bounds)</ID>
+    <ID>MaxLineLength:NotebookRepository.kt$NotebookRepository$arrayOf("id", "note_page_id", "note_object_id", "kind", "normalized_left", "normalized_top", "normalized_right", "normalized_bottom", "selected_text", "ordinal", "created_at")</ID>
+    <ID>MaxLineLength:NotebookRepository.kt$NotebookRepository$db.delete("objects", "id=? AND page_id=?", arrayOf(mutation.objectId.toString(), mutation.pageId.toString()))</ID>
+    <ID>MaxLineLength:NotebookRepository.kt$NotebookRepository$put("selected_text", anchor.selectedText)</ID>
+    <ID>MaxLineLength:NotebookRepository.kt$NotebookRepository$val style = PenStyle(c.getFloat(0), c.getInt(1), PressureCurve(c.getFloat(2), c.getFloat(3)), PenType.valueOf(c.getString(4)))</ID>
+    <ID>MaxLineLength:PenGeometry.kt$PenGeometry$1 -&gt; { l = p3 - rect.right; t = p4 - rect.bottom; r = w + (p3 - rect.right); b = h + (p4 - rect.bottom) }</ID>
+    <ID>MaxLineLength:PenGeometry.kt$PenGeometry$3 -&gt; { l = p3 - rect.right; t = p4 - rect.bottom; r = w + (p3 - rect.right); b = h + (p4 - rect.bottom) }</ID>
+    <ID>MaxLineLength:PhoneTransferClient.kt$PhoneTransferClient$if (failedSession != null) runCatchingCancellable { exchange(failedSession, authenticatedId, BleCommand.Release(itemId)) }</ID>
+    <ID>MaxLineLength:PhoneTransferClient.kt$PhoneTransferClient$require</ID>
+    <ID>MaxLineLength:PhoneTransferClient.kt$PhoneTransferClient$when</ID>
+    <ID>MaxLineLength:SettingsScreen.kt$"最近使用 ${DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT).format(Date(client.lastUsedAt))}"</ID>
+    <ID>MaxLineLength:SettingsScreen.kt$Text(if (client.legacy) "旧配对，连接后自动识别" else client.id, fontSize = 12.sp, color = Color.DarkGray)</ID>
+    <ID>MaxLineLength:SettingsScreen.kt$if (!transferPermissionsGranted) OutlinedButton(onClick = onTransferPermissions) { Text("授予权限") }</ID>
+    <ID>MaxLineLength:SettingsScreen.kt$if (online == null) "离线" else "在线 · ${online.imageCount} 张图片 · ${online.textCount} 段文字 · ${online.pdfCount} 份 PDF"</ID>
+    <ID>MaxLineLength:SettingsScreen.kt$listOfNotNull("BLE", snapshot.phase.name.replace('_', ' '), snapshot.mode?.name, "SSID ${snapshot.ssidMatch.name}")</ID>
+    <ID>MaxLineLength:SettingsScreen.kt$listOfNotNull(snapshot.deviceId?.let { " · 设备 $it" }, snapshot.operationId?.let { " · 操作 ${it.toString().take(8)}" })</ID>
+    <ID>MaxLineLength:TemplateManifestCodecTest.kt$TemplateManifestCodecTest$"""{"schemaVersion":1,"templates":[{"id":"bad","name":"Bad","description":"","file":"bad.jpg","width":3,"height":4}]}"""</ID>
+    <ID>MaxLineLength:TemplateManifestCodecTest.kt$TemplateManifestCodecTest$"""{"schemaVersion":1,"templates":[{"id":"custom.grid","name":"Grid","description":"Fine grid","file":"grid.svg","width":1404,"height":1872}]}"""</ID>
+    <ID>MaxLineLength:TemplateUi.kt$definition.error != null -&gt; Text(definition.error, color = Color(0xFF8B0000), fontSize = 11.sp)</ID>
+    <ID>MaxLineLength:Toolbar.kt$.</ID>
+    <ID>MaxLineLength:ViewportTransform.kt$PdfViewportMath$(centerX + state.panX).coerceIn(centerX - viewWidth * FIT_PAN_FRACTION, centerX + viewWidth * FIT_PAN_FRACTION)</ID>
+    <ID>MaxLineLength:ViewportTransform.kt$PdfViewportMath$(centerY + state.panY).coerceIn(centerY - viewHeight * FIT_PAN_FRACTION, centerY + viewHeight * FIT_PAN_FRACTION)</ID>
+    <ID>MaximumLineLength:ExportPanel.kt$ </ID>
+    <ID>MaximumLineLength:ExportTaskRepository.kt$ExportTaskRepository$ </ID>
+    <ID>MaximumLineLength:ExportTaskRepository.kt$ExportTaskRepository.Companion$ </ID>
+    <ID>MaximumLineLength:ExportViewModel.kt$ExportViewModel$ </ID>
+    <ID>MaximumLineLength:InsertionCoordinator.kt$InsertionCoordinator$ </ID>
+    <ID>MaximumLineLength:MainActivity.kt$ </ID>
+    <ID>MaximumLineLength:NotebookRepository.kt$NotebookRepository$ </ID>
+    <ID>MaximumLineLength:PenGeometry.kt$PenGeometry$ </ID>
+    <ID>MaximumLineLength:PhoneTransferClient.kt$PhoneTransferClient$ </ID>
+    <ID>MaximumLineLength:SettingsScreen.kt$ </ID>
+    <ID>MaximumLineLength:TemplateManifestCodecTest.kt$TemplateManifestCodecTest$ </ID>
+    <ID>MaximumLineLength:TemplateUi.kt$ </ID>
+    <ID>MaximumLineLength:Toolbar.kt$ </ID>
+    <ID>MaximumLineLength:ViewportTransform.kt$PdfViewportMath$ </ID>
+    <ID>MultiLineIfElse:AppSettingsStore.kt$AppSettingsStore$editor.remove(shortcutKey(scene, key))</ID>
+    <ID>MultiLineIfElse:EventLog.kt$EventLog$append(line)</ID>
+    <ID>MultiLineIfElse:EventLog.kt$EventLog$mainHandler.post { append(line) }</ID>
+    <ID>MultiLineIfElse:ExportDownloads.kt$ExportDownloads$resolver.delete(uri, null, null)</ID>
+    <ID>MultiLineIfElse:ExportDownloads.kt$ExportDownloads$resolver.update(uri, ContentValues().apply { put(MediaStore.MediaColumns.IS_PENDING, 0) }, null, null)</ID>
+    <ID>MultiLineIfElse:ExportEngine.kt$ExportEngine$renderer.renderToBitmap( snapshot, (snapshot.metadata.width * 2f).toInt(), (snapshot.metadata.height * 2f).toInt() )</ID>
+    <ID>MultiLineIfElse:ExportPanel.kt$"${summary.stalePageCount} 页待更新"</ID>
+    <ID>MultiLineIfElse:ExportPanel.kt$"NoteLink 未配对或不可用"</ID>
+    <ID>MultiLineIfElse:ExportPanel.kt$"发送 ${summary.notebookTitle} 到 NoteLink"</ID>
+    <ID>MultiLineIfElse:ExportPanel.kt$"页面集合或顺序待更新"</ID>
+    <ID>MultiLineIfElse:ExportPanel.kt$sendTask = summary</ID>
+    <ID>MultiLineIfElse:ExportPanel.kt$setOf(id)</ID>
+    <ID>MultiLineIfElse:ExportTaskRepository.kt$ExportTaskRepository$"pdf"</ID>
+    <ID>MultiLineIfElse:ExportTaskRepository.kt$ExportTaskRepository$0</ID>
+    <ID>MultiLineIfElse:ExportTaskRepository.kt$ExportTaskRepository$ArtifactRecord( cursor.getString(0)?.let(UUID::fromString), cursor.getString(1), cursor.getString(2), cursor.getBlob(3), if (cursor.isNull(4)) null else cursor.getLong(4), cursor.getString(5) )</ID>
+    <ID>MultiLineIfElse:ExportTaskRepository.kt$ExportTaskRepository$File(cursor.getString(1)).takeIf { it.isFile &amp;&amp; it.name == pageCacheFileName(source) }</ID>
+    <ID>MultiLineIfElse:ExportTaskRepository.kt$ExportTaskRepository$null</ID>
+    <ID>MultiLineIfElse:ExportTaskRepository.kt$ExportTaskRepository$sources.count { cachedPage(task.id, it) == null }</ID>
+    <ID>MultiLineIfElse:ExportTaskRepository.kt$ExportTaskRepository$sources.size</ID>
+    <ID>MultiLineIfElse:InsertionCoordinator.kt$InsertionCoordinator$mutableState.value = InsertionState.ImageReady(it, null)</ID>
+    <ID>MultiLineIfElse:InsertionCoordinator.kt$InsertionCoordinator$view.discardImportedImage(it)</ID>
+    <ID>MultiLineIfElse:LassoOverlayView.kt$LassoOverlayView$return false</ID>
+    <ID>MultiLineIfElse:MainActivity.kt$emptyList()</ID>
+    <ID>MultiLineIfElse:MainActivity.kt$null</ID>
+    <ID>MultiLineIfElse:MainActivity.kt$showNotice("该 Template 与当前页面不兼容")</ID>
+    <ID>MultiLineIfElse:MainActivity.kt$true</ID>
+    <ID>MultiLineIfElse:MainActivity.kt$when (val request = insertion.state.value) { is InsertionState.ImageReady -&gt; insertion.placeImage(x, y) .onSuccess { showNotice("图片已插入；使用 Side1 点击可编辑") } .onFailure { showNotice("图片插入失败：${it.message}") } is InsertionState.TextReady -&gt; textEditorRequest = TextEditorRequest.New(x, y, request.initialText) else -&gt; Unit }</ID>
+    <ID>MultiLineIfElse:MainActivity.kt${ x, y -&gt; if (pv.hasPendingLinkedNotePlacement()) { notebookBusy = true pv.placePendingLinkedNote(x, y) { result -&gt; notebookBusy = false result.onSuccess { showNotice("已建立双向链接：点击截图或 PDF 框角落的 Link 图标即可跳转；Side1 仍用于编辑图片") } } } else when (val request = insertion.state.value) { is InsertionState.ImageReady -&gt; insertion.placeImage(x, y) .onSuccess { showNotice("图片已插入；使用 Side1 点击可编辑") } .onFailure { showNotice("图片插入失败：${it.message}") } is InsertionState.TextReady -&gt; textEditorRequest = TextEditorRequest.New(x, y, request.initialText) else -&gt; Unit } }</ID>
+    <ID>MultiLineIfElse:NotebookRepository.kt$NotebookRepository$(if (cursor.isNull(19)) DEFAULT_TEMPLATE_ID else cursor.getString(19))</ID>
+    <ID>MultiLineIfElse:NotebookRepository.kt$NotebookRepository$(if (cursor.isNull(20)) DEFAULT_TEMPLATE_ID else cursor.getString(20))</ID>
+    <ID>MultiLineIfElse:NotebookRepository.kt$NotebookRepository$PdfPageSource( cursor.getInt(9), Bounds(cursor.getFloat(10), cursor.getFloat(11), cursor.getFloat(12), cursor.getFloat(13)), Transform2D( cursor.getFloat(14), cursor.getFloat(15), cursor.getFloat(16), cursor.getFloat(17), cursor.getFloat(18), cursor.getFloat(19) ) )</ID>
+    <ID>MultiLineIfElse:NotebookRepository.kt$NotebookRepository$PdfPageSource( sourcePageIndex = cursor.getInt(8), bounds = Bounds(cursor.getFloat(9), cursor.getFloat(10), cursor.getFloat(11), cursor.getFloat(12)), pdfToPage = Transform2D( cursor.getFloat(13), cursor.getFloat(14), cursor.getFloat(15), cursor.getFloat(16), cursor.getFloat(17), cursor.getFloat(18) ) )</ID>
+    <ID>MultiLineIfElse:NotebookRepository.kt$NotebookRepository$UUID.fromString(c.getString(0)) to enumValueOrDefault(c.getString(1), PageKind.BLANK)</ID>
+    <ID>MultiLineIfElse:NotebookRepository.kt$NotebookRepository$null</ID>
+    <ID>MultiLineIfElse:NotebookRepository.kt$NotebookRepository$put("parent_pdf_page_id", page.parentPdfPageId.toString())</ID>
+    <ID>MultiLineIfElse:NotebookRepository.kt$NotebookRepository$putNull("parent_pdf_page_id")</ID>
+    <ID>MultiLineIfElse:NotebookRepository.kt$NotebookRepository$return recorded</ID>
+    <ID>MultiLineIfElse:ObjectEditOverlayView.kt$ObjectEditOverlayView$true</ID>
+    <ID>MultiLineIfElse:PageManagerModel.kt$PageManagerModel$(selectedIndex.coerceIn(0, pageCount - 1) / CHUNK_SIZE).coerceAtMost(lastChunk(pageCount))</ID>
+    <ID>MultiLineIfElse:PageManagerModel.kt$PageManagerModel$0</ID>
+    <ID>MultiLineIfElse:PenDrawView.kt$PenDrawView$"pdf:${metadata.pdfSource?.sourcePageIndex ?: -1}"</ID>
+    <ID>MultiLineIfElse:PenDrawView.kt$PenDrawView$linkedPageId?.let { id -&gt; runCatching { repository.deleteLinkedNotePage(id) } }</ID>
+    <ID>MultiLineIfElse:PenDrawView.kt$PenDrawView$null</ID>
+    <ID>MultiLineIfElse:PenDrawView.kt$PenDrawView$templateStore.visualFingerprint(metadata.templateId)</ID>
+    <ID>MultiLineIfElse:PhoneTransferClient.kt$PhoneTransferClient$candidate.identityHash.equals(client.identityHash, ignoreCase = true)</ID>
+    <ID>MultiLineIfElse:PhoneTransferClient.kt$PhoneTransferClient$error("NoteLink 版本过旧，请升级后重试")</ID>
+    <ID>MultiLineIfElse:PhoneTransferClient.kt$PhoneTransferClient$error("手机返回了无效队列响应")</ID>
+    <ID>MultiLineIfElse:PhoneTransferClient.kt$PhoneTransferClient$null</ID>
+    <ID>MultiLineIfElse:PhoneTransferClient.kt$PhoneTransferClient$runCatchingCancellable { receiveImageAttempt(session, pairedPhoneId, item, incoming, key, TransferMode.LAN, lanEndpoint) }.fold({ return@coroutineScope it }, { it })</ID>
+    <ID>MultiLineIfElse:PhoneTransferClient.kt$PhoneTransferClient$runCatchingCancellable { sendExportAttempt(session, clientId, artifact, pairingKey, TransferMode.LAN, remoteLan, progressCallback) }.exceptionOrNull()</ID>
+    <ID>MultiLineIfElse:PhoneTransferClient.kt$PhoneTransferClient$throw TransferChannelException(response.failure)</ID>
+    <ID>MultiLineIfElse:TemplateManifestCodec.kt$TemplateManifestCodec$entries += TemplateManifestEntry(id!!, name!!, description!!, file!!, width!!, height!!)</ID>
+    <ID>MultiLineIfElse:TemplateManifestCodec.kt$TemplateManifestCodec$errors += problem</ID>
+    <ID>MultiLineIfElse:TemplateStore.kt$TemplateStore$"missing:$requested:${catalog.find(DEFAULT_TEMPLATE_ID)?.fingerprint.orEmpty()}"</ID>
+    <ID>MultiLineIfElse:TemplateStore.kt$TemplateStore$Files.move( temporary.toPath(), target.toPath(), StandardCopyOption.REPLACE_EXISTING )</ID>
+    <ID>MultiLineIfElse:TemplateStore.kt$TemplateStore$builtinJson</ID>
+    <ID>MultiLineIfElse:TemplateStore.kt$TemplateStore$emptyList()</ID>
+    <ID>MultiLineIfElse:TemplateStore.kt$TemplateStore$resolved.fingerprint</ID>
+    <ID>MultiLineIfElse:TemplateUi.kt$"公共目录已连接 · 返回应用或点击刷新可同步外部修改"</ID>
+    <ID>MultiLineIfElse:TemplateUi.kt$"正在使用内置模板 · 尚未连接公共目录"</ID>
+    <ID>MultiLineIfElse:ThumbnailManager.kt$ThumbnailManager$Bitmap.Config.ARGB_8888</ID>
+    <ID>MultiLineIfElse:ThumbnailManager.kt$ThumbnailManager$Bitmap.Config.RGB_565</ID>
+    <ID>MultiLineIfElse:Toolbar.kt$Box { SquareIconButton( Icons.Filled.Navigation, "PDF 导航：Side1 平移；Side2 缩放", enabled = true, selected = toolKind == ToolKind.NAVIGATION || navigationExpanded, onClick = { closeFlyouts() onToolSelected(ToolKind.NAVIGATION) navigationExpanded = true } ) PdfNavigationMenu( expanded = navigationExpanded, onDismiss = { navigationExpanded = false }, dockEdge = dockEdge, onFit = onPdfFit, onModeToggle = onPdfNavigationModeToggle, studyMode = pdfStudyMode ) }</ID>
+    <ID>MultiLineIfElse:Toolbar.kt$Box { SquareIconButton( Icons.Filled.PostAdd, "插入图片或文字", enabled = true, selected = insertionActive, onClick = { closeFlyouts() insertExpanded = true } ) InsertTypeMenu( expanded = insertExpanded, onDismiss = { insertExpanded = false }, dockEdge = dockEdge, onLocal = { kind -&gt; insertExpanded = false; onInsertLocal(kind) }, onNoteLink = { kind -&gt; insertExpanded = false; onInsertNoteLink(kind) } ) }</ID>
+    <ID>MultiLineIfElse:Toolbar.kt$Box { SquareIconButton( eraserIcon, eraserDesc, enabled = true, selected = eraserExpanded, onClick = { closeFlyouts(); eraserExpanded = true } ) TailEraserMenu( expanded = eraserExpanded, onDismiss = { eraserExpanded = false }, dockEdge = dockEdge, eraserMode = eraserMode, onToggle = onEraserModeToggle ) }</ID>
+    <ID>MultiLineIfElse:Toolbar.kt$Color.Black</ID>
+    <ID>MultiLineIfElse:Toolbar.kt$Color.White</ID>
+    <ID>MultiLineIfElse:Toolbar.kt$SquareIconButton( Icons.AutoMirrored.Filled.Redo, "Redo", enabled = canRedo, selected = false, onClick = { closeFlyouts(); onRedo() } )</ID>
+    <ID>MultiLineIfElse:Toolbar.kt$SquareIconButton( Icons.AutoMirrored.Filled.Undo, "Undo", enabled = canUndo, selected = false, onClick = { closeFlyouts(); onUndo() } )</ID>
+    <ID>MultiLineIfElse:Toolbar.kt$SquareIconButton( Icons.Filled.CropFree, "Lasso select", enabled = true, selected = toolKind == ToolKind.LASSO ) { closeFlyouts(); onToolSelected(ToolKind.LASSO) }</ID>
+    <ID>MultiLineIfElse:Toolbar.kt$SquareIconButton( Icons.Filled.Delete, "Delete selection", enabled = hasSelection, selected = false, onClick = { closeFlyouts(); onDelete() } )</ID>
+    <ID>MultiLineIfElse:Toolbar.kt$SquareIconButton( Icons.Filled.IosShare, "Export: tap to open export panel", enabled = true, selected = exportPanelOpen, onClick = { closeFlyouts(); onExportPanelToggle() } )</ID>
+    <ID>MultiLineIfElse:Toolbar.kt$SquareIconButton( Icons.Filled.Layers, "Pages: tap to manage; Side1 add; Side2 previous; Side3 next", enabled = true, selected = pageManagerOpen, onFunctionClick = onPageAdd, onSide2Click = onPreviousPage, onSide3Click = onNextPage, onClick = { closeFlyouts(); onPageManagerToggle() } )</ID>
+    <ID>MultiLineIfElse:Toolbar.kt$SquareIconButton( NotebookBookIcon, "Notebooks: tap to manage; Side1 current page; Side2 current to end", enabled = true, selected = notebookManagerOpen, onFunctionClick = onNotebookCurrentPage, onSide2Click = onNotebookCurrentToEnd, onSide3Click = {}, onClick = { closeFlyouts(); onNotebookManagerToggle() } )</ID>
+    <ID>MultiLineIfElse:ViewportTransform.kt$PdfViewportMath$(centerX + state.panX).coerceIn(viewWidth - contentWidth, 0f)</ID>
+    <ID>MultiLineIfElse:ViewportTransform.kt$PdfViewportMath$(centerY + state.panY).coerceIn(viewHeight - contentHeight, 0f)</ID>
+    <ID>NestedBlockDepth:ExportEngine.kt$ExportEngine$private fun sha256(file: File): ByteArray</ID>
+    <ID>NestedBlockDepth:PdfAssetStore.kt$PdfAssetStore$fun stage(uri: Uri): StagedPdf</ID>
+    <ID>NestedBlockDepth:PdfAssetStore.kt$PdfAssetStore$fun stageFile(source: File, displayName: String): StagedPdf</ID>
+    <ID>NestedBlockDepth:PdfInkAnnotationWriter.kt$PdfInkAnnotationWriter$private fun replaceNormalAppearance( document: PDFDocument, annotation: PDFAnnotation, bounds: PdfInkBounds, appearance: PdfInkAppearanceContent, )</ID>
+    <ID>NestedBlockDepth:TemplateStore.kt$TemplateStore$@Synchronized fun refresh(): TemplateCatalogSnapshot</ID>
+    <ID>NestedBlockDepth:TemplateStore.kt$TemplateStore$private fun mirrorAndValidate(document: DocumentFile, entry: TemplateManifestEntry): TemplateDefinition</ID>
+    <ID>NestedBlockDepth:TemplateStore.kt$TemplateStore$private fun seedBuiltins(uri: Uri)</ID>
+    <ID>NestedBlockDepth:ThumbnailManager.kt$ThumbnailManager$private fun render(snapshot: PageSnapshot, background: Bitmap?): Bitmap</ID>
+    <ID>NoConsecutiveBlankLines:PenDrawView.kt$PenDrawView$ </ID>
+    <ID>NoConsecutiveBlankLines:TransformObjectsCommand.kt$TransformObjectsCommand$ </ID>
+    <ID>NoMultipleSpaces:EraserOverlayView.kt$EraserOverlayView$ </ID>
+    <ID>NoMultipleSpaces:ModelerStrokeSmootherTest.kt$ModelerStrokeSmootherTest$ </ID>
+    <ID>NoUnusedImports:MainActivity.kt$com.betterhv.note.MainActivity.kt</ID>
+    <ID>NoUnusedImports:NotebookManagerScreen.kt$com.betterhv.note.NotebookManagerScreen.kt</ID>
+    <ID>NoUnusedImports:PageManagerPanel.kt$com.betterhv.note.PageManagerPanel.kt</ID>
+    <ID>NoUnusedImports:TemplateUi.kt$com.betterhv.note.TemplateUi.kt</ID>
+    <ID>NoUnusedImports:Toolbar.kt$com.betterhv.note.Toolbar.kt</ID>
+    <ID>ParameterListWrapping:ExportTaskRepository.kt$ExportTaskRepository.ArtifactRecord$( val id: UUID?, val path: String?, val fingerprint: String?, val sha256: ByteArray?, val createdAt: Long?, val lastError: String? )</ID>
+    <ID>ParameterListWrapping:HitTest.kt$HitTest$( ax: Float, ay: Float, bx: Float, by: Float, cx: Float, cy: Float, dx: Float, dy: Float )</ID>
+    <ID>ParameterListWrapping:HitTest.kt$HitTest$( ax: Float, ay: Float, bx: Float, by: Float, polygon: FloatArray )</ID>
+    <ID>ParameterListWrapping:HitTest.kt$HitTest$( ax: Float, ay: Float, bx: Float, by: Float, px: Float, py: Float )</ID>
+    <ID>ParameterListWrapping:HitTest.kt$HitTest$( points: List&lt;com.betterhv.note.ink.InkPoint&gt;, lx: Float, ly: Float, radius: Float )</ID>
+    <ID>ParameterListWrapping:HitTest.kt$HitTest$( px: Float, py: Float, ax: Float, ay: Float, bx: Float, by: Float )</ID>
+    <ID>ParameterListWrapping:NotebookRepository.kt$NotebookRepository$( db: SQLiteDatabase, id: UUID, transform: Transform2D, z: Int, created: Long, updated: Long )</ID>
+    <ID>ParameterListWrapping:NotebookRepository.kt$NotebookRepository$( db: SQLiteDatabase, id: UUID, transform: Transform2D, z: Int, created: Long, updated: Long, bounds: Bounds )</ID>
+    <ID>ParameterListWrapping:PenDrawView.kt$PenDrawView$( image: ImportedImage, centerX: Float, centerY: Float, objectId: UUID )</ID>
+    <ID>ParameterListWrapping:PenDrawView.kt$PenDrawView$( text: String, x: Float, y: Float, sourceDeviceId: String, itemId: UUID )</ID>
+    <ID>PropertyWrapping:NotebookRepository.kt$NotebookRepository$val style = PenStyle(c.getFloat(0), c.getInt(1), PressureCurve(c.getFloat(2), c.getFloat(3)), PenType.valueOf(c.getString(4)))</ID>
+    <ID>ReturnCount:EraserOverlayView.kt$EraserOverlayView$override fun onTouchEvent(event: MotionEvent): Boolean</ID>
+    <ID>ReturnCount:ExportTaskRepository.kt$ExportTaskRepository$@Synchronized fun currentArtifact(task: ExportTask, sources: List&lt;ExportPageSource&gt;): ExportArtifact?</ID>
+    <ID>ReturnCount:HitTest.kt$HitTest$fun segmentIntersectsPolygon( ax: Float, ay: Float, bx: Float, by: Float, polygon: FloatArray ): Boolean</ID>
+    <ID>ReturnCount:HitTest.kt$HitTest$fun strokeTouchesLocal( points: List&lt;com.betterhv.note.ink.InkPoint&gt;, lx: Float, ly: Float, radius: Float ): Boolean</ID>
+    <ID>ReturnCount:LassoOverlayView.kt$LassoOverlayView$override fun onTouchEvent(event: MotionEvent): Boolean</ID>
+    <ID>ReturnCount:MainActivity.kt$private fun noteTransferStatus(context: Context, isPaired: Boolean, permissionsGranted: Boolean): String</ID>
+    <ID>ReturnCount:ModelerStrokeSmoother.kt$ModelerStrokeSmoother$override fun finishStroke(): List&lt;InkPoint&gt;</ID>
+    <ID>ReturnCount:ModelerStrokeSmoother.kt$ModelerStrokeSmoother$override fun smoothBatch(batch: List&lt;InkPoint&gt;): List&lt;InkPoint&gt;</ID>
+    <ID>ReturnCount:ObjectEditOverlayView.kt$ObjectEditOverlayView$override fun onTouchEvent(event: MotionEvent): Boolean</ID>
+    <ID>ReturnCount:PageControlOverlayView.kt$PageControlOverlayView$override fun onTouchEvent(event: MotionEvent): Boolean</ID>
+    <ID>ReturnCount:PageRenderer.kt$PageRenderer$private fun renderTemplate(canvas: Canvas, snapshot: PageSnapshot, target: RectF)</ID>
+    <ID>ReturnCount:PenDrawView.kt$PenDrawView$fun activatePdfRegionEdit(selection: PdfRegionSelection): Boolean</ID>
+    <ID>ReturnCount:PenDrawView.kt$PenDrawView$fun beginPdfNavigation(x: Float, y: Float, modifier: PenSideButton): Boolean</ID>
+    <ID>ReturnCount:PenDrawView.kt$PenDrawView$fun beginRichObjectGesture(x: Float, y: Float): Boolean</ID>
+    <ID>ReturnCount:PenDrawView.kt$PenDrawView$fun deletePage(pageId: UUID): Boolean</ID>
+    <ID>ReturnCount:PenDrawView.kt$PenDrawView$fun movePage(pageId: UUID, targetIndex: Int): Boolean</ID>
+    <ID>ReturnCount:PenDrawView.kt$PenDrawView$fun navigateLinkedContentAt(screenX: Float, screenY: Float): Boolean</ID>
+    <ID>ReturnCount:PenDrawView.kt$PenDrawView$fun navigatePage(delta: Int): Boolean</ID>
+    <ID>ReturnCount:PenDrawView.kt$PenDrawView$fun setCurrentPageTemplate(templateId: String): Boolean</ID>
+    <ID>ReturnCount:PenDrawView.kt$PenDrawView$fun switchToPage(index: Int): Boolean</ID>
+    <ID>ReturnCount:PenDrawView.kt$PenDrawView$fun updateTextObject( id: UUID, text: String? = null, fontFamily: TextFontFamily? = null, fontSize: Float? = null ): TextObject?</ID>
+    <ID>ReturnCount:PenDrawView.kt$PenDrawView$fun zoomPdf(factor: Float): Boolean</ID>
+    <ID>ReturnCount:PenDrawView.kt$PenDrawView$private fun drawPdfBackground( canvas: Canvas, notebookId: UUID, metadata: Notebook.PageMetadata, viewport: ViewportTransform )</ID>
+    <ID>ReturnCount:PenDrawView.kt$PenDrawView$private fun pageThumbnailBackground( notebookId: UUID, metadata: Notebook.PageMetadata ): (() -&gt; Bitmap?)?</ID>
+    <ID>ReturnCount:PenDrawView.kt$PenDrawView$private fun schedulePagePreRender(id: UUID)</ID>
+    <ID>ReturnCount:PenSettings.kt$PenProfiles$fun serviceColor(style: PenStyle, colorHardware: Boolean): Int</ID>
+    <ID>ReturnCount:PhoneTransferClient.kt$PhoneTransferClient$private suspend fun findSender( paired: PairedDevice, kind: ContentKind?, timeoutMillis: Long ): DiscoveredSender?</ID>
+    <ID>ReturnCount:SelectionTool.kt$SelectionTool$private fun objectQuadIntersectsPolygon(obj: PageObject, polygon: FloatArray): Boolean</ID>
+    <ID>ReturnCount:SelectionTool.kt$SelectionTool$private fun strokeInPolygon(obj: StrokeObject, polygon: FloatArray): Boolean</ID>
+    <ID>ReturnCount:StrokeBuilder.kt$StrokeBuilder$fun finish(): Stroke?</ID>
+    <ID>ReturnCount:StrokeGeometry.kt$StrokeGeometry$fun buildRange(all: List&lt;InkPoint&gt;, fromIndex: Int, style: PenStyle): StrokeOutline</ID>
+    <ID>ReturnCount:TemplateManifestCodec.kt$TemplateManifestCodec$fun parse(json: String): TemplateManifestResult</ID>
+    <ID>ReturnCount:TemplateModels.kt$TemplateDefinition$fun isCompatible(pageWidth: Float, pageHeight: Float): Boolean</ID>
+    <ID>ReturnCount:TemplateRenderer.kt$TemplateRenderer$@Synchronized private fun renderShared(definition: TemplateDefinition, width: Int, height: Int): Bitmap?</ID>
+    <ID>ReturnCount:TemplateStore.kt$TemplateStore$fun hasUsableDirectoryPermission(): Boolean</ID>
+    <ID>SpacingAroundComma:HitTest.kt$HitTest$,</ID>
+    <ID>SpacingAroundKeyword:InsertionCoordinator.kt$InsertionCoordinator$else</ID>
+    <ID>SpacingAroundKeyword:ViewportTransform.kt$PdfViewportMath$else</ID>
+    <ID>SpacingBetweenDeclarationsWithAnnotations:NotebookRepository.kt$NotebookRepository$@Synchronized fun checkpoint()</ID>
+    <ID>SpacingBetweenDeclarationsWithAnnotations:NotebookRepository.kt$NotebookRepository$@Synchronized override fun close()</ID>
+    <ID>SpacingBetweenDeclarationsWithAnnotations:PenDrawView.kt$PenDrawView$@Volatile private var desiredWarmNotebookId: UUID? = notebook.id</ID>
+    <ID>SpacingBetweenDeclarationsWithAnnotations:PenDrawView.kt$PenDrawView$@Volatile private var desiredWarmPageIds: Set&lt;UUID&gt; = emptySet()</ID>
+    <ID>SpacingBetweenDeclarationsWithAnnotations:PenDrawView.kt$PenDrawView$@Volatile private var pagePreRenderClosed = false</ID>
+    <ID>SpacingBetweenDeclarationsWithAnnotations:PenDrawView.kt$PenDrawView$@Volatile private var persistenceError: String? = null</ID>
+    <ID>SpacingBetweenDeclarationsWithAnnotations:PhoneTransferClient.kt$PhoneTransferClient$@Volatile private var activeListeningSocket: ServerSocket? = null</ID>
+    <ID>SpacingBetweenDeclarationsWithAnnotations:PhoneTransferClient.kt$PhoneTransferClient$@Volatile private var activeOperationJob: Job? = null</ID>
+    <ID>SpacingBetweenDeclarationsWithAnnotations:PhoneTransferClient.kt$PhoneTransferClient$@Volatile private var inboundReplay = BleReplayCache()</ID>
+    <ID>StringTemplate:ExportFileNames.kt$ExportFileNames$${shortHash}</ID>
+    <ID>SwallowedException:EinkRefreshController.kt$EinkRefreshController$t: Throwable</ID>
+    <ID>SwallowedException:InkStrokeModelerJNI.kt$InkStrokeModelerJNI.Companion$t: Throwable</ID>
+    <ID>TooGenericExceptionCaught:AutosaveController.kt$AutosaveController$t: Throwable</ID>
+    <ID>TooGenericExceptionCaught:EinkRefreshController.kt$EinkRefreshController$t: Throwable</ID>
+    <ID>TooGenericExceptionCaught:ExportDownloads.kt$ExportDownloads$t: Throwable</ID>
+    <ID>TooGenericExceptionCaught:ExportEngine.kt$ExportEngine$t: Throwable</ID>
+    <ID>TooGenericExceptionCaught:ExportViewModel.kt$ExportViewModel$t: Throwable</ID>
+    <ID>TooGenericExceptionCaught:ImageAssetStore.kt$ImageAssetStore$t: Throwable</ID>
+    <ID>TooGenericExceptionCaught:InkStrokeModelerJNI.kt$InkStrokeModelerJNI.Companion$t: Throwable</ID>
+    <ID>TooGenericExceptionCaught:InsertionCoordinator.kt$InsertionCoordinator$error: Throwable</ID>
+    <ID>TooGenericExceptionCaught:InsertionCoordinator.kt$error: Throwable</ID>
+    <ID>TooGenericExceptionCaught:NativeSelfTest.kt$NativeSelfTest$t: Throwable</ID>
+    <ID>TooGenericExceptionCaught:PdfAssetStore.kt$PdfAssetStore$t: Throwable</ID>
+    <ID>TooGenericExceptionCaught:PdfImportCoordinator.kt$PdfImportCoordinator$t: Throwable</ID>
+    <ID>TooGenericExceptionCaught:PdfInkAnnotationWriter.kt$PdfInkAnnotationWriter$error: Throwable</ID>
+    <ID>TooGenericExceptionCaught:PenDrawView.kt$PenDrawView$t: Throwable</ID>
+    <ID>TooGenericExceptionCaught:PhoneTransferClient.kt$PhoneTransferClient$error: Throwable</ID>
+    <ID>TooGenericExceptionCaught:PhoneTransferClient.kt$PhoneTransferClient$t: Throwable</ID>
+    <ID>TooGenericExceptionCaught:PhoneTransferClient.kt$PhoneTransferClient.NoteReceivedLease$error: Throwable</ID>
+    <ID>TooGenericExceptionCaught:PhoneTransferClient.kt$error: Throwable</ID>
+    <ID>TooGenericExceptionCaught:PointBlobCodec.kt$PointBlobCodec$e: Exception</ID>
+    <ID>TooManyFunctions:ExportTaskRepository.kt$ExportTaskRepository : AutoCloseable</ID>
+    <ID>TooManyFunctions:InsertionCoordinator.kt$InsertionCoordinator : AutoCloseable</ID>
+    <ID>TooManyFunctions:NotebookRepository.kt$NotebookRepository : AutoCloseable</ID>
+    <ID>TooManyFunctions:PenButtonTracker.kt$PenButtonTracker</ID>
+    <ID>TooManyFunctions:PenDrawView.kt$PenDrawView : ViewHvPenDrawListenerToolHost</ID>
+    <ID>TooManyFunctions:PhoneTransferClient.kt$PhoneTransferClient : AutoCloseableTransferObservable</ID>
+    <ID>TooManyFunctions:SelectionTool.kt$SelectionTool : Tool</ID>
+    <ID>TooManyFunctions:TemplateStore.kt$TemplateStore : TemplateResolver</ID>
+    <ID>TooManyFunctions:Toolbar.kt$com.betterhv.note.Toolbar.kt</ID>
+    <ID>UnusedPrivateMember:PhoneTransferClient.kt$PhoneTransferClient$private fun localWifiIpv4Address(): String?</ID>
+    <ID>UnusedPrivateMember:Toolbar.kt$private fun alignmentFor(edge: DockEdge): Alignment</ID>
+    <ID>UnusedPrivateProperty:PenDrawView.kt$PenDrawView.Companion$/** Long enough to catch a trailing batch, short enough to feel immediate. */ private const val FINALIZE_DELAY_MS = 80L</ID>
+    <ID>UnusedPrivateProperty:PenTool.kt$PenTool$private val host: ToolHost</ID>
+    <ID>Wrapping:EditorInteractionTest.kt$EditorInteractionTest$;</ID>
+    <ID>Wrapping:ExportDownloads.kt$ExportDownloads$;</ID>
+    <ID>Wrapping:ExportPanel.kt$(</ID>
+    <ID>Wrapping:ExportPanel.kt$;</ID>
+    <ID>Wrapping:ExportRevisionTest.kt$ExportRevisionTest$(</ID>
+    <ID>Wrapping:ExportRevisionTest.kt$ExportRevisionTest$(ExportFormat.PDF, original.mapIndexed { index, page -&gt; if (index == 1) page.copy(contentRevision = 3) else page }, 2)</ID>
+    <ID>Wrapping:ExportTaskRepository.kt$ExportTaskRepository$(</ID>
+    <ID>Wrapping:ExportViewModel.kt$ExportViewModel$(</ID>
+    <ID>Wrapping:HitTest.kt$HitTest$(</ID>
+    <ID>Wrapping:ImageAssetStore.kt$ImageAssetStore$;</ID>
+    <ID>Wrapping:InsertionCoordinator.kt$InsertionCoordinator$;</ID>
+    <ID>Wrapping:MainActivity.kt$;</ID>
+    <ID>Wrapping:MainActivity.kt${ message -&gt; snackbarScope.launch { snackbarHostState.showSnackbar( message = message, withDismissAction = true, duration = SnackbarDuration.Short ) } }</ID>
+    <ID>Wrapping:MigrationManager.kt$MigrationManager$"""</ID>
+    <ID>Wrapping:MuPdfEngine.kt$MuPdfEngine$(</ID>
+    <ID>Wrapping:NotebookNameDialog.kt$;</ID>
+    <ID>Wrapping:NotebookRepository.kt$NotebookRepository$"""</ID>
+    <ID>Wrapping:NotebookRepository.kt$NotebookRepository$(</ID>
+    <ID>Wrapping:NotebookRepository.kt$NotebookRepository$( "pages", arrayOf( "width", "height", "bookmarked", "content_revision", "created_at", "updated_at", "kind", "parent_pdf_page_id", "pdf_page_index", "pdf_bound_left", "pdf_bound_top", "pdf_bound_right", "pdf_bound_bottom", "pdf_a", "pdf_b", "pdf_c", "pdf_d", "pdf_tx", "pdf_ty", "template_id" ), "id=?", arrayOf(id.toString()), null, null, null )</ID>
+    <ID>Wrapping:NotebookRepository.kt$NotebookRepository$(db, "images", ContentValues().apply { put("object_id", obj.id.toString()); put("asset_path", obj.assetPath) put("mime_type", obj.mimeType); put("pixel_width", obj.pixelWidth) put("pixel_height", obj.pixelHeight); put("exif_orientation", obj.exifOrientation) }, "object_id", obj.id.toString())</ID>
+    <ID>Wrapping:NotebookRepository.kt$NotebookRepository$(db, "texts", ContentValues().apply { put("object_id", obj.id.toString()); put("content", obj.text) put("font_family", obj.fontFamily.name); put("font_size", obj.fontSize) }, "object_id", obj.id.toString())</ID>
+    <ID>Wrapping:NotebookRepository.kt$NotebookRepository$-&gt;</ID>
+    <ID>Wrapping:NotebookRepository.kt$NotebookRepository$;</ID>
+    <ID>Wrapping:PageManagerPanel.kt$;</ID>
+    <ID>Wrapping:PageRenderer.kt$PageRenderer$(</ID>
+    <ID>Wrapping:PdfInkAppearance.kt$PdfInkAppearance.Companion$(</ID>
+    <ID>Wrapping:PdfInkAppearanceTest.kt$PdfInkAppearanceTest$(</ID>
+    <ID>Wrapping:PenDrawView.kt$PenDrawView$(</ID>
+    <ID>Wrapping:PenGeometry.kt$PenGeometry$;</ID>
+    <ID>Wrapping:PhoneTransferClient.kt$PhoneTransferClient$(</ID>
+    <ID>Wrapping:PhoneTransferClient.kt$PhoneTransferClient$;</ID>
+    <ID>Wrapping:PhoneTransferClient.kt$PhoneTransferClient$exchange(failedSession, authenticatedId, BleCommand.Release(itemId))</ID>
+    <ID>Wrapping:PhoneTransferClient.kt$PhoneTransferClient.NoteReceivedLease$;</ID>
+    <ID>Wrapping:SelectionTool.kt$SelectionTool$(</ID>
+    <ID>Wrapping:SelectionToolTest.kt$SelectionToolTest$;</ID>
+    <ID>Wrapping:StrokeSimplifier.kt$RamerDouglasPeuckerSimplifier$(</ID>
+    <ID>Wrapping:TemplateRenderer.kt$TemplateRenderer$(</ID>
+    <ID>Wrapping:TemplateRenderer.kt$TemplateRenderer$(path, BitmapFactory.Options().apply { inSampleSize = sample inPreferredConfig = Bitmap.Config.ARGB_8888 })</ID>
+    <ID>Wrapping:ThumbnailManager.kt$ThumbnailManager$(</ID>
+    <ID>Wrapping:ThumbnailManager.kt$ThumbnailManager$;</ID>
+    <ID>Wrapping:Toolbar.kt$(</ID>
+    <ID>Wrapping:Toolbar.kt$(modifier.size(44.dp).clickable(onClick = onClick), contentAlignment = when (edge) { DockEdge.START -&gt; Alignment.CenterStart DockEdge.END -&gt; Alignment.CenterEnd DockEdge.TOP -&gt; Alignment.TopCenter DockEdge.BOTTOM -&gt; Alignment.BottomCenter })</ID>
+    <ID>Wrapping:Toolbar.kt$;</ID>
+  </CurrentIssues>
+</SmellBaseline>

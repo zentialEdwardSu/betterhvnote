@@ -1,6 +1,7 @@
 package com.betterhv.note.storage
 
 import com.betterhv.note.doc.Notebook
+import com.betterhv.note.doc.NotebookKind
 import java.util.UUID
 
 enum class StartupBehavior { WORKING_COPY, LAST_OPENED }
@@ -8,6 +9,7 @@ enum class StartupBehavior { WORKING_COPY, LAST_OPENED }
 data class NotebookSummary(
     val id: UUID,
     val title: String,
+    val kind: NotebookKind,
     val pageCount: Int,
     val cover: Notebook.PageMetadata?,
     val updatedAt: Long,

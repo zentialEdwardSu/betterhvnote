@@ -2,6 +2,14 @@ package com.betterhv.note
 
 import android.content.Context
 
+internal fun decodeVisibleToolbarItems(stored: Set<String>): Set<ToolbarItem> {
+    val migrated = stored.mapNotNull(ToolbarItem::fromStorageId)
+        .filterNot { it == ToolbarItem.MENU }
+        .toMutableSet()
+    if ("linked_note" in stored) migrated += ToolbarItem.LASSO
+    return migrated
+}
+
 /** Small, version-tolerant store for user-facing editor behavior. */
 class AppSettingsStore(context: Context) {
     private val preferences = context.applicationContext.getSharedPreferences(NAME, Context.MODE_PRIVATE)
@@ -21,10 +29,11 @@ class AppSettingsStore(context: Context) {
     var visibleToolbarItems: Set<ToolbarItem>
         get() {
             if (!preferences.contains(KEY_TOOLBAR_ITEMS)) return ToolbarItem.defaults
-            return preferences.getStringSet(KEY_TOOLBAR_ITEMS, emptySet()).orEmpty()
-                .mapNotNull(ToolbarItem::fromStorageId)
-                .filterNot { it == ToolbarItem.MENU }
-                .toSet()
+            val stored = preferences.getStringSet(KEY_TOOLBAR_ITEMS, emptySet()).orEmpty()
+            // v1 exposed linked-note as a standalone tool. It is now Side1 of
+            // the lasso tool; keep it reachable for users who had hidden lasso
+            // but explicitly left the old linked-note button visible.
+            return decodeVisibleToolbarItems(stored)
         }
         set(value) = preferences.edit()
             .putStringSet(
@@ -46,6 +55,12 @@ class AppSettingsStore(context: Context) {
     var toolbarDockFraction: Float
         get() = preferences.getFloat(KEY_TOOLBAR_DOCK_FRACTION, 0.5f).coerceIn(0f, 1f)
         set(value) = preferences.edit().putFloat(KEY_TOOLBAR_DOCK_FRACTION, value.coerceIn(0f, 1f)).apply()
+
+    var templateDirectoryUri: String?
+        get() = preferences.getString(KEY_TEMPLATE_DIRECTORY_URI, null)
+        set(value) = preferences.edit().apply {
+            if (value == null) remove(KEY_TEMPLATE_DIRECTORY_URI) else putString(KEY_TEMPLATE_DIRECTORY_URI, value)
+        }.apply()
 
     fun loadHardwareShortcuts(): HardwareShortcutBindings {
         var result = HardwareShortcutBindings()
@@ -87,5 +102,6 @@ class AppSettingsStore(context: Context) {
         private const val KEY_TOOLBAR_HIDDEN = "toolbar_hidden"
         private const val KEY_TOOLBAR_DOCK_EDGE = "toolbar_dock_edge"
         private const val KEY_TOOLBAR_DOCK_FRACTION = "toolbar_dock_fraction"
+        private const val KEY_TEMPLATE_DIRECTORY_URI = "template_directory_uri"
     }
 }

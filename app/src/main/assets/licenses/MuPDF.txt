@@ -1,0 +1,8 @@
+MuPDF fitz 1.28.0
+Copyright Artifex Software, Inc.
+
+MuPDF is used by BetterHvNote under GNU AGPL version 3 or later.
+https://www.gnu.org/licenses/agpl-3.0.txt
+
+BetterHvNote corresponding source:
+https://github.com/zentialEdwardSu/betterhvnote

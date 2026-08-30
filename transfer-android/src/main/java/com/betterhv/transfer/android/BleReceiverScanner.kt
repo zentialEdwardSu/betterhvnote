@@ -116,7 +116,7 @@ class BleReceiverScanner(context: Context) {
         val data = manufacturerData ?: serviceData
         if (data == null) {
             if (!hasNoteLinkService) return null
-            return DiscoveredSender(device.address, "", record.deviceName ?: "NoteLink", 0, 0)
+            return DiscoveredSender(device.address, "", record.deviceName ?: "NoteLink", 0, 0, 0)
         }
         // Android phones use manufacturer data in the scan response. Windows
         // uses service data so queue discovery and the connectable GATT service
@@ -125,7 +125,7 @@ class BleReceiverScanner(context: Context) {
         val hash = advertisement.identityHash.joinToString("") { "%02x".format(it) }
         return DiscoveredSender(
             device.address, hash, advertisement.deviceName,
-            advertisement.imageCount, advertisement.textCount
+            advertisement.imageCount, advertisement.textCount, advertisement.pdfCount
         )
     }
 
@@ -140,6 +140,7 @@ internal fun mergeDiscoveredSender(
     return update.copy(
         name = update.name.takeUnless { it == "NoteLink" } ?: previous.name,
         imageCount = maxOf(previous.imageCount, update.imageCount),
-        textCount = maxOf(previous.textCount, update.textCount)
+        textCount = maxOf(previous.textCount, update.textCount),
+        pdfCount = maxOf(previous.pdfCount, update.pdfCount)
     )
 }

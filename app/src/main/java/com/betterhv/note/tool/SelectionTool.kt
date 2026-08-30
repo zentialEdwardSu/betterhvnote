@@ -35,6 +35,7 @@ class SelectionTool(
 
     private var mode = Mode.NONE
     private var selection: SelectionSet = SelectionSet.EMPTY
+    private var completedRegion: Bounds? = null
 
     // Lasso path accumulation, flat (x0,y0,x1,y1,...).
     private val lassoPath = ArrayList<Float>()
@@ -51,6 +52,25 @@ class SelectionTool(
 
     fun currentSelection(): SelectionSet = selection
 
+    /** Last completed free/rectangular selection region, consumed by PDF actions. */
+    fun consumeCompletedRegion(): Bounds? = completedRegion.also { completedRegion = null }
+
+    fun selectRectangle(bounds: Bounds): SelectionSet {
+        completedRegion = bounds
+        selection = selectWithPolygon(rectanglePolygon(bounds), bounds)
+        host.onSelectionChanged(selection)
+        if (!selection.isEmpty) host.requestRepaint(selection.bounds)
+        return selection
+    }
+
+    fun selectObjectIds(ids: Collection<UUID>): SelectionSet {
+        val objects = ids.mapNotNull(page::getObject)
+        selection = SelectionSet.of(objects)
+        host.onSelectionChanged(selection)
+        if (!selection.isEmpty) host.requestRepaint(selection.bounds)
+        return selection
+    }
+
     /**
      * Snapshot of the in-progress lasso polyline (flat x0,y0,x1,y1,...) while a
      * lasso is being drawn, for the view's transient marquee overlay; null when
@@ -61,6 +81,7 @@ class SelectionTool(
 
     fun clearSelection() {
         selection = SelectionSet.EMPTY
+        completedRegion = null
         host.onSelectionChanged(selection)
     }
 
@@ -73,6 +94,7 @@ class SelectionTool(
     }
 
     override fun onDown(x: Float, y: Float) {
+        completedRegion = null
         if (!selection.isEmpty) {
             val handle = hitHandle(x, y)
             if (handle != null) {
@@ -155,19 +177,26 @@ class SelectionTool(
         // either dimension before running its Region intersection query.
         if (lassoBounds.width < MIN_LASSO_SIZE || lassoBounds.height < MIN_LASSO_SIZE) {
             lassoPath.clear()
+            completedRegion = null
             selection = SelectionSet.EMPTY
             host.onSelectionChanged(selection)
             return
         }
-        val hits = ArrayList<PageObject>()
-        for (obj in page.queryObjects(lassoBounds)) {
-            if (obj !is StrokeObject) continue
-            if (strokeInPolygon(obj, polygon)) hits.add(obj)
-        }
+        completedRegion = lassoBounds
         lassoPath.clear()
-        selection = SelectionSet.of(hits)
+        selection = selectWithPolygon(polygon, lassoBounds)
         host.onSelectionChanged(selection)
         if (!selection.isEmpty) host.requestRepaint(selection.bounds)
+    }
+
+    private fun selectWithPolygon(polygon: FloatArray, bounds: Bounds): SelectionSet {
+        val hits = page.queryObjects(bounds).filter { obj ->
+            when (obj) {
+                is StrokeObject -> strokeInPolygon(obj, polygon)
+                else -> objectQuadIntersectsPolygon(obj, polygon)
+            }
+        }
+        return SelectionSet.of(hits)
     }
 
     private fun strokeInPolygon(obj: StrokeObject, polygon: FloatArray): Boolean {
@@ -186,6 +215,40 @@ class SelectionTool(
         }
         return false
     }
+
+    private fun objectQuadIntersectsPolygon(obj: PageObject, polygon: FloatArray): Boolean {
+        val b = obj.localBounds
+        val points = arrayOf(
+            obj.transform.mapPoint(b.left, b.top),
+            obj.transform.mapPoint(b.right, b.top),
+            obj.transform.mapPoint(b.right, b.bottom),
+            obj.transform.mapPoint(b.left, b.bottom)
+        )
+        val quad = FloatArray(8)
+        points.forEachIndexed { index, point ->
+            quad[index * 2] = point[0]
+            quad[index * 2 + 1] = point[1]
+        }
+        if (points.any { HitTest.pointInPolygon(it[0], it[1], polygon) }) return true
+        var i = 0
+        while (i + 1 < polygon.size) {
+            if (HitTest.pointInPolygon(polygon[i], polygon[i + 1], quad)) return true
+            i += 2
+        }
+        for (edge in points.indices) {
+            val start = points[edge]
+            val end = points[(edge + 1) % points.size]
+            if (HitTest.segmentIntersectsPolygon(start[0], start[1], end[0], end[1], polygon)) return true
+        }
+        return false
+    }
+
+    private fun rectanglePolygon(bounds: Bounds): FloatArray = floatArrayOf(
+        bounds.left, bounds.top,
+        bounds.right, bounds.top,
+        bounds.right, bounds.bottom,
+        bounds.left, bounds.bottom
+    )
 
     // -- Move --------------------------------------------------------------
 

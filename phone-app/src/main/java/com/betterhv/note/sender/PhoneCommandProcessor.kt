@@ -91,7 +91,7 @@ class PhoneCommandProcessor(
     }
 
     private fun dispatch(command: BleCommand, peerId: String, key: ByteArray): BleResponse = when (command) {
-        BleCommand.Counts -> queue.counts().let { BleResponse.Counts(it.first, it.second) }
+        BleCommand.Counts -> queue.counts().let { BleResponse.Counts(it.images, it.texts, it.pdfs) }
         is BleCommand.Lease -> queue.leaseNext(command.kind, command.destinationDeviceId)?.let { lease ->
             leases[lease.offer.item.id] = lease
             BleResponse.Offer(lease.offer.item)
@@ -192,7 +192,7 @@ class PhoneCommandProcessor(
         probeKey: ByteArray
     ): BleResponse {
         val lease = requireLease(command.itemId)
-        val source = requireNotNull(lease.payloadFile) { "不是图片项目" }
+        val source = requireNotNull(lease.payloadFile) { "不是文件项目" }
         if (command.selectedMode == TransferMode.LAN) {
             phase(command.itemId, TransferPhase.PROBING_LAN)
             runCatching { EncryptedFileTransfer.probe(endpoint.host, command.itemId, probeKey) }

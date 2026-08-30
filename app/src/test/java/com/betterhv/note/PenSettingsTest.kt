@@ -1,5 +1,6 @@
 package com.betterhv.note
 
+import com.betterhv.note.ink.PenStyle
 import com.betterhv.note.ink.PenType
 import org.junit.Assert.assertEquals
 import org.junit.Test
@@ -95,5 +96,26 @@ class PenSettingsTest {
         assertEquals(0xFFFF0000.toInt(), secondStyle.color)
         assertEquals(4f + 32f * (4f / 19f), firstStyle.baseWidth, 0.001f)
         assertEquals(36f, secondStyle.baseWidth, 0.001f)
+    }
+
+    @Test
+    fun romOverlayWidthCompensatesForItsThinnerRendering() {
+        assertEquals(
+            7,
+            PenProfiles.serviceWidth(PenStyle(baseWidth = 4f, penType = PenType.NormalPen))
+        )
+        assertEquals(
+            30,
+            PenProfiles.serviceWidth(PenStyle(baseWidth = 30f, penType = PenType.Marker))
+        )
+        assertEquals(
+            3,
+            PenProfiles.serviceWidth(PenStyle(baseWidth = 3f, penType = PenType.Pencil))
+        )
+    }
+
+    @Test
+    fun romOverlayWidthNeverRoundsDownToZero() {
+        assertEquals(1, PenProfiles.serviceWidth(PenStyle(baseWidth = 0.1f)))
     }
 }

@@ -15,6 +15,7 @@ import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.CancellationException
 
 /**
  * Android endpoint shells keep lifecycle and radio code out of app UI. The wire command
@@ -69,14 +70,17 @@ class AndroidReceiverEndpoint(
 
     override suspend fun discover(timeoutMillis: Long): List<DiscoveredSender> {
         mutableSnapshot.value = TransferSnapshot(phase = TransferPhase.DISCOVERING, canCancel = true)
-        return runCatching { scanner.discover(timeoutMillis) }
-            .onSuccess { mutableSnapshot.value = TransferSnapshot() }
-            .onFailure {
-                val failure = TransferFailure(TransferErrorCode.INTERNAL, it.message ?: "BLE scan failed", true)
-                mutableSnapshot.value = TransferSnapshot(phase = TransferPhase.FAILED, lastFailure = failure, canRetry = true)
-                mutableEvents.tryEmit(TransferEvent.Failed(null, failure))
-            }
-            .getOrThrow()
+        return try {
+            scanner.discover(timeoutMillis).also { mutableSnapshot.value = TransferSnapshot() }
+        } catch (cancelled: CancellationException) {
+            mutableSnapshot.value = TransferSnapshot()
+            throw cancelled
+        } catch (error: Throwable) {
+            val failure = TransferFailure(TransferErrorCode.INTERNAL, error.message ?: "BLE scan failed", true)
+            mutableSnapshot.value = TransferSnapshot(phase = TransferPhase.FAILED, lastFailure = failure, canRetry = true)
+            mutableEvents.tryEmit(TransferEvent.Failed(null, failure))
+            throw error
+        }
     }
 
     override suspend fun requestNext(kind: ContentKind, stagingDirectory: File): ReceivedLease? =

@@ -1,0 +1,168 @@
+<?xml version="1.0" ?>
+<SmellBaseline>
+  <ManuallySuppressedIssues/>
+  <CurrentIssues>
+    <ID>AnnotationOnSeparateLine:WifiDirectController.kt$WifiDirectController$@Suppress("DEPRECATION") WifiP2pConfig().apply { deviceAddress = requireNotNull(owner).deviceAddress groupOwnerIntent = 0 }</ID>
+    <ID>AnnotationOnSeparateLine:WifiDirectController.kt$WifiDirectController$@Suppress("DEPRECATION") appContext.registerReceiver(receiver, filter)</ID>
+    <ID>ArgumentListWrapping:AndroidEndpoints.kt$AndroidSenderEndpoint$( context, deviceId, deviceName, provider::counts, commandHandler )</ID>
+    <ID>ArgumentListWrapping:AndroidPairingController.kt$AndroidPairingController$( TABLE, COLUMNS, null, null, null, null, "last_used_at DESC, paired_at DESC" )</ID>
+    <ID>ArgumentListWrapping:AndroidPairingController.kt$AndroidPairingController$( TABLE, arrayOf("encrypted_secret"), "device_id=?", arrayOf(deviceId), null, null, null )</ID>
+    <ID>ArgumentListWrapping:AndroidPairingController.kt$AndroidPairingController$( TABLE, arrayOf("encrypted_secret"), "device_id=?", arrayOf(oldDeviceId), null, null, null )</ID>
+    <ID>ArgumentListWrapping:AndroidPairingController.kt$AndroidPairingController$( deviceId = localDeviceId, deviceName = localDeviceName, publicKey = pair.public.encoded, nonce = TransferCrypto.randomBytes(16) )</ID>
+    <ID>ArgumentListWrapping:AndroidPairingController.kt$AndroidPairingController$( local.deviceId, offer.deviceId, offer.deviceName.ifBlank { remoteDeviceName }, TransferCrypto.verificationCode(key, transcript), key )</ID>
+    <ID>ArgumentListWrapping:AndroidPairingController.kt$AndroidPairingController$( sixDigitCode.encodeToByteArray(), "BetterHv-manual-v1".encodeToByteArray(), "paired-device".encodeToByteArray(), 32 )</ID>
+    <ID>ArgumentListWrapping:AndroidPairingController.kt$AndroidPairingController$(KeyGenParameterSpec.Builder( KEYSTORE_ALIAS, KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT ).setBlockModes(KeyProperties.BLOCK_MODE_GCM) .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE) .build())</ID>
+    <ID>ArgumentListWrapping:AndroidPairingController.kt$AndroidPairingController.Companion$( "device_id", "device_name", "paired_at", "identity_hash", "last_used_at", "legacy" )</ID>
+    <ID>ArgumentListWrapping:BleQueueProtocolTest.kt$BleQueueProtocolTest$( UUID.randomUUID(), com.betterhv.transfer.core.TransferMode.LAN, com.betterhv.transfer.core.NetworkEndpoint("192.168.49.1") )</ID>
+    <ID>ArgumentListWrapping:BleQueueProtocolTest.kt$BleQueueProtocolTest$( artifactId, "notebook_all.pdf", "application/pdf", 42L, ByteArray(32) { it.toByte() } )</ID>
+    <ID>ArgumentListWrapping:BleReceiverScanner.kt$BleReceiverScanner$( device.address, hash, advertisement.deviceName, advertisement.imageCount, advertisement.textCount, advertisement.pdfCount )</ID>
+    <ID>ArgumentListWrapping:BleSenderPeripheral.kt$BleSenderPeripheral$( BleConstants.COMMAND_UUID, BluetoothGattCharacteristic.PROPERTY_WRITE, BluetoothGattCharacteristic.PERMISSION_WRITE )</ID>
+    <ID>ArgumentListWrapping:BleSenderPeripheral.kt$BleSenderPeripheral$( BleConstants.IDENTITY_UUID, BluetoothGattCharacteristic.PROPERTY_READ, BluetoothGattCharacteristic.PERMISSION_READ )</ID>
+    <ID>ArgumentListWrapping:BleSenderPeripheral.kt$BleSenderPeripheral$( BleConstants.SERVICE_UUID, android.bluetooth.BluetoothGattService.SERVICE_TYPE_PRIMARY )</ID>
+    <ID>ArgumentListWrapping:BleSenderPeripheral.kt$BleSenderPeripheral$( TransferCrypto.sha256(deviceId.encodeToByteArray()), deviceName, counts.images, counts.texts, counts.pdfs )</ID>
+    <ID>ArgumentListWrapping:BleSenderPeripheral.kt$BleSenderPeripheral.&lt;no name provided&gt;$( device, requestId, if (result.isSuccess) BluetoothGatt.GATT_SUCCESS else BluetoothGatt.GATT_FAILURE, offset, null )</ID>
+    <ID>ArgumentListWrapping:EncryptedFileTransfer.kt$EncryptedFileTransfer$( destination, expectedItemId, key, probeKey, progress, onListening )</ID>
+    <ID>ArgumentListWrapping:EncryptedFileTransferTest.kt$EncryptedFileTransferTest$(900_000)</ID>
+    <ID>ArgumentListWrapping:EncryptedFileTransferTest.kt$EncryptedFileTransferTest$(ByteArray(900_000) { index -&gt; index.toByte() })</ID>
+    <ID>ArgumentListWrapping:EncryptedFileTransferTest.kt$EncryptedFileTransferTest$(directory, "source.bin")</ID>
+    <ID>ArgumentListWrapping:ReceivedLeaseTest.kt$ReceivedLeaseTest$( id = UUID.randomUUID(), destinationDeviceId = null, kind = ContentKind.TEXT, mimeType = "text/plain", byteLength = 0, sha256 = ByteArray(32), createdAt = 0, position = 0 )</ID>
+    <ID>ArgumentListWrapping:WifiDirectController.kt$WifiDirectController$(TAG, "Configured temporary group unsupported; using system group", it)</ID>
+    <ID>CyclomaticComplexMethod:WifiDirectController.kt$WifiDirectController$@SuppressLint("MissingPermission") suspend fun joinHostedGroup( ownerDeviceAddress: String, ownerDeviceName: String, networkName: String? = null, passphrase: String? = null, timeoutMillis: Long = 30_000L ): WifiDirectSession</ID>
+    <ID>ImportOrdering:AndroidEndpoints.kt$import android.bluetooth.BluetoothDevice import android.content.Context import com.betterhv.transfer.core.ContentKind import com.betterhv.transfer.core.TransferErrorCode import com.betterhv.transfer.core.TransferEvent import com.betterhv.transfer.core.TransferFailure import com.betterhv.transfer.core.TransferPhase import com.betterhv.transfer.core.TransferSnapshot import java.io.File import kotlinx.coroutines.flow.MutableStateFlow import kotlinx.coroutines.flow.MutableSharedFlow import kotlinx.coroutines.flow.SharedFlow import kotlinx.coroutines.flow.StateFlow import kotlinx.coroutines.flow.asSharedFlow import kotlinx.coroutines.flow.asStateFlow import kotlinx.coroutines.CancellationException</ID>
+    <ID>ImportOrdering:BleGattSession.kt$import android.annotation.SuppressLint import android.bluetooth.BluetoothDevice import android.bluetooth.BluetoothGatt import android.bluetooth.BluetoothGattCallback import android.bluetooth.BluetoothGattCharacteristic import android.bluetooth.BluetoothGattDescriptor import android.bluetooth.BluetoothGattService import android.bluetooth.BluetoothManager import android.bluetooth.BluetoothProfile import android.content.Context import android.os.Build import android.util.Log import com.betterhv.transfer.core.BleTransportFrameCodec import com.betterhv.transfer.core.BleTransportReassembler import kotlinx.coroutines.CompletableDeferred import kotlinx.coroutines.CancellationException import kotlinx.coroutines.delay import kotlinx.coroutines.sync.Mutex import kotlinx.coroutines.sync.withLock import kotlinx.coroutines.withTimeout import kotlinx.coroutines.withTimeoutOrNull import java.util.concurrent.atomic.AtomicInteger</ID>
+    <ID>ImportOrdering:BleQueueProtocolTest.kt$import com.betterhv.transfer.core.ExportTransferOffer import com.betterhv.transfer.core.BleCommand import com.betterhv.transfer.core.BleQueueProtocol import com.betterhv.transfer.core.BleResponse import java.util.UUID import org.junit.Assert.assertEquals import org.junit.Test</ID>
+    <ID>ImportOrdering:BleReceiverScanner.kt$import android.annotation.SuppressLint import android.bluetooth.BluetoothManager import android.bluetooth.le.ScanCallback import android.bluetooth.le.ScanResult import android.bluetooth.le.ScanSettings import android.content.Context import android.os.ParcelUuid import com.betterhv.transfer.core.NoteLinkAdvertisementCodec import java.util.concurrent.ConcurrentHashMap import kotlinx.coroutines.CompletableDeferred import kotlinx.coroutines.channels.Channel import kotlinx.coroutines.withTimeoutOrNull</ID>
+    <ID>ImportOrdering:BleSenderPeripheral.kt$import android.annotation.SuppressLint import android.bluetooth.BluetoothAdapter import android.bluetooth.BluetoothDevice import android.bluetooth.BluetoothGatt import android.bluetooth.BluetoothGattCharacteristic import android.bluetooth.BluetoothGattDescriptor import android.bluetooth.BluetoothGattServer import android.bluetooth.BluetoothGattServerCallback import android.bluetooth.BluetoothManager import android.bluetooth.BluetoothStatusCodes import android.bluetooth.le.AdvertiseCallback import android.bluetooth.le.AdvertiseData import android.bluetooth.le.AdvertiseSettings import android.content.Context import android.os.ParcelUuid import android.util.Log import com.betterhv.transfer.core.ContentKind import com.betterhv.transfer.core.ContentCounts import com.betterhv.transfer.core.BleTransportFrameCodec import com.betterhv.transfer.core.BleTransportReassembler import com.betterhv.transfer.core.NoteLinkAdvertisementCodec import com.betterhv.transfer.core.TransferCrypto import java.util.ArrayDeque import java.util.concurrent.atomic.AtomicInteger</ID>
+    <ID>ImportOrdering:EncryptedFileTransferTest.kt$import java.io.File import java.nio.file.Files import java.util.UUID import java.util.concurrent.Executors import java.util.concurrent.TimeUnit import org.junit.Assert.assertArrayEquals import org.junit.Assert.assertEquals import org.junit.Test</ID>
+    <ID>ImportOrdering:ReceivedLeaseTest.kt$import com.betterhv.transfer.core.ContentKind import com.betterhv.transfer.core.QueueItem import com.betterhv.transfer.core.RemotePayload import com.betterhv.transfer.core.TransferOffer import java.util.UUID import java.util.concurrent.atomic.AtomicBoolean import kotlinx.coroutines.async import kotlinx.coroutines.delay import kotlinx.coroutines.runBlocking import org.junit.Assert.assertFalse import org.junit.Assert.assertTrue import org.junit.Test</ID>
+    <ID>ImportOrdering:TransferEndpoint.kt$import com.betterhv.transfer.core.ContentKind import com.betterhv.transfer.core.ContentCounts import com.betterhv.transfer.core.PairedDevice import com.betterhv.transfer.core.QueueItem import com.betterhv.transfer.core.RemotePayload import com.betterhv.transfer.core.TransferLease import com.betterhv.transfer.core.TransferObservable import java.io.File import java.util.UUID import kotlinx.coroutines.Dispatchers import kotlinx.coroutines.withContext</ID>
+    <ID>ImportOrdering:WifiDirectController.kt$import android.annotation.SuppressLint import android.content.BroadcastReceiver import android.content.Context import android.content.Intent import android.content.IntentFilter import android.net.wifi.p2p.WifiP2pConfig import android.net.wifi.p2p.WifiP2pDevice import android.net.wifi.p2p.WifiP2pInfo import android.net.wifi.p2p.WifiP2pGroup import android.net.wifi.p2p.WifiP2pManager import android.os.Build import android.util.Log import java.security.SecureRandom import kotlinx.coroutines.CompletableDeferred import kotlinx.coroutines.delay import kotlinx.coroutines.suspendCancellableCoroutine import kotlinx.coroutines.withTimeout import kotlinx.coroutines.flow.MutableStateFlow import kotlinx.coroutines.flow.StateFlow import kotlinx.coroutines.flow.asStateFlow import kotlin.coroutines.resume import kotlin.coroutines.resumeWithException</ID>
+    <ID>Indentation:BleGattSession.kt$BleGattSession$ </ID>
+    <ID>LongParameterList:EncryptedFileTransfer.kt$EncryptedFileTransfer$( destination: File, expectedItemId: UUID, key: ByteArray, probeKey: ByteArray? = null, progress: (Long, Long) -&gt; Unit = { _, _ -&gt; }, onListening: (ServerSocket) -&gt; Unit = {} )</ID>
+    <ID>LongParameterList:EncryptedFileTransfer.kt$EncryptedFileTransfer$( ownerAddress: String, itemId: UUID, source: File, key: ByteArray, offset: Long = 0L, progress: (Long, Long) -&gt; Unit = { _, _ -&gt; } )</ID>
+    <ID>LoopWithTooManyJumpStatements:BleReceiverScanner.kt$BleReceiverScanner$while</ID>
+    <ID>MagicNumber:AndroidPairingController.kt$AndroidPairingController$12</ID>
+    <ID>MagicNumber:AndroidPairingController.kt$AndroidPairingController$128</ID>
+    <ID>MagicNumber:AndroidPairingController.kt$AndroidPairingController$16</ID>
+    <ID>MagicNumber:AndroidPairingController.kt$AndroidPairingController$3</ID>
+    <ID>MagicNumber:AndroidPairingController.kt$AndroidPairingController$32</ID>
+    <ID>MagicNumber:AndroidPairingController.kt$AndroidPairingController$4</ID>
+    <ID>MagicNumber:AndroidPairingController.kt$AndroidPairingController$5</ID>
+    <ID>MagicNumber:AndroidPairingController.kt$AndroidPairingController$6</ID>
+    <ID>MagicNumber:AndroidPairingController.kt$AndroidPairingController.Companion$5</ID>
+    <ID>MagicNumber:BleGattSession.kt$BleGattSession$133</ID>
+    <ID>MagicNumber:BleGattSession.kt$BleGattSession$15_000L</ID>
+    <ID>MagicNumber:BleGattSession.kt$BleGattSession$23</ID>
+    <ID>MagicNumber:BleGattSession.kt$BleGattSession$247</ID>
+    <ID>MagicNumber:BleGattSession.kt$BleGattSession$26</ID>
+    <ID>MagicNumber:BleGattSession.kt$BleGattSession$3</ID>
+    <ID>MagicNumber:BleGattSession.kt$BleGattSession$33</ID>
+    <ID>MagicNumber:BleGattSession.kt$BleGattSession$5_000L</ID>
+    <ID>MagicNumber:BleGattSession.kt$BleGattSession.&lt;no name provided&gt;$33</ID>
+    <ID>MagicNumber:BleReceiverScanner.kt$BleReceiverScanner$150L</ID>
+    <ID>MagicNumber:BleReceiverScanner.kt$BleReceiverScanner$1_000L</ID>
+    <ID>MagicNumber:BleReceiverScanner.kt$BleReceiverScanner$1_000_000L</ID>
+    <ID>MagicNumber:BleReceiverScanner.kt$BleReceiverScanner$2_000L</ID>
+    <ID>MagicNumber:BleReceiverScanner.kt$BleReceiverScanner$60_000L</ID>
+    <ID>MagicNumber:BleSecureEnvelope.kt$BleReplayCache.&lt;no name provided&gt;$0.75f</ID>
+    <ID>MagicNumber:BleSecureEnvelope.kt$BleSecureEnvelope$12</ID>
+    <ID>MagicNumber:BleSecureEnvelope.kt$BleSecureEnvelope$16</ID>
+    <ID>MagicNumber:BleSenderPeripheral.kt$BleSenderPeripheral$23</ID>
+    <ID>MagicNumber:BleSenderPeripheral.kt$BleSenderPeripheral$3</ID>
+    <ID>MagicNumber:BleSenderPeripheral.kt$BleSenderPeripheral$33</ID>
+    <ID>MagicNumber:HighBandwidthSessionManager.kt$HighBandwidthSessionManager$1_000L</ID>
+    <ID>MagicNumber:TransferPermissions.kt$TransferPermissions$31</ID>
+    <ID>MagicNumber:TransferPermissions.kt$TransferPermissions$33</ID>
+    <ID>MagicNumber:WifiDirectController.kt$WifiDirectController$150L</ID>
+    <ID>MagicNumber:WifiDirectController.kt$WifiDirectController$250L</ID>
+    <ID>MagicNumber:WifiDirectController.kt$WifiDirectController$29</ID>
+    <ID>MagicNumber:WifiDirectController.kt$WifiDirectController$3</ID>
+    <ID>MagicNumber:WifiDirectController.kt$WifiDirectController$33</ID>
+    <ID>MagicNumber:WifiDirectController.kt$WifiDirectController$4</ID>
+    <ID>MagicNumber:WifiDirectController.kt$WifiDirectController$5_000L</ID>
+    <ID>MagicNumber:WifiDirectController.kt$WifiDirectController$6</ID>
+    <ID>MagicNumber:WifiDirectController.kt$WifiDirectController$750L</ID>
+    <ID>MagicNumber:WifiDirectController.kt$WifiDirectController$8</ID>
+    <ID>MaxLineLength:AndroidEndpoints.kt$AndroidReceiverEndpoint$mutableSnapshot.value = TransferSnapshot(phase = TransferPhase.FAILED, lastFailure = failure, canRetry = true)</ID>
+    <ID>MaxLineLength:AndroidEndpoints.kt$AndroidSenderEndpoint$mutableSnapshot.value = TransferSnapshot(deviceId = deviceId, phase = TransferPhase.FAILED, lastFailure = failure, canRetry = true)</ID>
+    <ID>MaxLineLength:BleGattSession.kt$BleGattSession$gatt</ID>
+    <ID>MaxLineLength:BleGattSession.kt$BleGattSession$gatt?.writeCharacteristic(characteristic, frame, BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT) == BluetoothGatt.GATT_SUCCESS</ID>
+    <ID>MaxLineLength:BleGattSession.kt$BleGattSession.&lt;no name provided&gt;$override</ID>
+    <ID>MaxLineLength:BleGattSession.kt$BleGattSession.&lt;no name provided&gt;$ready.completeExceptionally(IllegalStateException("BetterHv BLE response characteristic missing")); return</ID>
+    <ID>MaxLineLength:EncryptedFileTransferTest.kt$EncryptedFileTransferTest$val source = File(directory, "source.bin").also { it.writeBytes(ByteArray(900_000) { index -&gt; index.toByte() }) }</ID>
+    <ID>MaxLineLength:HighBandwidthSessionManager.kt$HighBandwidthSessionManager$deviceAddress = requireNotNull(session.localDeviceAddress) { "Wi-Fi Direct device address unavailable" }</ID>
+    <ID>MaxLineLength:HighBandwidthSessionManager.kt$HighBandwidthSessionManager$if (isActive) mutableState.value = HostedGroupState.Unavailable("Wi-Fi Direct group disconnected", 1_000L)</ID>
+    <ID>MaxLineLength:HighBandwidthSessionManager.kt$HighBandwidthSessionManager$mutableState.value = HostedGroupState.Unavailable(error.message ?: "Wi-Fi Direct unavailable", backoff)</ID>
+    <ID>MaxLineLength:WifiDirectController.kt$WifiDirectController$}</ID>
+    <ID>MaximumLineLength:AndroidEndpoints.kt$AndroidReceiverEndpoint$ </ID>
+    <ID>MaximumLineLength:AndroidEndpoints.kt$AndroidSenderEndpoint$ </ID>
+    <ID>MaximumLineLength:BleGattSession.kt$BleGattSession$ </ID>
+    <ID>MaximumLineLength:BleGattSession.kt$BleGattSession.&lt;no name provided&gt;$ </ID>
+    <ID>MaximumLineLength:EncryptedFileTransferTest.kt$EncryptedFileTransferTest$ </ID>
+    <ID>MaximumLineLength:HighBandwidthSessionManager.kt$HighBandwidthSessionManager$ </ID>
+    <ID>MaximumLineLength:WifiDirectController.kt$WifiDirectController$ </ID>
+    <ID>MultiLineIfElse:AndroidPairingController.kt$AndroidPairingController$writable.delete(TABLE, "device_id=?", arrayOf(deviceId))</ID>
+    <ID>MultiLineIfElse:AndroidPairingController.kt$AndroidPairingController$writable.delete(TABLE, null, null)</ID>
+    <ID>MultiLineIfElse:BleGattSession.kt$BleGattSession$23</ID>
+    <ID>MultiLineIfElse:BleGattSession.kt$BleGattSession$device.connectGatt(context, false, callback)</ID>
+    <ID>MultiLineIfElse:BleGattSession.kt$BleGattSession$device.connectGatt(context, false, callback, BluetoothDevice.TRANSPORT_LE)</ID>
+    <ID>MultiLineIfElse:BleGattSession.kt$BleGattSession.&lt;no name provided&gt;$identityWaiter?.complete(value)</ID>
+    <ID>MultiLineIfElse:BleGattSession.kt$BleGattSession.&lt;no name provided&gt;$identityWaiter?.completeExceptionally(IllegalStateException("GATT identity read failed: $status"))</ID>
+    <ID>MultiLineIfElse:BleGattSession.kt$BleGattSession.&lt;no name provided&gt;$mtuReady.complete(mtu)</ID>
+    <ID>MultiLineIfElse:BleGattSession.kt$BleGattSession.&lt;no name provided&gt;$mtuReady.completeExceptionally(IllegalStateException("GATT MTU negotiation failed: $status"))</ID>
+    <ID>MultiLineIfElse:BleGattSession.kt$BleGattSession.&lt;no name provided&gt;$ready.complete(Unit)</ID>
+    <ID>MultiLineIfElse:BleGattSession.kt$BleGattSession.&lt;no name provided&gt;$ready.completeExceptionally(IllegalStateException("GATT subscribe failed: $status"))</ID>
+    <ID>MultiLineIfElse:BleGattSession.kt$BleGattSession.&lt;no name provided&gt;$writeWaiter?.complete(Unit)</ID>
+    <ID>MultiLineIfElse:BleGattSession.kt$BleGattSession.&lt;no name provided&gt;$writeWaiter?.completeExceptionally(IllegalStateException("GATT frame write failed: $status"))</ID>
+    <ID>MultiLineIfElse:BleReceiverScanner.kt$BleReceiverScanner$minOf( remainingMillis, settleAfterFirstMillis.coerceIn(150L, 2_000L) )</ID>
+    <ID>MultiLineIfElse:BleReceiverScanner.kt$BleReceiverScanner$remainingMillis</ID>
+    <ID>MultiLineIfElse:BleSenderPeripheral.kt$BleSenderPeripheral.&lt;no name provided&gt;$Log.e(TAG, "BLE response frame failed: $status")</ID>
+    <ID>MultiLineIfElse:BleSenderPeripheral.kt$BleSenderPeripheral.&lt;no name provided&gt;$sendNextNotification(device)</ID>
+    <ID>MultiLineIfElse:BleSenderPeripheral.kt$BleSenderPeripheral.&lt;no name provided&gt;$server?.sendResponse( device, requestId, if (result.isSuccess) BluetoothGatt.GATT_SUCCESS else BluetoothGatt.GATT_FAILURE, offset, null )</ID>
+    <ID>MultiLineIfElse:BleSenderPeripheral.kt$BleSenderPeripheral.&lt;no name provided&gt;$subscribed += device</ID>
+    <ID>MultiLineIfElse:BleSenderPeripheral.kt$BleSenderPeripheral.&lt;no name provided&gt;$subscribed -= device</ID>
+    <ID>MultiLineIfElse:WifiDirectController.kt$WifiDirectController$@Suppress("DEPRECATION") appContext.registerReceiver(receiver, filter)</ID>
+    <ID>MultiLineIfElse:WifiDirectController.kt$WifiDirectController$appContext.registerReceiver(receiver, filter, Context.RECEIVER_EXPORTED)</ID>
+    <ID>MultiLineIfElse:WifiDirectController.kt$WifiDirectController$continuation.resume(null)</ID>
+    <ID>MultiLineIfElse:WifiDirectController.kt$WifiDirectController$false</ID>
+    <ID>MultiLineIfElse:WifiDirectController.kt$WifiDirectController$null</ID>
+    <ID>MultiLineIfElse:WifiDirectController.kt$WifiDirectController$runCatching { action { listener -&gt; manager.createGroup(channel, ephemeralGroupConfig(), listener) } }.onFailure { Log.w(TAG, "Configured temporary group unsupported; using system group", it) }.isSuccess</ID>
+    <ID>MultiLineIfElse:WifiDirectController.kt$WifiDirectController.&lt;no name provided&gt;$connectionWaiter?.complete(info)</ID>
+    <ID>NoBlankLineBeforeRbrace:BleReceiverScanner.kt$BleReceiverScanner$ </ID>
+    <ID>NoBlankLineBeforeRbrace:BleSenderPeripheral.kt$BleSenderPeripheral$ </ID>
+    <ID>NoUnusedImports:BleGattSession.kt$com.betterhv.transfer.android.BleGattSession.kt</ID>
+    <ID>NoUnusedImports:BleSenderPeripheral.kt$com.betterhv.transfer.android.BleSenderPeripheral.kt</ID>
+    <ID>NoUnusedImports:TransferEndpoint.kt$com.betterhv.transfer.android.TransferEndpoint.kt</ID>
+    <ID>ParameterListWrapping:BleGattSession.kt$BleGattSession.&lt;no name provided&gt;$( gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic, value: ByteArray )</ID>
+    <ID>ParameterListWrapping:BleSenderPeripheral.kt$BleSenderPeripheral.&lt;no name provided&gt;$( device: BluetoothDevice, requestId: Int, characteristic: BluetoothGattCharacteristic, preparedWrite: Boolean, responseNeeded: Boolean, offset: Int, value: ByteArray )</ID>
+    <ID>ParameterListWrapping:BleSenderPeripheral.kt$BleSenderPeripheral.&lt;no name provided&gt;$( device: BluetoothDevice, requestId: Int, descriptor: BluetoothGattDescriptor, preparedWrite: Boolean, responseNeeded: Boolean, offset: Int, value: ByteArray )</ID>
+    <ID>ParameterListWrapping:BleSenderPeripheral.kt$BleSenderPeripheral.&lt;no name provided&gt;$( device: BluetoothDevice, requestId: Int, offset: Int, characteristic: BluetoothGattCharacteristic )</ID>
+    <ID>ReturnCount:BleGattSession.kt$BleGattSession.&lt;no name provided&gt;$override fun onServicesDiscovered(gatt: BluetoothGatt, status: Int)</ID>
+    <ID>ReturnCount:BleReceiverScanner.kt$BleReceiverScanner$@SuppressLint("MissingPermission") private fun ScanResult.toSender(): DiscoveredSender?</ID>
+    <ID>ReturnCount:BleReceiverScanner.kt$internal fun mergeDiscoveredSender( previous: DiscoveredSender, update: DiscoveredSender ): DiscoveredSender</ID>
+    <ID>ReturnCount:BleSenderPeripheral.kt$BleSenderPeripheral$@SuppressLint("MissingPermission") private fun sendNextNotification(device: BluetoothDevice)</ID>
+    <ID>SpacingBetweenDeclarationsWithAnnotations:BleGattSession.kt$BleGattSession$@Volatile private var closed = false</ID>
+    <ID>SpacingBetweenDeclarationsWithAnnotations:BleSecureEnvelope.kt$BleReplayCache$@Synchronized fun accept(nonce: ByteArray)</ID>
+    <ID>SpacingBetweenDeclarationsWithAnnotations:WifiDirectController.kt$WifiDirectController$@Volatile private var currentSession: WifiDirectSession? = null</ID>
+    <ID>TooGenericExceptionCaught:AndroidEndpoints.kt$AndroidReceiverEndpoint$error: Throwable</ID>
+    <ID>TooGenericExceptionCaught:BleGattSession.kt$BleGattSession.Companion$error: Throwable</ID>
+    <ID>TooGenericExceptionCaught:HighBandwidthSessionManager.kt$HighBandwidthSessionManager$error: Throwable</ID>
+    <ID>TooManyFunctions:AndroidPairingController.kt$AndroidPairingController : PairingController</ID>
+    <ID>TooManyFunctions:WifiDirectController.kt$WifiDirectController : AutoCloseable</ID>
+    <ID>Wrapping:AndroidPairingController.kt$AndroidPairingController$(</ID>
+    <ID>Wrapping:AndroidPairingController.kt$AndroidPairingController$;</ID>
+    <ID>Wrapping:AndroidPairingController.kt$AndroidPairingController.PairingDatabase$"""</ID>
+    <ID>Wrapping:AndroidPairingController.kt$AndroidPairingController.PairingDatabase$(</ID>
+    <ID>Wrapping:BleGattSession.kt$BleGattSession$;</ID>
+    <ID>Wrapping:BleGattSession.kt$BleGattSession.&lt;no name provided&gt;$;</ID>
+    <ID>Wrapping:BleQueueProtocolTest.kt$BleQueueProtocolTest$(</ID>
+    <ID>Wrapping:BleSenderPeripheral.kt$BleSenderPeripheral$(</ID>
+    <ID>Wrapping:BleSenderPeripheral.kt$BleSenderPeripheral$;</ID>
+    <ID>Wrapping:BleSenderPeripheral.kt$BleSenderPeripheral$it.addDescriptor(BluetoothGattDescriptor( BleConstants.CCCD_UUID, BluetoothGattDescriptor.PERMISSION_READ or BluetoothGattDescriptor.PERMISSION_WRITE ))</ID>
+    <ID>Wrapping:BleSenderPeripheral.kt$BleSenderPeripheral.&lt;no name provided&gt;$(</ID>
+    <ID>Wrapping:WifiDirectController.kt$WifiDirectController$!it.isGroupOwner &amp;&amp; (ownerDeviceAddress.isBlank() || it.ownerDeviceName == ownerDeviceName)</ID>
+    <ID>Wrapping:WifiDirectController.kt$WifiDirectController$(</ID>
+    <ID>Wrapping:WifiDirectController.kt$WifiDirectController$(channel, object : WifiP2pManager.ActionListener { override fun onSuccess() { Log.i(TAG, "Wi-Fi Direct group removal completed") } override fun onFailure(reason: Int) { Log.w(TAG, "Wi-Fi Direct group removal failed: $reason") } })</ID>
+    <ID>Wrapping:WifiDirectController.kt$WifiDirectController$;</ID>
+  </CurrentIssues>
+</SmellBaseline>

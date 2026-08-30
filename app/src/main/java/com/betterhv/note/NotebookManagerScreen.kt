@@ -1,6 +1,7 @@
 package com.betterhv.note
 
 import android.graphics.Bitmap
+import android.net.Uri
 import android.os.SystemClock
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -29,12 +30,14 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.ContentCut
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.IosShare
+import androidx.compose.material.icons.filled.PictureAsPdf
 import androidx.compose.material.icons.filled.Workspaces
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -66,41 +69,55 @@ private val NotionHover = Color(0xFFF7F7F5)
 
 private enum class NotebookCreateAction { CURRENT_TO_END, SELECTION, BLANK }
 
+data class NotebookManagerState(
+    val summaries: List<NotebookSummary>,
+    val pages: List<PageUiInfo>,
+    val currentToEndIds: Set<UUID>,
+    val busy: Boolean,
+    val thumbnailSize: DpSize,
+)
+
+data class NotebookManagerActions(
+    val coverBitmap: (NotebookSummary) -> Bitmap?,
+    val pageBitmap: (UUID) -> Bitmap?,
+    val requestCovers: (List<NotebookSummary>) -> Unit,
+    val requestPages: (List<UUID>) -> Unit,
+    val onSwitchNotebook: (UUID) -> Unit,
+    val onCreateFromCurrentToEnd: (Set<UUID>) -> Unit,
+    val onCreateFromSelection: (Set<UUID>) -> Unit,
+    val onCreateBlank: () -> Unit,
+    val onImportLocalPdf: (Uri) -> Unit,
+    val onImportNoteLinkPdf: () -> Unit,
+    val onDeleteNotebook: (UUID) -> Unit,
+    val onExportNotebook: (UUID) -> Unit,
+    val onNotice: (String) -> Unit,
+    val onClose: () -> Unit,
+)
+
 @Composable
 fun NotebookManagerScreen(
-    summaries: List<NotebookSummary>,
-    pages: List<PageUiInfo>,
-    currentToEndIds: Set<UUID>,
-    busy: Boolean,
-    notebookThumbnailSize: DpSize,
-    coverBitmap: (NotebookSummary) -> Bitmap?,
-    pageBitmap: (UUID) -> Bitmap?,
-    requestCovers: (List<NotebookSummary>) -> Unit,
-    requestPages: (List<UUID>) -> Unit,
-    onSwitchNotebook: (UUID) -> Unit,
-    onCreateFromCurrentToEnd: (Set<UUID>) -> Unit,
-    onCreateFromSelection: (Set<UUID>) -> Unit,
-    onCreateBlank: () -> Unit,
-    onDeleteNotebook: (UUID) -> Unit,
-    onExportNotebook: (UUID) -> Unit,
-    onNotice: (String) -> Unit,
-    onClose: () -> Unit
+    state: NotebookManagerState,
+    actions: NotebookManagerActions,
 ) {
     var selecting by remember { mutableStateOf(false) }
     var selectedIds by remember { mutableStateOf(emptySet<UUID>()) }
     var pendingDeleteId by remember { mutableStateOf<UUID?>(null) }
     var pendingDeleteAt by remember { mutableLongStateOf(0L) }
+    var pdfSourceChooserOpen by remember { mutableStateOf(false) }
+    val pdfPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        uri?.let(actions.onImportLocalPdf)
+    }
 
     fun cancelDeleteConfirmation() {
         pendingDeleteId = null
         pendingDeleteAt = 0L
     }
 
-    LaunchedEffect(summaries.map { it.id to it.cover?.contentRevision }) {
-        requestCovers(summaries)
+    LaunchedEffect(state.summaries.map { it.id to it.cover?.contentRevision }) {
+        actions.requestCovers(state.summaries)
     }
-    LaunchedEffect(selecting, pages.map(PageUiInfo::id)) {
-        if (selecting) requestPages(pages.map(PageUiInfo::id))
+    LaunchedEffect(selecting, state.pages.map(PageUiInfo::id)) {
+        if (selecting) actions.requestPages(state.pages.map(PageUiInfo::id))
     }
     LaunchedEffect(pendingDeleteId, pendingDeleteAt) {
         if (pendingDeleteId != null) {
@@ -113,23 +130,23 @@ fun NotebookManagerScreen(
         Column(Modifier.fillMaxSize()) {
             NotebookTopBar(
                 selecting = selecting,
-                notebookCount = summaries.size,
+                notebookCount = state.summaries.size,
                 selectedCount = selectedIds.size,
-                busy = busy,
-                canCreateCurrentToEnd = currentToEndIds.isNotEmpty(),
-                canSelectPages = pages.isNotEmpty(),
+                busy = state.busy,
+                canCreateCurrentToEnd = state.currentToEndIds.isNotEmpty(),
+                canSelectPages = state.pages.isNotEmpty(),
                 onBack = {
                     cancelDeleteConfirmation()
                     if (selecting) {
                         selecting = false
                         selectedIds = emptySet()
                     } else {
-                        onClose()
+                        actions.onClose()
                     }
                 },
                 onCreateCurrentToEnd = {
                     cancelDeleteConfirmation()
-                    onCreateFromCurrentToEnd(currentToEndIds)
+                    actions.onCreateFromCurrentToEnd(state.currentToEndIds)
                 },
                 onSelectPages = {
                     cancelDeleteConfirmation()
@@ -137,16 +154,17 @@ fun NotebookManagerScreen(
                 },
                 onCreateBlank = {
                     cancelDeleteConfirmation()
-                    onCreateBlank()
+                    actions.onCreateBlank()
                 },
-                onConfirmSelection = { onCreateFromSelection(selectedIds) }
+                onImportPdf = { pdfSourceChooserOpen = true },
+                onConfirmSelection = { actions.onCreateFromSelection(selectedIds) }
             )
 
             if (selecting) {
                 PageSelectionGrid(
-                    pages = pages,
+                    pages = state.pages,
                     selectedIds = selectedIds,
-                    pageBitmap = pageBitmap,
+                    pageBitmap = actions.pageBitmap,
                     onToggle = { pageId ->
                         selectedIds = if (pageId in selectedIds) {
                             selectedIds - pageId
@@ -157,14 +175,14 @@ fun NotebookManagerScreen(
                 )
             } else {
                 NotebookGrid(
-                    summaries = summaries,
-                    thumbnailSize = notebookThumbnailSize,
-                    coverBitmap = coverBitmap,
-                    busy = busy,
+                    summaries = state.summaries,
+                    thumbnailSize = state.thumbnailSize,
+                    coverBitmap = actions.coverBitmap,
+                    busy = state.busy,
                     pendingDeleteId = pendingDeleteId,
                     onOpen = { summary ->
                         cancelDeleteConfirmation()
-                        onSwitchNotebook(summary.id)
+                        actions.onSwitchNotebook(summary.id)
                     },
                     onDelete = { summary ->
                         val now = SystemClock.uptimeMillis()
@@ -172,24 +190,47 @@ fun NotebookManagerScreen(
                             now - pendingDeleteAt <= NOTEBOOK_DELETE_CONFIRM_MS
                         ) {
                             cancelDeleteConfirmation()
-                            onDeleteNotebook(summary.id)
+                            actions.onDeleteNotebook(summary.id)
                         } else {
                             pendingDeleteId = summary.id
                             pendingDeleteAt = now
-                            onNotice("再次点击删除图标以删除“${summary.title}”")
+                            actions.onNotice("再次点击删除图标以删除“${summary.title}”")
                         }
                     },
-                    onExport = { summary -> onExportNotebook(summary.id) }
+                    onExport = { summary -> actions.onExportNotebook(summary.id) }
                 )
             }
         }
-        if (busy) {
+        if (state.busy) {
             Box(
                 Modifier.fillMaxSize().background(Color(0x66FFFFFF)),
                 contentAlignment = Alignment.Center
             ) {
-                CircularProgressIndicator(color = Color.Black)
+                Surface(
+                    shape = RectangleShape,
+                    color = Color.White,
+                    border = androidx.compose.foundation.BorderStroke(1.dp, Color.Black),
+                    tonalElevation = 0.dp,
+                    shadowElevation = 0.dp
+                ) { Text("处理中…", Modifier.padding(horizontal = 24.dp, vertical = 14.dp)) }
             }
+        }
+        if (pdfSourceChooserOpen && !state.busy) {
+            EinkChoiceOverlay(
+                title = "导入 PDF",
+                description = "选择 PDF 来源。导入后会创建独立的 PDF 笔记本。",
+                onDismissRequest = { pdfSourceChooserOpen = false },
+                choices = listOf(
+                    "本地文件" to {
+                        pdfSourceChooserOpen = false
+                        pdfPicker.launch(arrayOf("application/pdf"))
+                    },
+                    "NoteLink" to {
+                        pdfSourceChooserOpen = false
+                        actions.onImportNoteLinkPdf()
+                    }
+                )
+            )
         }
     }
 }
@@ -206,6 +247,7 @@ private fun NotebookTopBar(
     onCreateCurrentToEnd: () -> Unit,
     onSelectPages: () -> Unit,
     onCreateBlank: () -> Unit,
+    onImportPdf: () -> Unit,
     onConfirmSelection: () -> Unit
 ) {
     Row(
@@ -241,6 +283,13 @@ private fun NotebookTopBar(
             )
         } else {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                NotionIconButton(
+                    icon = Icons.Filled.PictureAsPdf,
+                    contentDescription = "导入 PDF",
+                    enabled = !busy,
+                    outlined = true,
+                    onClick = onImportPdf
+                )
                 CreateNotebookIconButton(
                     action = NotebookCreateAction.CURRENT_TO_END,
                     contentDescription = "当前页至末页创建新笔记本",

@@ -13,11 +13,27 @@ class Page(
     val id: UUID = UUID.randomUUID(),
     width: Float = 0f,
     height: Float = 0f,
+    val kind: PageKind = PageKind.BLANK,
+    val parentPdfPageId: UUID? = null,
+    val pdfSource: PdfPageSource? = null,
+    templateId: String? = if (kind == PageKind.PDF_SOURCE) null else DEFAULT_TEMPLATE_ID,
     bookmarked: Boolean = false,
     contentRevision: Long = 0L,
     val createdAt: Long = System.currentTimeMillis(),
     updatedAt: Long = createdAt
 ) {
+    init {
+        require((kind == PageKind.PDF_SOURCE) == (pdfSource != null)) {
+            "Only PDF source pages may carry PDF geometry"
+        }
+        require((kind == PageKind.LINKED_NOTE) == (parentPdfPageId != null)) {
+            "Linked note pages must reference their PDF source page"
+        }
+        require((kind == PageKind.PDF_SOURCE) == (templateId == null)) {
+            "PDF source pages cannot carry a template; writable pages require one"
+        }
+    }
+
     var width: Float = width
         private set
     var height: Float = height
@@ -27,6 +43,8 @@ class Page(
     var bookmarked: Boolean = bookmarked
         private set
     var contentRevision: Long = contentRevision
+        private set
+    var templateId: String? = templateId
         private set
     val scene = Scene()
     val spatialIndex: SpatialIndex = UniformGridSpatialIndex()
@@ -89,6 +107,14 @@ class Page(
         touch(contentChanged = false)
     }
 
+    fun setTemplate(templateId: String) {
+        require(kind != PageKind.PDF_SOURCE) { "PDF source pages use the imported document background" }
+        require(templateId.isNotBlank()) { "Template id must not be blank" }
+        if (this.templateId == templateId) return
+        this.templateId = templateId
+        touch()
+    }
+
     /** Storage-only restore path: rebuilds Scene + index without changing persisted timestamps. */
     fun restoreObject(obj: PageObject) {
         scene.add(obj)
@@ -100,3 +126,5 @@ class Page(
         if (contentChanged) contentRevision++
     }
 }
+
+const val DEFAULT_TEMPLATE_ID = "builtin.blank"

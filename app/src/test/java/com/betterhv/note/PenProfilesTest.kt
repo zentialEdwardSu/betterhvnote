@@ -71,4 +71,20 @@ class PenProfilesTest {
         assertEquals(marker.widthAt(0f), marker.widthAt(1f), 0.001f)
         assertEquals(PenType.Marker, marker.penType)
     }
+
+    @Test
+    fun normalPenAppliesItsMeasuredVisualWidthScale() {
+        val normal = PenProfiles.style(
+            PenSettings().updateActivePreset { it.copy(widthLevel = 4) },
+            "N10Pro"
+        )
+        val marker = PenProfiles.style(
+            PenSettings().selectType(PenType.Marker)
+                .updateActivePreset { it.copy(widthLevel = 4) },
+            "N10Pro"
+        )
+
+        assertEquals(36f * 0.34f, normal.widthAt(1f), 0.001f)
+        assertEquals(80f, marker.widthAt(1f), 0.001f)
+    }
 }

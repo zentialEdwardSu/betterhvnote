@@ -1,0 +1,208 @@
+<?xml version="1.0" ?>
+<SmellBaseline>
+  <ManuallySuppressedIssues/>
+  <CurrentIssues>
+    <ID>ArgumentListWrapping:ExportInboxRepository.kt$ExportInboxRepository$( "inbox_exports", COLUMNS, null, null, null, null, "COALESCE(received_at, created_at) DESC" )</ID>
+    <ID>ArgumentListWrapping:ExportInboxRepository.kt$ExportInboxRepository$( "inbox_exports", null, it, SQLiteDatabase.CONFLICT_REPLACE )</ID>
+    <ID>ArgumentListWrapping:ExportInboxRepository.kt$ExportInboxRepository$("error")</ID>
+    <ID>ArgumentListWrapping:ExportInboxRepository.kt$ExportInboxRepository$("inbox_exports", it, "artifact_id=?", arrayOf(artifactId.toString()))</ID>
+    <ID>ArgumentListWrapping:ExportInboxRepository.kt$ExportInboxRepository$("received_at", System.currentTimeMillis())</ID>
+    <ID>ArgumentListWrapping:ExportInboxRepository.kt$ExportInboxRepository$("state", InboxExportState.COMPLETE.name)</ID>
+    <ID>ArgumentListWrapping:ExportInboxRepository.kt$ExportInboxRepository$(4)</ID>
+    <ID>ArgumentListWrapping:ExportInboxRepository.kt$ExportInboxRepository$(5)</ID>
+    <ID>ArgumentListWrapping:ExportInboxRepository.kt$ExportInboxRepository$(6)</ID>
+    <ID>ArgumentListWrapping:ExportInboxRepository.kt$ExportInboxRepository$(7)</ID>
+    <ID>ArgumentListWrapping:ExportInboxRepository.kt$ExportInboxRepository$(artifactId.toString())</ID>
+    <ID>ArgumentListWrapping:ExportInboxRepository.kt$ExportInboxRepository$(cursor.getString(7))</ID>
+    <ID>ArgumentListWrapping:ExportInboxRepository.kt$ExportInboxRepository$(partial.toPath(), target.toPath(), StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING)</ID>
+    <ID>ArgumentListWrapping:MainActivity.kt$("BLE", snapshot.phase.name.replace('_', ' '), snapshot.mode?.name, "SSID ${snapshot.ssidMatch.name}")</ID>
+    <ID>ArgumentListWrapping:MainActivity.kt$("发送队列 · ${items.size} 项", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)</ID>
+    <ID>ArgumentListWrapping:MainActivity.kt$('_', ' ')</ID>
+    <ID>ArgumentListWrapping:MainActivity.kt$(0)</ID>
+    <ID>ArgumentListWrapping:MainActivity.kt$(ActivityResultContracts.RequestMultiplePermissions())</ID>
+    <ID>ArgumentListWrapping:MainActivity.kt$(Dispatchers.IO)</ID>
+    <ID>ArgumentListWrapping:MainActivity.kt$(code, style = MaterialTheme.typography.displayMedium, fontWeight = FontWeight.Bold)</ID>
+    <ID>ArgumentListWrapping:MainActivity.kt$(context)</ID>
+    <ID>ArgumentListWrapping:MainActivity.kt$(it, pairing.pairedDevice?.id)</ID>
+    <ID>ArgumentListWrapping:MainActivity.kt$(item, onUp = { queue.move(item.id, -1) }, onDown = { queue.move(item.id, 1) }, onDelete = { queue.delete(item.id) TransferForegroundService.sync(queueContext(queue), queue.items().isNotEmpty()) })</ID>
+    <ID>ArgumentListWrapping:MainActivity.kt$(onDismissRequest = { pairingCode = null }, title = { Text("在 Note 上完成配对") }, text = { Column { Text("在 N10Pro 的“设置 → 手机传输”中输入："); Text(code, style = MaterialTheme.typography.displayMedium, fontWeight = FontWeight.Bold) } }, confirmButton = { Button(onClick = { pairingCode = null }) { Text("完成") } })</ID>
+    <ID>ArgumentListWrapping:MainActivity.kt$(onDismissRequest = { textDialog = null }, title = { Text("加入文字") }, text = { OutlinedTextField(value, { value = it }, minLines = 3, maxLines = 8) }, confirmButton = { Button(onClick = { runCatching { queue.enqueueText(value, pairing.pairedDevice?.id) } .onSuccess { TransferForegroundService.sync(queueContext(queue), true); textDialog = null } .onFailure { showNotice(it.message ?: "文字加入失败") } }) { Text("加入队列") } }, dismissButton = { OutlinedButton(onClick = { textDialog = null }) { Text("取消") } })</ID>
+    <ID>ArgumentListWrapping:MainActivity.kt$MainActivity$(IntentCompat.getParcelableExtra(intent, Intent.EXTRA_STREAM, Uri::class.java))</ID>
+    <ID>ArgumentListWrapping:MainActivity.kt$MainActivity$(intent, Intent.EXTRA_STREAM, Uri::class.java)</ID>
+    <ID>ArgumentListWrapping:PhoneCommandProcessor.kt$PhoneCommandProcessor$( TransferErrorCode.CONNECTION_TIMEOUT, "接收端口未能及时启动", true, command.selectedMode )</ID>
+    <ID>ArgumentListWrapping:PhoneCommandProcessor.kt$PhoneCommandProcessor$( TransferErrorCode.SSID_MISMATCH, "LAN SSID 指纹不匹配", true, TransferMode.LAN )</ID>
+    <ID>ArgumentListWrapping:PhoneCommandProcessor.kt$PhoneCommandProcessor$( TransferErrorCode.UNSUPPORTED_MODE, "双方不支持 ${command.selectedMode}", false, command.selectedMode )</ID>
+    <ID>ArgumentListWrapping:PhoneCommandProcessor.kt$PhoneCommandProcessor$( TransferErrorCode.UNSUPPORTED_PROTOCOL, error.message.orEmpty(), false )</ID>
+    <ID>ArgumentListWrapping:PhoneCommandProcessor.kt$PhoneCommandProcessor$(command.itemId, command.offset, content.size, content.copyOfRange(command.offset, end))</ID>
+    <ID>ArgumentListWrapping:PhoneCommandProcessor.kt$PhoneCommandProcessor$(command.offset, end)</ID>
+    <ID>ArgumentListWrapping:PhoneCommandProcessor.kt$PhoneCommandProcessor$(local.ssidFingerprint, command.localCapabilities.ssidFingerprint)</ID>
+    <ID>ArgumentListWrapping:PhoneQueueRepository.kt$PhoneQueueRepository$( "queue_items", ITEM_COLUMNS, "id=?", arrayOf(id.toString()), null, null, null )</ID>
+    <ID>ArgumentListWrapping:PhoneQueueRepository.kt$PhoneQueueRepository$( "queue_items", ITEM_COLUMNS, null, null, null, null, "position ASC, created_at ASC" )</ID>
+    <ID>ArgumentListWrapping:PhoneQueueRepository.kt$PhoneQueueRepository$( "queue_items", arrayOf("payload_path"), "id=?", arrayOf(id.toString()), null, null, null )</ID>
+    <ID>ArgumentListWrapping:PhoneQueueRepository.kt$PhoneQueueRepository$( "queue_items", arrayOf("text_content"), "id=?", arrayOf(id.toString()), null, null, null )</ID>
+    <ID>ArgumentListWrapping:PhoneQueueRepository.kt$PhoneQueueRepository$( "queue_items", values, "state IN (?,?,?) AND lease_expires_at IS NOT NULL AND lease_expires_at&lt;=?", arrayOf(QueueState.LEASED.name, QueueState.TRANSFERRING.name, QueueState.AWAITING_COMMIT.name, now.toString()) )</ID>
+    <ID>ArgumentListWrapping:PhoneQueueRepository.kt$PhoneQueueRepository$("queue_items", ContentValues().apply { put("position", index) }, "id=?", arrayOf(id.toString()))</ID>
+    <ID>ArgumentListWrapping:PhoneQueueRepository.kt$PhoneQueueRepository$(QueueState.LEASED.name, QueueState.TRANSFERRING.name, QueueState.AWAITING_COMMIT.name, now.toString())</ID>
+    <ID>ArgumentListWrapping:PhoneQueueRepository.kt$PhoneQueueRepository$(now)</ID>
+    <ID>ArgumentListWrapping:PhoneQueueRepository.kt$PhoneQueueRepository.QueueDatabase$(true)</ID>
+    <ID>ArgumentListWrapping:ShareUndoNotifier.kt$ShareUndoNotifier$( context, NOTIFICATION_ID, undo, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE )</ID>
+    <ID>ArgumentListWrapping:TransferForegroundService.kt$TransferForegroundService$( this, 1, Intent(this, MainActivity::class.java), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE )</ID>
+    <ID>ArgumentListWrapping:TransferForegroundService.kt$TransferForegroundService$( this, 2, Intent(this, TransferForegroundService::class.java).setAction(ACTION_PAUSE), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE )</ID>
+    <ID>ArgumentListWrapping:TransferForegroundService.kt$TransferForegroundService$( this, 3, Intent(this, TransferForegroundService::class.java).setAction(ACTION_CANCEL_TRANSFER), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE )</ID>
+    <ID>ArgumentListWrapping:TransferForegroundService.kt$TransferForegroundService$( this, NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE )</ID>
+    <ID>CyclomaticComplexMethod:MainActivity.kt$@Composable private fun PhoneTransferStatus( snapshot: TransferSnapshot, log: List&lt;TransferLogEntry&gt;, endpointName: String?, showRecentEvents: Boolean, onCancel: () -&gt; Unit )</ID>
+    <ID>CyclomaticComplexMethod:MainActivity.kt$@OptIn(ExperimentalMaterial3Api::class) @Composable private fun BetterHvSendApp( queue: PhoneQueueRepository, inbox: ExportInboxRepository, pairing: AndroidPairingController, initialNotice: String?, showNotice: (String) -&gt; Unit )</ID>
+    <ID>CyclomaticComplexMethod:PhoneCommandProcessor.kt$PhoneCommandProcessor$private fun dispatch(command: BleCommand, peerId: String, key: ByteArray): BleResponse</ID>
+    <ID>CyclomaticComplexMethod:TransferForegroundService.kt$TransferForegroundService$private fun showNotification()</ID>
+    <ID>EmptyElseBlock:ExportInboxRepository.kt$ExportInboxRepository$if (count &lt; 0) break</ID>
+    <ID>EmptyElseBlock:PhoneQueueRepository.kt$PhoneQueueRepository$if (count &lt; 0) break</ID>
+    <ID>EmptyElseBlock:PhoneQueueRepository.kt$PhoneQueueRepository.PhoneSenderLease$if (!finished) offer = offer.copy(item = coordinator.heartbeat(offer.item.id))</ID>
+    <ID>EmptyElseBlock:PhoneQueueRepository.kt$PhoneQueueRepository.PhoneSenderLease$if (!finished) offer = offer.copy(item = coordinator.transition(offer.item.id, QueueState.AWAITING_COMMIT))</ID>
+    <ID>EmptyElseBlock:PhoneQueueRepository.kt$PhoneQueueRepository.PhoneSenderLease$if (!finished) offer = offer.copy(item = coordinator.transition(offer.item.id, QueueState.TRANSFERRING))</ID>
+    <ID>ImportOrdering:ExportInboxRepository.kt$import android.content.ContentValues import android.content.Context import android.database.sqlite.SQLiteDatabase import android.database.sqlite.SQLiteOpenHelper import android.net.Uri import android.os.Build import android.os.Environment import android.provider.MediaStore import androidx.core.content.FileProvider import com.betterhv.transfer.core.ExportTransferOffer import java.io.File import java.io.FileInputStream import java.nio.file.Files import java.nio.file.StandardCopyOption import java.security.MessageDigest import java.util.UUID import kotlinx.coroutines.flow.MutableStateFlow import kotlinx.coroutines.flow.StateFlow</ID>
+    <ID>ImportOrdering:MainActivity.kt$import android.content.ClipboardManager import android.content.ClipData import android.content.Context import android.content.Intent import android.content.pm.PackageManager import android.bluetooth.BluetoothManager import android.net.wifi.WifiManager import android.net.Uri import android.os.Bundle import androidx.activity.ComponentActivity import androidx.activity.compose.rememberLauncherForActivityResult import androidx.activity.compose.setContent import androidx.activity.result.contract.ActivityResultContracts import androidx.compose.foundation.layout.Arrangement import androidx.compose.foundation.layout.Column import androidx.compose.foundation.layout.Row import androidx.compose.foundation.layout.Spacer import androidx.compose.foundation.layout.fillMaxSize import androidx.compose.foundation.layout.fillMaxWidth import androidx.compose.foundation.layout.height import androidx.compose.foundation.layout.heightIn import androidx.compose.foundation.layout.padding import androidx.compose.foundation.lazy.LazyColumn import androidx.compose.foundation.lazy.items import androidx.compose.foundation.rememberScrollState import androidx.compose.foundation.verticalScroll import androidx.compose.foundation.shape.RoundedCornerShape import androidx.compose.material.icons.Icons import androidx.compose.material.icons.automirrored.filled.ArrowBack import androidx.compose.material.icons.automirrored.filled.OpenInNew import androidx.compose.material.icons.filled.AddPhotoAlternate import androidx.compose.material.icons.filled.CameraAlt import androidx.compose.material.icons.filled.Cancel import androidx.compose.material.icons.filled.ContentPaste import androidx.compose.material.icons.filled.Delete import androidx.compose.material.icons.filled.DeleteSweep import androidx.compose.material.icons.filled.KeyboardArrowDown import androidx.compose.material.icons.filled.KeyboardArrowUp import androidx.compose.material.icons.filled.Refresh import androidx.compose.material.icons.filled.Download import androidx.compose.material.icons.filled.OpenInNew import androidx.compose.material.icons.filled.PictureAsPdf import androidx.compose.material.icons.filled.Save import androidx.compose.material.icons.filled.Settings import androidx.compose.material.icons.filled.Share import androidx.compose.material3.AlertDialog import androidx.compose.material3.Button import androidx.compose.material3.Card import androidx.compose.material3.ExperimentalMaterial3Api import androidx.compose.material3.FloatingActionButton import androidx.compose.material3.Icon import androidx.compose.material3.IconButton import androidx.compose.material3.HorizontalDivider import androidx.compose.material3.ListItem import androidx.compose.material3.LinearProgressIndicator import androidx.compose.material3.MaterialTheme import androidx.compose.material3.OutlinedButton import androidx.compose.material3.OutlinedTextField import androidx.compose.material3.Scaffold import androidx.compose.material3.Surface import androidx.compose.material3.Switch import androidx.compose.material3.Text import androidx.compose.material3.TopAppBar import androidx.compose.runtime.Composable import androidx.compose.runtime.DisposableEffect import androidx.compose.runtime.collectAsState import androidx.compose.runtime.getValue import androidx.compose.runtime.mutableIntStateOf import androidx.compose.runtime.mutableStateOf import androidx.compose.runtime.remember import androidx.compose.runtime.rememberCoroutineScope import androidx.compose.runtime.setValue import androidx.compose.ui.Alignment import androidx.compose.ui.Modifier import androidx.compose.ui.platform.LocalContext import androidx.lifecycle.compose.LocalLifecycleOwner import androidx.compose.ui.text.font.FontWeight import androidx.compose.ui.text.style.TextOverflow import androidx.compose.ui.unit.dp import androidx.core.content.FileProvider import androidx.core.content.IntentCompat import androidx.lifecycle.lifecycleScope import androidx.lifecycle.Lifecycle import androidx.lifecycle.LifecycleEventObserver import com.betterhv.transfer.android.AndroidPairingController import com.betterhv.transfer.android.TransferPermissions import com.betterhv.transfer.core.ContentKind import com.betterhv.transfer.core.QueueItem import com.betterhv.transfer.core.QueueState import com.betterhv.transfer.core.TransferPhase import com.betterhv.transfer.core.isActiveTransferPhase import com.betterhv.transfer.core.TransferLogEntry import com.betterhv.transfer.core.TransferLogLevel import com.betterhv.transfer.core.TransferModes import com.betterhv.transfer.core.TransferSnapshot import java.io.File import java.security.SecureRandom import java.text.DateFormat import java.util.Date import kotlinx.coroutines.Dispatchers import kotlinx.coroutines.launch import kotlinx.coroutines.withContext</ID>
+    <ID>ImportOrdering:PhoneCommandProcessor.kt$import android.content.Context import android.util.Log import com.betterhv.transfer.android.AndroidNetworkInfoProvider import com.betterhv.transfer.android.AndroidPairingController import com.betterhv.transfer.android.BleReplayCache import com.betterhv.transfer.android.BleSecureEnvelope import com.betterhv.transfer.android.EncryptedFileTransfer import com.betterhv.transfer.android.HighBandwidthSessionManager import com.betterhv.transfer.android.SenderLease import com.betterhv.transfer.core.BleCommand import com.betterhv.transfer.core.BleQueueProtocol import com.betterhv.transfer.core.BleResponse import com.betterhv.transfer.core.CapabilityNegotiation import com.betterhv.transfer.core.DeviceCapabilities import com.betterhv.transfer.core.TransferChannelException import com.betterhv.transfer.core.TransferErrorCode import com.betterhv.transfer.core.TransferEvent import com.betterhv.transfer.core.TransferFailure import com.betterhv.transfer.core.TransferMode import com.betterhv.transfer.core.TransferNetworkSecurity import com.betterhv.transfer.core.TransferObservable import com.betterhv.transfer.core.TransferPhase import com.betterhv.transfer.core.TransferProgressMeter import com.betterhv.transfer.core.TransferSnapshot import java.io.File import java.net.ServerSocket import java.util.UUID import java.util.concurrent.ConcurrentHashMap import java.util.concurrent.CountDownLatch import java.util.concurrent.TimeUnit import kotlinx.coroutines.CancellationException import kotlinx.coroutines.CoroutineScope import kotlinx.coroutines.Dispatchers import kotlinx.coroutines.Job import kotlinx.coroutines.SupervisorJob import kotlinx.coroutines.cancel import kotlinx.coroutines.flow.MutableSharedFlow import kotlinx.coroutines.flow.MutableStateFlow import kotlinx.coroutines.flow.SharedFlow import kotlinx.coroutines.flow.StateFlow import kotlinx.coroutines.flow.asSharedFlow import kotlinx.coroutines.flow.asStateFlow import kotlinx.coroutines.launch</ID>
+    <ID>ImportOrdering:PhoneQueueRepository.kt$import android.content.ContentValues import android.content.Context import android.database.sqlite.SQLiteDatabase import android.database.sqlite.SQLiteOpenHelper import android.graphics.BitmapFactory import android.net.Uri import android.provider.OpenableColumns import com.betterhv.transfer.android.SenderContentProvider import com.betterhv.transfer.android.SenderLease import com.betterhv.transfer.core.ContentKind import com.betterhv.transfer.core.ContentCounts import com.betterhv.transfer.core.QueueCoordinator import com.betterhv.transfer.core.QueueItem import com.betterhv.transfer.core.QueueState import com.betterhv.transfer.core.QueueStore import com.betterhv.transfer.core.TransferLimits import com.betterhv.transfer.core.TransferOffer import java.io.File import java.io.FileInputStream import java.security.MessageDigest import java.util.UUID import kotlinx.coroutines.flow.MutableStateFlow import kotlinx.coroutines.flow.StateFlow</ID>
+    <ID>Indentation:MainActivity.kt$MainActivity$ </ID>
+    <ID>LongMethod:MainActivity.kt$@Composable private fun PhoneTransferStatus( snapshot: TransferSnapshot, log: List&lt;TransferLogEntry&gt;, endpointName: String?, showRecentEvents: Boolean, onCancel: () -&gt; Unit )</ID>
+    <ID>LongMethod:MainActivity.kt$@OptIn(ExperimentalMaterial3Api::class) @Composable private fun BetterHvSendApp( queue: PhoneQueueRepository, inbox: ExportInboxRepository, pairing: AndroidPairingController, initialNotice: String?, showNotice: (String) -&gt; Unit )</ID>
+    <ID>LongMethod:MainActivity.kt$@OptIn(ExperimentalMaterial3Api::class) @Composable private fun SettingsScreen( displayName: String, sentCacheCount: Int, receivedCacheCount: Int, transfer: TransferSnapshot, transferLog: List&lt;TransferLogEntry&gt;, endpointName: String?, showRecentTransferEvents: Boolean, message: String?, onBack: () -&gt; Unit, onSaveName: (String) -&gt; Unit, onShowRecentTransferEventsChange: (Boolean) -&gt; Unit, onClearSent: () -&gt; Unit, onClearReceived: () -&gt; Unit )</ID>
+    <ID>LongMethod:PhoneCommandProcessor.kt$PhoneCommandProcessor$private fun dispatch(command: BleCommand, peerId: String, key: ByteArray): BleResponse</ID>
+    <ID>LongParameterList:MainActivity.kt$( deviceName: String?, connectionStatus: String, showPermissionButton: Boolean, onPair: () -&gt; Unit, onUnpair: () -&gt; Unit, onPermissions: () -&gt; Unit, onRefresh: () -&gt; Unit, receiveEnabled: Boolean, onReceiveToggle: () -&gt; Unit )</ID>
+    <ID>LongParameterList:MainActivity.kt$( displayName: String, sentCacheCount: Int, receivedCacheCount: Int, transfer: TransferSnapshot, transferLog: List&lt;TransferLogEntry&gt;, endpointName: String?, showRecentTransferEvents: Boolean, message: String?, onBack: () -&gt; Unit, onSaveName: (String) -&gt; Unit, onShowRecentTransferEventsChange: (Boolean) -&gt; Unit, onClearSent: () -&gt; Unit, onClearReceived: () -&gt; Unit )</ID>
+    <ID>MagicNumber:ExportInboxRepository.kt$ExportInboxRepository$10</ID>
+    <ID>MagicNumber:ExportInboxRepository.kt$ExportInboxRepository$1024</ID>
+    <ID>MagicNumber:ExportInboxRepository.kt$ExportInboxRepository$120</ID>
+    <ID>MagicNumber:ExportInboxRepository.kt$ExportInboxRepository$29</ID>
+    <ID>MagicNumber:ExportInboxRepository.kt$ExportInboxRepository$3</ID>
+    <ID>MagicNumber:ExportInboxRepository.kt$ExportInboxRepository$4</ID>
+    <ID>MagicNumber:ExportInboxRepository.kt$ExportInboxRepository$5</ID>
+    <ID>MagicNumber:ExportInboxRepository.kt$ExportInboxRepository$6</ID>
+    <ID>MagicNumber:ExportInboxRepository.kt$ExportInboxRepository$64</ID>
+    <ID>MagicNumber:ExportInboxRepository.kt$ExportInboxRepository$7</ID>
+    <ID>MagicNumber:ExportInboxRepository.kt$ExportInboxRepository$8</ID>
+    <ID>MagicNumber:ExportInboxRepository.kt$ExportInboxRepository$9</ID>
+    <ID>MagicNumber:MainActivity.kt$1024</ID>
+    <ID>MagicNumber:MainActivity.kt$1024.0</ID>
+    <ID>MagicNumber:MainActivity.kt$1_000</ID>
+    <ID>MagicNumber:MainActivity.kt$1_000_000</ID>
+    <ID>MagicNumber:MainActivity.kt$1_024</ID>
+    <ID>MagicNumber:MainActivity.kt$1_024.0</ID>
+    <ID>MagicNumber:MainActivity.kt$1_048_576</ID>
+    <ID>MagicNumber:MainActivity.kt$1_048_576.0</ID>
+    <ID>MagicNumber:MainActivity.kt$1_073_741_824</ID>
+    <ID>MagicNumber:MainActivity.kt$1_073_741_824.0</ID>
+    <ID>MagicNumber:MainActivity.kt$6</ID>
+    <ID>MagicNumber:MainActivity.kt$60</ID>
+    <ID>MagicNumber:MainActivity.kt$8</ID>
+    <ID>MagicNumber:PhoneQueueRepository.kt$PhoneQueueRepository$10</ID>
+    <ID>MagicNumber:PhoneQueueRepository.kt$PhoneQueueRepository$1024</ID>
+    <ID>MagicNumber:PhoneQueueRepository.kt$PhoneQueueRepository$11</ID>
+    <ID>MagicNumber:PhoneQueueRepository.kt$PhoneQueueRepository$3</ID>
+    <ID>MagicNumber:PhoneQueueRepository.kt$PhoneQueueRepository$4</ID>
+    <ID>MagicNumber:PhoneQueueRepository.kt$PhoneQueueRepository$40</ID>
+    <ID>MagicNumber:PhoneQueueRepository.kt$PhoneQueueRepository$5</ID>
+    <ID>MagicNumber:PhoneQueueRepository.kt$PhoneQueueRepository$6</ID>
+    <ID>MagicNumber:PhoneQueueRepository.kt$PhoneQueueRepository$64</ID>
+    <ID>MagicNumber:PhoneQueueRepository.kt$PhoneQueueRepository$7</ID>
+    <ID>MagicNumber:PhoneQueueRepository.kt$PhoneQueueRepository$8</ID>
+    <ID>MagicNumber:PhoneQueueRepository.kt$PhoneQueueRepository$9</ID>
+    <ID>MagicNumber:TransferForegroundService.kt$TransferForegroundService$1000</ID>
+    <ID>MagicNumber:TransferForegroundService.kt$TransferForegroundService$3</ID>
+    <ID>MaxLineLength:ExportInboxRepository.kt$ExportInboxRepository$Files.move(partial.toPath(), target.toPath(), StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING)</ID>
+    <ID>MaxLineLength:ExportInboxRepository.kt$ExportInboxRepository$cursor.getLong(4)</ID>
+    <ID>MaxLineLength:ExportInboxRepository.kt$ExportInboxRepository$if</ID>
+    <ID>MaxLineLength:ExportInboxRepository.kt$ExportInboxRepository$put("state", InboxExportState.COMPLETE.name); put("received_at", System.currentTimeMillis()); putNull("error")</ID>
+    <ID>MaxLineLength:ExportInboxRepository.kt$ExportInboxRepository$}</ID>
+    <ID>MaxLineLength:MainActivity.kt$"本端 ${TransferModes.describe(snapshot.localModes)} · 对端 ${TransferModes.describe(snapshot.remoteModes)}"</ID>
+    <ID>MaxLineLength:MainActivity.kt$MainActivity$Intent.ACTION_SEND -&gt; listOfNotNull(IntentCompat.getParcelableExtra(intent, Intent.EXTRA_STREAM, Uri::class.java))</ID>
+    <ID>MaxLineLength:MainActivity.kt$MainActivity$else -&gt; IntentCompat.getParcelableArrayListExtra(intent, Intent.EXTRA_STREAM, Uri::class.java).orEmpty()</ID>
+    <ID>MaxLineLength:MainActivity.kt$listOfNotNull("BLE", snapshot.phase.name.replace('_', ' '), snapshot.mode?.name, "SSID ${snapshot.ssidMatch.name}")</ID>
+    <ID>MaxLineLength:MainActivity.kt$runCatching { withContext(Dispatchers.IO) { uris.forEach { queue.enqueueImage(it, pairing.pairedDevice?.id) } } }</ID>
+    <ID>MaxLineLength:MainActivity.kt$val</ID>
+    <ID>MaxLineLength:MainActivity.kt$val value = clip?.takeIf { it.itemCount &gt; 0 }?.getItemAt(0)?.coerceToText(context)?.toString().orEmpty()</ID>
+    <ID>MaxLineLength:PhoneCommandProcessor.kt$PhoneCommandProcessor$BleResponse.TextChunk(command.itemId, command.offset, content.size, content.copyOfRange(command.offset, end))</ID>
+    <ID>MaxLineLength:PhoneCommandProcessor.kt$PhoneCommandProcessor$TransferNetworkSecurity.compare(local.ssidFingerprint, remote.ssidFingerprint) != com.betterhv.transfer.core.SsidMatch.MATCH</ID>
+    <ID>MaxLineLength:PhoneCommandProcessor.kt$PhoneCommandProcessor$require</ID>
+    <ID>MaxLineLength:PhoneCommandProcessor.kt$PhoneCommandProcessor$val match = TransferNetworkSecurity.compare(local.ssidFingerprint, command.localCapabilities.ssidFingerprint)</ID>
+    <ID>MaxLineLength:PhoneQueueRepository.kt$PhoneQueueRepository$@Synchronized override fun releaseExpired(now: Long): Int</ID>
+    <ID>MaxLineLength:PhoneQueueRepository.kt$PhoneQueueRepository.PhoneSenderLease$override fun heartbeat()</ID>
+    <ID>MaxLineLength:PhoneQueueRepository.kt$PhoneQueueRepository.PhoneSenderLease$override fun markAwaitingCommit()</ID>
+    <ID>MaxLineLength:PhoneQueueRepository.kt$PhoneQueueRepository.PhoneSenderLease$override fun markTransferring()</ID>
+    <ID>MaxLineLength:PhoneQueueRepository.kt$PhoneQueueRepository.QueueDatabase$override fun onConfigure(db: SQLiteDatabase)</ID>
+    <ID>MaxLineLength:TransferForegroundService.kt$TransferForegroundService$TransferPhase.TRANSFERRING -&gt; "${transfer.mode?.name ?: "网络"} · ${transfer.bytesTransferred}/${transfer.totalBytes} 字节 · ${transfer.bytesPerSecond} B/s"</ID>
+    <ID>MaximumLineLength:ExportInboxRepository.kt$ExportInboxRepository$ </ID>
+    <ID>MaximumLineLength:MainActivity.kt$ </ID>
+    <ID>MaximumLineLength:MainActivity.kt$MainActivity$ </ID>
+    <ID>MaximumLineLength:PhoneCommandProcessor.kt$PhoneCommandProcessor$ </ID>
+    <ID>MaximumLineLength:PhoneQueueRepository.kt$PhoneQueueRepository$ </ID>
+    <ID>MaximumLineLength:PhoneQueueRepository.kt$PhoneQueueRepository.PhoneSenderLease$ </ID>
+    <ID>MaximumLineLength:PhoneQueueRepository.kt$PhoneQueueRepository.QueueDatabase$ </ID>
+    <ID>MaximumLineLength:TransferForegroundService.kt$TransferForegroundService$ </ID>
+    <ID>MultiLineIfElse:ExportInboxRepository.kt$ExportInboxRepository$error("当前系统版本不支持无权限保存到 Downloads")</ID>
+    <ID>MultiLineIfElse:MainActivity.kt$"将删除已接收和接收失败的文件，正在接收的项目会保留。"</ID>
+    <ID>MultiLineIfElse:MainActivity.kt$"将删除待发送和发送失败的项目，正在传输的项目会保留。"</ID>
+    <ID>MultiLineIfElse:MainActivity.kt$"已清理 $removed 项发送缓存"</ID>
+    <ID>MultiLineIfElse:MainActivity.kt$"已清理 $removed 项接收缓存"</ID>
+    <ID>MultiLineIfElse:MainActivity.kt$"没有可清理的发送缓存"</ID>
+    <ID>MultiLineIfElse:MainActivity.kt$"没有可清理的接收缓存"</ID>
+    <ID>MultiLineIfElse:MainActivity.kt$MaterialTheme.colorScheme.error</ID>
+    <ID>MultiLineIfElse:MainActivity.kt$MaterialTheme.colorScheme.onSurfaceVariant</ID>
+    <ID>MultiLineIfElse:MainActivity.kt$OutlinedButton( onClick = onPermissions, modifier = Modifier.weight(1f) ) { Text("授予权限") }</ID>
+    <ID>MultiLineIfElse:MainActivity.kt$OutlinedButton( onClick = onReceiveToggle, modifier = Modifier.weight(1f) ) { Text(if (receiveEnabled) "暂停接收" else "恢复接收") }</ID>
+    <ID>MultiLineIfElse:MainActivity.kt$OutlinedButton(onClick = onUnpair, modifier = Modifier.weight(1f)) { Text("取消配对") }</ID>
+    <ID>MultiLineIfElse:MainActivity.kt$Scaffold( topBar = { TopAppBar( title = { Text(appDisplayName) }, actions = { IconButton(onClick = { settingsMessage = null; showSettings = true }) { Icon(Icons.Default.Settings, "设置") } } ) }, floatingActionButton = { Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) { FloatingActionButton(onClick = { val context = queueContext(queue) val file = File(context.filesDir, "camera/capture-${System.currentTimeMillis()}.jpg") .also { it.parentFile?.mkdirs() } cameraFile = file cameraUri = FileProvider.getUriForFile(context, "${context.packageName}.files", file) camera.launch(cameraUri!!) }) { Icon(Icons.Default.CameraAlt, "拍照") } FloatingActionButton(onClick = { imagePicker.launch(arrayOf("image/*")) }) { Icon(Icons.Default.AddPhotoAlternate, "选择图片") } FloatingActionButton(onClick = { pdfPicker.launch(arrayOf("application/pdf")) }) { Icon(Icons.Default.PictureAsPdf, "选择 PDF") } FloatingActionButton(onClick = { val context = queueContext(queue) val clip = context.getSystemService(ClipboardManager::class.java).primaryClip val value = clip?.takeIf { it.itemCount &gt; 0 }?.getItemAt(0)?.coerceToText(context)?.toString().orEmpty() if (value.isBlank()) showNotice("剪贴板没有文字") else textDialog = value }) { Icon(Icons.Default.ContentPaste, "从剪贴板添加") } } } ) { padding -&gt; LazyColumn( Modifier.fillMaxSize().padding(padding).padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(12.dp) ) { item { DeviceCard( deviceName = pairing.pairedDevice?.name, connectionStatus = connectionStatus, showPermissionButton = missingPermissions.isNotEmpty(), onPair = { val code = SecureRandom().nextInt(1_000_000).toString().padStart(6, '0') pairing.confirmManual("betterhv-note", "N10Pro", code) queue.reassignPending("betterhv-note") ShareShortcutPublisher.update(queueContext(queue), pairing.pairedDevice) TransferForegroundService.setReceiveEnabled(context, true) TransferForegroundService.sync(queueContext(queue), queue.items().isNotEmpty()) statusRevision++ pairingCode = code }, onUnpair = { scope.launch { runCatching { withContext(Dispatchers.IO) { pairing.unpair() } } .onSuccess { ShareShortcutPublisher.update(queueContext(queue), null) TransferForegroundService.sync(context, queue.items().isNotEmpty()) statusRevision++ showNotice("已取消配对；队列内容保留") } .onFailure { showNotice("取消配对失败：${it.message}") } } }, onPermissions = { permissionLauncher.launch(TransferPermissions.missingPhonePermissions(context)) }, onRefresh = { statusRevision++ if (TransferPermissions.hasAllPhonePermissions(context)) { runCatching { TransferForegroundService.sync(context, queue.items().isNotEmpty()) } .onSuccess { showNotice("连接状态已刷新") } .onFailure { showNotice("刷新失败：${it.message}") } } }, receiveEnabled = TransferForegroundService.isReceiveEnabled(context), onReceiveToggle = { val enabled = !TransferForegroundService.isReceiveEnabled(context) TransferForegroundService.setReceiveEnabled(context, enabled) TransferForegroundService.sync(context, queue.items().isNotEmpty()) statusRevision++ } ) } if (transfer.phase.isActiveTransferPhase || showRecentTransferEvents &amp;&amp; transferLog.isNotEmpty()) { item { PhoneTransferStatus( transfer, transferLog, pairing.pairedDevice?.name, showRecentTransferEvents, NoteLinkTransferRuntime::cancel ) } } initialNotice?.let { item { Text(it, color = MaterialTheme.colorScheme.primary) } } item { Text("发送队列 · ${items.size} 项", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold) } if (items.isEmpty()) item { Text("使用下方按钮拍照、选图或读取剪贴板；也可以从其他应用的分享菜单发送到这里。") } items(items, key = { it.id }) { item -&gt; QueueCard(item, onUp = { queue.move(item.id, -1) }, onDown = { queue.move(item.id, 1) }, onDelete = { queue.delete(item.id) TransferForegroundService.sync(queueContext(queue), queue.items().isNotEmpty()) }) } item { Text( "收到的导出 · ${inboxItems.count { it.state == InboxExportState.COMPLETE }} 项", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold ) } if (inboxItems.isEmpty()) item { Text("Note 发送的 PDF 与 PNG 会保存在这里。") } items(inboxItems, key = { it.artifactId }) { item -&gt; InboxCard( item = item, onOpen = { val uri = inbox.contentUri(item) runCatching { context.startActivity(viewExportIntent(context, item, uri)) }.onFailure { showNotice("无法打开文件：${it.message ?: "没有兼容的应用"}") } }, onShare = { val uri = inbox.contentUri(item) runCatching { context.startActivity(shareExportIntent(context, item, uri)) }.onFailure { showNotice("无法分享文件：${it.message ?: "没有兼容的应用"}") } }, onSave = { scope.launch { runCatching { withContext(Dispatchers.IO) { inbox.saveToDownloads(item) } } .onSuccess { showNotice("已保存到 Downloads/NoteLink") } .onFailure { showNotice("保存失败：${it.message}") } } }, onDelete = { inbox.delete(item.artifactId) } ) } item { Spacer(Modifier.height(96.dp)) } } }</ID>
+    <ID>MultiLineIfElse:MainActivity.kt$item { Text("使用下方按钮拍照、选图或读取剪贴板；也可以从其他应用的分享菜单发送到这里。") }</ID>
+    <ID>MultiLineIfElse:MainActivity.kt$pairingCode?.let { code -&gt; AlertDialog(onDismissRequest = { pairingCode = null }, title = { Text("在 Note 上完成配对") }, text = { Column { Text("在 N10Pro 的“设置 → 手机传输”中输入："); Text(code, style = MaterialTheme.typography.displayMedium, fontWeight = FontWeight.Bold) } }, confirmButton = { Button(onClick = { pairingCode = null }) { Text("完成") } }) }</ID>
+    <ID>MultiLineIfElse:MainActivity.kt$scope.launch { runCatching { withContext(Dispatchers.IO) { queue.enqueueImage(uri, pairing.pairedDevice?.id) } } .onSuccess { TransferForegroundService.sync(queueContext(queue), true) } .onFailure { showNotice("照片加入失败：${it.message}") } cameraFile?.delete() cameraFile = null cameraUri = null }</ID>
+    <ID>MultiLineIfElse:MainActivity.kt$showNotice("没有附近设备权限时仍可排队，但 Note 无法连接")</ID>
+    <ID>MultiLineIfElse:MainActivity.kt$textDialog?.let { initial -&gt; var value by remember(initial) { mutableStateOf(initial) } AlertDialog(onDismissRequest = { textDialog = null }, title = { Text("加入文字") }, text = { OutlinedTextField(value, { value = it }, minLines = 3, maxLines = 8) }, confirmButton = { Button(onClick = { runCatching { queue.enqueueText(value, pairing.pairedDevice?.id) } .onSuccess { TransferForegroundService.sync(queueContext(queue), true); textDialog = null } .onFailure { showNotice(it.message ?: "文字加入失败") } }) { Text("加入队列") } }, dismissButton = { OutlinedButton(onClick = { textDialog = null }) { Text("取消") } }) }</ID>
+    <ID>MultiLineIfElse:PhoneCommandProcessor.kt$PhoneCommandProcessor$return BleResponse.Failure(TransferFailure( TransferErrorCode.SSID_MISMATCH, "LAN SSID 指纹不匹配", true, TransferMode.LAN ))</ID>
+    <ID>MultiLineIfElse:PhoneCommandProcessor.kt$PhoneCommandProcessor$return BleResponse.Failure(TransferFailure( TransferErrorCode.UNSUPPORTED_MODE, "双方不支持 ${command.selectedMode}", false, command.selectedMode ))</ID>
+    <ID>MultiLineIfElse:PhoneQueueRepository.kt$PhoneQueueRepository$File(appContext.filesDir, cursor.getString(0)).canonicalFile .takeIf { it.toPath().startsWith(outboxDir.canonicalFile.toPath()) }</ID>
+    <ID>MultiLineIfElse:PhoneQueueRepository.kt$PhoneQueueRepository$null</ID>
+    <ID>MultiLineIfElse:TransferForegroundService.kt$TransferForegroundService$endpoint?.refreshAdvertisement()</ID>
+    <ID>MultiLineIfElse:TransferForegroundService.kt$TransferForegroundService$stopSelf()</ID>
+    <ID>MultiLineIfElse:TransferForegroundService.kt$TransferForegroundService.Companion$ContextCompat.startForegroundService(context, intent)</ID>
+    <ID>MultiLineIfElse:TransferForegroundService.kt$TransferForegroundService.Companion$context.stopService(intent)</ID>
+    <ID>NestedBlockDepth:ExportInboxRepository.kt$ExportInboxRepository$fun saveToDownloads(item: InboxExport): String</ID>
+    <ID>NestedBlockDepth:ExportInboxRepository.kt$ExportInboxRepository$private fun sha256(file: File): ByteArray</ID>
+    <ID>NestedBlockDepth:PhoneQueueRepository.kt$PhoneQueueRepository$fun enqueueImage(uri: Uri, destinationDeviceId: String?): QueueItem</ID>
+    <ID>NestedBlockDepth:PhoneQueueRepository.kt$PhoneQueueRepository$fun enqueuePdf(uri: Uri, destinationDeviceId: String?): QueueItem</ID>
+    <ID>NestedBlockDepth:PhoneQueueRepository.kt$PhoneQueueRepository$private fun sha256(file: File): ByteArray</ID>
+    <ID>NoUnusedImports:MainActivity.kt$com.betterhv.note.sender.MainActivity.kt</ID>
+    <ID>ParameterListWrapping:PhoneQueueRepository.kt$PhoneQueueRepository.QueueDatabase$(db: SQLiteDatabase)</ID>
+    <ID>PropertyWrapping:MainActivity.kt$val permissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { grants -&gt; statusRevision++ if (TransferPermissions.hasAllPhonePermissions(context)) { TransferForegroundService.sync(context, items.isNotEmpty()) showNotice("附近设备权限已授予") } else showNotice("没有附近设备权限时仍可排队，但 Note 无法连接") }</ID>
+    <ID>ReturnCount:MainActivity.kt$private fun phoneConnectionStatus( context: Context, isPaired: Boolean, hasItems: Boolean, permissionsGranted: Boolean, receiveEnabled: Boolean ): String</ID>
+    <ID>ReturnCount:PhoneCommandProcessor.kt$PhoneCommandProcessor$private fun prepare(command: BleCommand.PrepareFileTransfer, peerId: String, pairingKey: ByteArray): BleResponse</ID>
+    <ID>ReturnCount:TransferForegroundService.kt$TransferForegroundService$override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int</ID>
+    <ID>TooGenericExceptionCaught:ExportInboxRepository.kt$ExportInboxRepository$t: Throwable</ID>
+    <ID>TooGenericExceptionCaught:PhoneCommandProcessor.kt$PhoneCommandProcessor$error: Throwable</ID>
+    <ID>TooGenericExceptionCaught:PhoneQueueRepository.kt$PhoneQueueRepository$t: Throwable</ID>
+    <ID>TooManyFunctions:ExportInboxRepository.kt$ExportInboxRepository : AutoCloseable</ID>
+    <ID>TooManyFunctions:PhoneCommandProcessor.kt$PhoneCommandProcessor : AutoCloseableTransferObservable</ID>
+    <ID>TooManyFunctions:PhoneQueueRepository.kt$PhoneQueueRepository : QueueStoreSenderContentProviderAutoCloseable</ID>
+    <ID>Wrapping:ExportInboxRepository.kt$ExportInboxRepository$(</ID>
+    <ID>Wrapping:ExportInboxRepository.kt$ExportInboxRepository$;</ID>
+    <ID>Wrapping:ExportInboxRepository.kt$ExportInboxRepository.InboxDatabase$"""</ID>
+    <ID>Wrapping:ExportInboxRepository.kt$ExportInboxRepository.InboxDatabase$(</ID>
+    <ID>Wrapping:MainActivity.kt$(</ID>
+    <ID>Wrapping:MainActivity.kt$;</ID>
+    <ID>Wrapping:MainActivity.kt$Button(onClick = { runCatching { queue.enqueueText(value, pairing.pairedDevice?.id) } .onSuccess { TransferForegroundService.sync(queueContext(queue), true); textDialog = null } .onFailure { showNotice(it.message ?: "文字加入失败") } }) { Text("加入队列") }</ID>
+    <ID>Wrapping:MainActivity.kt$Column { Text("在 N10Pro 的“设置 → 手机传输”中输入："); Text(code, style = MaterialTheme.typography.displayMedium, fontWeight = FontWeight.Bold) }</ID>
+    <ID>Wrapping:MainActivity.kt$MainActivity$;</ID>
+    <ID>Wrapping:MainActivity.kt$Text("在 N10Pro 的“设置 → 手机传输”中输入："); Text(code, style = MaterialTheme.typography.displayMedium, fontWeight = FontWeight.Bold)</ID>
+    <ID>Wrapping:NoteLinkTransferRuntime.kt$NoteLinkTransferRuntime$;</ID>
+    <ID>Wrapping:PhoneCommandProcessor.kt$PhoneCommandProcessor$(</ID>
+    <ID>Wrapping:PhoneCommandProcessor.kt$PhoneCommandProcessor$;</ID>
+    <ID>Wrapping:PhoneQueueRepository.kt$PhoneQueueRepository$(</ID>
+    <ID>Wrapping:PhoneQueueRepository.kt$PhoneQueueRepository$;</ID>
+    <ID>Wrapping:PhoneQueueRepository.kt$PhoneQueueRepository.PhoneSenderLease$;</ID>
+    <ID>Wrapping:PhoneQueueRepository.kt$PhoneQueueRepository.PhoneSenderLease${ if (!finished) offer = offer.copy(item = coordinator.transition(offer.item.id, QueueState.AWAITING_COMMIT)); publish() }</ID>
+    <ID>Wrapping:PhoneQueueRepository.kt$PhoneQueueRepository.PhoneSenderLease${ if (!finished) offer = offer.copy(item = coordinator.transition(offer.item.id, QueueState.TRANSFERRING)); publish() }</ID>
+    <ID>Wrapping:PhoneQueueRepository.kt$PhoneQueueRepository.QueueDatabase$"""</ID>
+    <ID>Wrapping:PhoneQueueRepository.kt$PhoneQueueRepository.QueueDatabase$(</ID>
+    <ID>Wrapping:PhoneQueueRepository.kt$PhoneQueueRepository.QueueDatabase$;</ID>
+    <ID>Wrapping:TransferForegroundService.kt$TransferForegroundService$;</ID>
+  </CurrentIssues>
+</SmellBaseline>

@@ -104,6 +104,24 @@ class StrokeGeometryTest {
     }
 
     @Test
+    fun `marker bounds include round cap extension past endpoints`() {
+        val markerStyle = PenStyle(
+            baseWidth = 20f,
+            pressureCurve = PressureCurve(a = 1f, gamma = 1f),
+            penType = PenType.Marker
+        )
+        val stroke = Stroke(
+            points = listOf(point(10f, 30f), point(50f, 30f)),
+            style = markerStyle
+        )
+
+        assertEquals(0f, stroke.bounds.left, EPS)
+        assertEquals(60f, stroke.bounds.right, EPS)
+        assertEquals(20f, stroke.bounds.top, EPS)
+        assertEquals(40f, stroke.bounds.bottom, EPS)
+    }
+
+    @Test
     fun `empty input yields an empty outline`() {
         val outline = StrokeGeometry.build(emptyList(), style)
         assertTrue(outline.isEmpty)

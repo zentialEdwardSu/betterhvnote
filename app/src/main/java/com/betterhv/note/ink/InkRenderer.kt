@@ -33,14 +33,20 @@ class InkRenderer {
         strokeCap = Paint.Cap.ROUND
         strokeJoin = Paint.Join.ROUND
     }
+    private val markerPaint = Paint().apply {
+        isAntiAlias = true
+        style = Paint.Style.STROKE
+        strokeCap = Paint.Cap.ROUND
+        strokeJoin = Paint.Join.ROUND
+    }
     private val path = Path()
 
     /** Draw a finished stroke. */
     fun drawStroke(canvas: Canvas, stroke: Stroke) {
         when (stroke.style.penType) {
             PenType.Pencil -> drawPencil(canvas, stroke)
-            PenType.NormalPen, PenType.Marker ->
-                drawOutline(canvas, stroke.outline, stroke.style.color)
+            PenType.Marker -> drawMarker(canvas, stroke)
+            PenType.NormalPen -> drawOutline(canvas, stroke.outline, stroke.style.color)
         }
     }
 
@@ -70,6 +76,31 @@ class InkRenderer {
             path.lineTo(right[i * 2], right[i * 2 + 1])
         }
         path.close()
+    }
+
+    /**
+     * Marker has a pressure-independent width, so a stroked centerline is both
+     * simpler and more robust than closing a filled ribbon. In particular it
+     * gives the same round caps as the ROM overlay and avoids the crossed-edge
+     * spikes that a very wide ribbon can develop near a short final segment.
+     */
+    private fun drawMarker(canvas: Canvas, stroke: Stroke) {
+        val points = stroke.points
+        if (points.isEmpty()) return
+
+        markerPaint.color = stroke.style.color
+        markerPaint.strokeWidth = stroke.style.widthAt(1f)
+        if (points.size == 1) {
+            canvas.drawPoint(points[0].x, points[0].y, markerPaint)
+            return
+        }
+
+        path.rewind()
+        path.moveTo(points[0].x, points[0].y)
+        for (i in 1 until points.size) {
+            path.lineTo(points[i].x, points[i].y)
+        }
+        canvas.drawPath(path, markerPaint)
     }
 
     /**

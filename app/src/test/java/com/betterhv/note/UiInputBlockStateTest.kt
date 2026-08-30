@@ -14,6 +14,7 @@ class UiInputBlockStateTest {
         assertTrue(UiInputBlockState(notebookNameOpen = true).blocked)
         assertTrue(UiInputBlockState(textEditorOpen = true).blocked)
         assertTrue(UiInputBlockState(insertionOpen = true).blocked)
+        assertTrue(UiInputBlockState(linkedNotePlacementOpen = true).blocked)
     }
 
     @Test fun everyToolbarPopupAndGuardedSurfaceBlocksCanvas() {

@@ -91,12 +91,15 @@ class TransferCoreTest {
             ssidFingerprint = ByteArray(8) { it.toByte() }
         )
         assertArrayEquals(
-            byteArrayOf(2, 1, 0, 2, 0, 3),
-            BleQueueProtocol.encode(BleResponse.Counts(2, 3))
+            byteArrayOf(3, 1, 0, 2, 0, 3, 0, 4),
+            BleQueueProtocol.encode(BleResponse.Counts(2, 3, 4))
         )
         val command = BleCommand.Capabilities(capabilities)
         assertEquals(command, BleQueueProtocol.decodeCommand(BleQueueProtocol.encode(command)))
-        assertEquals(BleResponse.Counts(2, 3), BleQueueProtocol.decodeResponse(byteArrayOf(2, 1, 0, 2, 0, 3)))
+        assertEquals(
+            BleResponse.Counts(2, 3, 4),
+            BleQueueProtocol.decodeResponse(byteArrayOf(3, 1, 0, 2, 0, 3, 0, 4))
+        )
         org.junit.Assert.assertThrows(UnsupportedBleProtocolException::class.java) {
             BleQueueProtocol.decodeCommand(byteArrayOf(1, 11))
         }

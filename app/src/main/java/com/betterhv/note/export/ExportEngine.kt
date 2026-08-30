@@ -3,9 +3,8 @@ package com.betterhv.note.export
 import android.graphics.Bitmap
 import com.betterhv.note.storage.NotebookRepository
 import com.betterhv.note.storage.PageSnapshot
-import com.itextpdf.text.Document
-import com.itextpdf.text.pdf.PdfCopy
-import com.itextpdf.text.pdf.PdfReader
+import com.betterhv.note.doc.PageKind
+import com.betterhv.note.pdf.MuPdfEngine
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ensureActive
@@ -23,8 +22,10 @@ class ExportEngine(
     private val notebookRepository: NotebookRepository,
     private val taskRepository: ExportTaskRepository,
     private val renderer: PageRenderer,
-    private val exportRoot: File
+    private val exportRoot: File,
+    private val pdfWriter: PdfInkAnnotationWriter = PdfInkAnnotationWriter()
 ) {
+    private val muPdf = MuPdfEngine()
     suspend fun generate(
         taskId: UUID,
         onProgress: (ExportProgress) -> Unit = {}
@@ -48,7 +49,7 @@ class ExportEngine(
             val temp = File(artifactDir, "$artifactId.tmp")
             try {
                 when (task.format) {
-                    ExportFormat.PNG -> generatePng(sources.single(), temp, onProgress)
+                    ExportFormat.PNG -> generatePng(task.notebookId, sources.single(), temp, onProgress)
                     ExportFormat.PDF -> generatePdf(task, sources, temp, onProgress)
                 }
                 coroutineContext.ensureActive()
@@ -89,6 +90,7 @@ class ExportEngine(
     }
 
     private suspend fun generatePng(
+        notebookId: UUID,
         source: ExportPageSource,
         output: File,
         onProgress: (ExportProgress) -> Unit
@@ -97,7 +99,20 @@ class ExportEngine(
         onProgress(ExportProgress(0, 1, source.id))
         val page = notebookRepository.loadPage(source.id) ?: error("页面已删除")
         val snapshot = PageSnapshot.capture(page)
-        val bitmap = renderer.renderToBitmap(
+        val bitmap = if (page.kind == PageKind.PDF_SOURCE) {
+            val record = notebookRepository.pdfDocument(notebookId) ?: error("PDF 资源记录缺失")
+            val file = notebookRepository.resolveDocumentAsset(record.assetPath) ?: error("PDF 资源文件缺失")
+            val base = File(output.parentFile, "${output.name}.base.tmp.pdf")
+            val annotated = File(output.parentFile, "${output.name}.annotated.tmp.pdf")
+            try {
+                pdfWriter.copySourcePage(file, requireNotNull(page.pdfSource).sourcePageIndex, base)
+                pdfWriter.addInkAnnotations(base, snapshot, annotated)
+                muPdf.renderPage(annotated, 0, (snapshot.metadata.width * 2f).toInt())
+            } finally {
+                base.delete()
+                annotated.delete()
+            }
+        } else renderer.renderToBitmap(
             snapshot, (snapshot.metadata.width * 2f).toInt(), (snapshot.metadata.height * 2f).toInt()
         )
         try {
@@ -127,47 +142,39 @@ class ExportEngine(
                 pageFiles += cached
             } else {
                 val page = notebookRepository.loadPage(source.id) ?: error("页面已删除")
-                val finalPage = File(pageDir, "${source.id}-r${source.contentRevision}.pdf")
-                val tempPage = File(pageDir, "${source.id}-r${source.contentRevision}.tmp")
+                val finalPage = File(pageDir, ExportTaskRepository.pageCacheFileName(source))
+                val basePage = File(pageDir, "${source.id}-r${source.contentRevision}-base.tmp.pdf")
+                val tempPage = File(pageDir, "${finalPage.name}.tmp")
                 try {
-                    renderer.renderSinglePagePdf(PageSnapshot.capture(page), tempPage)
+                    val snapshot = PageSnapshot.capture(page)
+                    if (page.kind == PageKind.PDF_SOURCE) {
+                        val record = notebookRepository.pdfDocument(task.notebookId)
+                            ?: error("PDF 资源记录缺失")
+                        val original = notebookRepository.resolveDocumentAsset(record.assetPath)
+                            ?: error("PDF 资源文件缺失")
+                        pdfWriter.copySourcePage(
+                            original,
+                            requireNotNull(page.pdfSource).sourcePageIndex,
+                            basePage
+                        )
+                    } else {
+                        renderer.renderSinglePagePdfBase(snapshot, basePage)
+                    }
+                    coroutineContext.ensureActive()
+                    pdfWriter.addInkAnnotations(basePage, snapshot, tempPage)
                     coroutineContext.ensureActive()
                     atomicMove(tempPage, finalPage)
                     taskRepository.recordCachedPage(task.id, source, finalPage)?.delete()
                     pageFiles += finalPage
                 } finally {
+                    basePage.delete()
                     tempPage.delete()
                 }
             }
         }
         coroutineContext.ensureActive()
         onProgress(ExportProgress(sources.size, sources.size, null, ExportProgress.Stage.ASSEMBLING))
-        mergePdfPages(pageFiles, output)
-    }
-
-    private fun mergePdfPages(pages: List<File>, output: File) {
-        FileOutputStream(output).use { stream ->
-            val document = Document()
-            val copy = PdfCopy(document, stream)
-            document.open()
-            try {
-                pages.forEach { file ->
-                    // Path-backed readers can read past EOF for small PdfDocument
-                    // outputs on Android; byte-backed parsing avoids that platform bug.
-                    val reader = PdfReader(file.readBytes())
-                    try {
-                        for (pageNumber in 1..reader.numberOfPages) {
-                            copy.addPage(copy.getImportedPage(reader, pageNumber))
-                        }
-                        copy.freeReader(reader)
-                    } finally {
-                        reader.close()
-                    }
-                }
-            } finally {
-                document.close()
-            }
-        }
+        pdfWriter.mergePages(pageFiles, output)
     }
 
     private fun atomicMove(source: File, target: File) {

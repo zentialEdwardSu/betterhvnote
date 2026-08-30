@@ -19,22 +19,26 @@ import java.io.FileOutputStream
 import java.util.UUID
 import java.util.concurrent.Executors
 
-data class ThumbnailKey(val pageId: UUID, val contentRevision: Long)
+data class ThumbnailKey(
+    val pageId: UUID,
+    val contentRevision: Long,
+    val backgroundRevision: String = ""
+)
 
 /** Thread-safe version gate, separated from Android rendering for JVM regression tests. */
 class ThumbnailRevisionGate {
-    private val expected = HashMap<UUID, Long>()
+    private val expected = HashMap<UUID, ThumbnailKey>()
 
     @Synchronized
     fun expect(key: ThumbnailKey): Boolean {
         val existing = expected[key.pageId]
-        if (existing != null && existing > key.contentRevision) return false
-        expected[key.pageId] = key.contentRevision
+        if (existing != null && existing.contentRevision > key.contentRevision) return false
+        expected[key.pageId] = key
         return true
     }
 
     @Synchronized fun isCurrent(key: ThumbnailKey): Boolean =
-        expected[key.pageId] == key.contentRevision
+        expected[key.pageId] == key
 
     @Synchronized fun remove(pageId: UUID) {
         expected.remove(pageId)
@@ -55,28 +59,34 @@ class ThumbnailManager(cacheDir: File, private val documentsDir: File = cacheDir
     private val revisionGate = ThumbnailRevisionGate()
 
     @Synchronized
-    fun get(pageId: UUID, contentRevision: Long): Bitmap? =
-        memory[ThumbnailKey(pageId, contentRevision)]
+    fun get(pageId: UUID, contentRevision: Long, backgroundRevision: String = ""): Bitmap? =
+        memory[ThumbnailKey(pageId, contentRevision, backgroundRevision)]
 
     /** Invalidates prior memory/disk generations immediately after a document mutation. */
-    fun invalidate(pageId: UUID, contentRevision: Long) {
-        if (!revisionGate.expect(ThumbnailKey(pageId, contentRevision))) return
+    fun invalidate(pageId: UUID, contentRevision: Long, backgroundRevision: String = "") {
+        if (!revisionGate.expect(ThumbnailKey(pageId, contentRevision, backgroundRevision))) return
         synchronized(this) {
             memory.keys.filter { it.pageId == pageId && it.contentRevision != contentRevision }
                 .forEach(memory::remove)
         }
-        executor.execute { deleteOtherRevisions(pageId, contentRevision) }
+        executor.execute { deleteOtherRevisions(ThumbnailKey(pageId, contentRevision, backgroundRevision)) }
     }
 
-    fun request(snapshot: PageSnapshot, onReady: (ThumbnailKey) -> Unit = {}) {
-        val key = ThumbnailKey(snapshot.metadata.id, snapshot.metadata.contentRevision)
-        request(key, { snapshot }, onReady)
+    fun request(
+        snapshot: PageSnapshot,
+        backgroundRevision: String = "",
+        backgroundProvider: (() -> Bitmap?)? = null,
+        onReady: (ThumbnailKey) -> Unit = {}
+    ) {
+        val key = ThumbnailKey(snapshot.metadata.id, snapshot.metadata.contentRevision, backgroundRevision)
+        request(key, { snapshot }, backgroundProvider, onReady)
     }
 
     /** Provider runs on the thumbnail worker, so an unloaded Page can be read without blocking UI. */
     fun request(
         key: ThumbnailKey,
         snapshotProvider: () -> PageSnapshot?,
+        backgroundProvider: (() -> Bitmap?)? = null,
         onReady: (ThumbnailKey) -> Unit = {}
     ) {
         if (!revisionGate.expect(key)) return
@@ -87,7 +97,12 @@ class ThumbnailManager(cacheDir: File, private val documentsDir: File = cacheDir
             val bitmap = cached ?: run {
                 val snapshot = snapshotProvider() ?: return@execute
                 if (snapshot.metadata.contentRevision != key.contentRevision || !isCurrent(key)) return@execute
-                render(snapshot)
+                val background = backgroundProvider?.invoke()
+                try {
+                    render(snapshot, background)
+                } finally {
+                    background?.recycle()
+                }
             }
             if (!isCurrent(key)) return@execute
             if (cached == null) {
@@ -107,7 +122,7 @@ class ThumbnailManager(cacheDir: File, private val documentsDir: File = cacheDir
                 memory[key] = bitmap
             }
             if (!isCurrent(key)) return@execute
-            deleteOtherRevisions(key.pageId, key.contentRevision)
+            deleteOtherRevisions(key)
             mainHandler.post { if (isCurrent(key)) onReady(key) }
         }
     }
@@ -128,16 +143,21 @@ class ThumbnailManager(cacheDir: File, private val documentsDir: File = cacheDir
     private fun fileFor(key: ThumbnailKey) = File(directory, cacheName(key, "png"))
 
     private fun cacheName(key: ThumbnailKey, extension: String) =
-        "${key.pageId}-${key.contentRevision}-r$RENDER_VERSION.$extension"
+        "${key.pageId}-${key.contentRevision}-b${revisionHash(key.backgroundRevision)}-r$RENDER_VERSION.$extension"
 
-    private fun deleteOtherRevisions(pageId: UUID, keepRevision: Long) {
-        val keepName = cacheName(ThumbnailKey(pageId, keepRevision), "png")
+    private fun revisionHash(value: String): String =
+        java.security.MessageDigest.getInstance("SHA-256").digest(value.encodeToByteArray())
+            .take(6).joinToString("") { "%02x".format(it) }
+
+    private fun deleteOtherRevisions(key: ThumbnailKey) {
+        val pageId = key.pageId
+        val keepName = cacheName(key, "png")
         directory.listFiles { file ->
             file.name.startsWith("$pageId-") && file.name != keepName
         }?.forEach(File::delete)
     }
 
-    private fun render(snapshot: PageSnapshot): Bitmap {
+    private fun render(snapshot: PageSnapshot, background: Bitmap?): Bitmap {
         val bitmap = Bitmap.createBitmap(WIDTH, HEIGHT, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bitmap)
         canvas.drawColor(Color.WHITE)
@@ -152,6 +172,14 @@ class ThumbnailManager(cacheDir: File, private val documentsDir: File = cacheDir
         val contentHeight = snapshot.metadata.height.takeIf { it > 0f }
             ?: snapshot.objects.maxOfOrNull { it.pageBounds.bottom }?.coerceAtLeast(1f) ?: 1f
         val scale = minOf((WIDTH - 2f * PADDING) / contentWidth, (HEIGHT - 2f * PADDING) / contentHeight)
+        background?.let {
+            canvas.drawBitmap(
+                it,
+                null,
+                RectF(PADDING, PADDING, PADDING + contentWidth * scale, PADDING + contentHeight * scale),
+                Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+            )
+        }
         inkCanvas.translate(PADDING, PADDING)
         inkCanvas.scale(scale, scale)
         val renderer = InkRenderer()
@@ -165,7 +193,10 @@ class ThumbnailManager(cacheDir: File, private val documentsDir: File = cacheDir
                 is StrokeObject -> {
                     val sourceStyle = obj.stroke.style
                     val previewStyle = sourceStyle.copy(
-                        baseWidth = maxOf(sourceStyle.baseWidth, MIN_BASE_WIDTH_PX / scale),
+                        baseWidth = maxOf(
+                            sourceStyle.baseWidth,
+                            MIN_BASE_WIDTH_PX / (scale * sourceStyle.renderedWidthScale)
+                        ),
                         pressureCurve = sourceStyle.pressureCurve.copy(
                             a = maxOf(sourceStyle.pressureCurve.a, MIN_PRESSURE_FLOOR)
                         )
@@ -242,13 +273,14 @@ class ThumbnailManager(cacheDir: File, private val documentsDir: File = cacheDir
     }
 
     companion object {
-        const val WIDTH = 120
-        const val HEIGHT = 160
-        private const val PADDING = 4f
+        // Render near the N10Pro card's actual visual size so PDF cover text remains legible.
+        const val WIDTH = 360
+        const val HEIGHT = 480
+        private const val PADDING = 8f
         private const val MEMORY_LIMIT = 24
-        private const val RENDER_VERSION = 6
-        private const val IMAGE_DECODE_DIMENSION = 512
-        private const val MIN_BASE_WIDTH_PX = 0.5f
+        private const val RENDER_VERSION = 10
+        private const val IMAGE_DECODE_DIMENSION = 1024
+        private const val MIN_BASE_WIDTH_PX = 1.5f
         private const val MIN_PRESSURE_FLOOR = 0.65f
         private val THICKEN_OFFSETS = arrayOf(
             -0.25f to -0.25f, 0f to -0.25f, 0.25f to -0.25f,

@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "templates": [
+    {
+      "id": "builtin.single-lines",
+      "name": "Single lines",
+      "description": "浅灰色横线纸",
+      "file": "single-lines.svg",
+      "width": 1860,
+      "height": 2414
+    },
+    {
+      "id": "builtin.dotted",
+      "name": "Dotted",
+      "description": "浅灰色点阵纸",
+      "file": "dotted.svg",
+      "width": 1860,
+      "height": 2414
+    }
+  ]
+}

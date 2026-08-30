@@ -15,7 +15,8 @@ data class PageSnapshot(
         fun capture(page: Page) = PageSnapshot(
             metadata = Notebook.PageMetadata(
                 page.id, page.width, page.height, page.bookmarked, page.contentRevision,
-                page.createdAt, page.updatedAt
+                page.createdAt, page.updatedAt, page.kind, page.parentPdfPageId, page.pdfSource,
+                page.templateId
             ),
             objects = page.scene.all().toList()
         )
@@ -32,6 +33,7 @@ data class ObjectChange(
 data class DocumentChange(
     val notebookId: UUID,
     val title: String,
+    val notebookKind: com.betterhv.note.doc.NotebookKind,
     val createdAt: Long,
     val updatedAt: Long,
     val pageOrder: List<UUID>,
@@ -77,6 +79,7 @@ data class DocumentChange(
         ) = DocumentChange(
             notebookId = notebook.id,
             title = notebook.title,
+            notebookKind = notebook.kind,
             createdAt = notebook.createdAt,
             updatedAt = notebook.updatedAt,
             pageOrder = notebook.pageOrder.toList(),

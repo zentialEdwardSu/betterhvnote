@@ -3,6 +3,7 @@ package com.betterhv.note
 import com.betterhv.note.ink.PenStyle
 import com.betterhv.note.ink.PenType
 import com.betterhv.note.ink.PressureCurve
+import kotlin.math.roundToInt
 
 /** One of the deliberately small, e-ink-friendly color choices in the pen panel. */
 data class PenColorChoice(
@@ -105,6 +106,24 @@ object PenProfiles {
         PenType.Pencil, PenType.Marker -> 15
     }
 
+    /**
+     * Width sent to the ROM's low-latency overlay renderer.
+     *
+     * The ROM does not use one width response for every pen ID. Normal pen
+     * (service ID 6) still needs the measured 1.75x input compensation, while
+     * pencil and marker share service ID 15 and use the nominal width directly.
+     * Keep this device-facing calibration separate from the stored nominal
+     * [PenStyle.baseWidth]. Rounding also avoids systematic Float.toInt()
+     * thinning at the narrow end.
+     */
+    fun serviceWidth(style: PenStyle): Int {
+        val scale = when (style.penType) {
+            PenType.NormalPen -> ROM_NORMAL_PEN_WIDTH_SCALE
+            PenType.Pencil, PenType.Marker -> ROM_PEN_ID_15_WIDTH_SCALE
+        }
+        return (style.baseWidth * scale).roundToInt().coerceAtLeast(1)
+    }
+
     /** hvNote's five logical settings linearly interpolated into device-specific actual pixels. */
     fun actualWidth(type: PenType, widthLevel: Int, model: String): Float {
         val safeLevel = widthLevel.takeIf { it in logicalWidths.indices }
@@ -186,6 +205,9 @@ object PenProfiles {
     const val SERVICE_COLOR_WHITE = 2
     const val SERVICE_COLOR_DARK_GRAY = 3
     const val SERVICE_COLOR_LIGHT_GRAY = 4
+
+    private const val ROM_NORMAL_PEN_WIDTH_SCALE = 1.75f
+    private const val ROM_PEN_ID_15_WIDTH_SCALE = 1.0f
 }
 
 /** SharedPreferences uses this pure codec so invalid stored values have deterministic defaults. */

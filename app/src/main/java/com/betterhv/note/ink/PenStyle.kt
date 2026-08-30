@@ -8,10 +8,10 @@ import kotlin.math.pow
  *     f(p) = a + (1 - a) * p^gamma        p in [0,1], f(p) in [a,1]
  *
  * This is the shape function only; the absolute width comes from
- * [PenStyle.baseWidth] (w = w0 * f(p)). Keeping the two separate means a
- * width change does not require rebuilding the curve, and the curve stays a
- * swappable, independently testable component -- the spec explicitly forbids
- * baking this formula into the renderer.
+ * [PenStyle.baseWidth] (w = w0 * s(type) * f(p)). [renderedWidthScale] models
+ * the visual response of the vendor brush represented by that nominal width;
+ * the pressure curve remains a separate, swappable component -- the spec
+ * explicitly forbids baking this formula into the renderer.
  *
  * `a` keeps a floor under the width so light strokes do not vanish entirely.
  */
@@ -52,13 +52,28 @@ data class PenStyle(
         require(baseWidth > 0.0f) { "baseWidth must be positive, got $baseWidth" }
     }
 
-    /** Spec §14: w = w0 * f(p). */
-    fun widthAt(pressure: Float): Float = baseWidth * pressureCurve.factor(pressure)
+    /**
+     * Visual scale for the selected brush engine. On N10Pro the ROM's normal
+     * (graffiti) pen renders a nominal width at about one third of its numeric
+     * value. Marker and pencil use their nominal width directly.
+     */
+    val renderedWidthScale: Float
+        get() = when (penType) {
+            PenType.NormalPen -> NORMAL_PEN_RENDERED_WIDTH_SCALE
+            PenType.Pencil, PenType.Marker -> 1.0f
+        }
+
+    /** Spec §14 with the brush-specific visual calibration. */
+    fun widthAt(pressure: Float): Float =
+        baseWidth * renderedWidthScale * pressureCurve.factor(pressure)
 
     /** Upper bound on width, used for dirty-rect margins (§28). */
-    val maxWidth: Float get() = baseWidth
+    val maxWidth: Float get() = baseWidth * renderedWidthScale
 
     companion object {
         const val COLOR_BLACK: Int = 0xFF000000.toInt()
+
+        /** Calibrated from minimum/maximum normal-pen live-vs-materialized comparisons. */
+        private const val NORMAL_PEN_RENDERED_WIDTH_SCALE = 0.34f
     }
 }

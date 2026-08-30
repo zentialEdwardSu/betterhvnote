@@ -3,6 +3,7 @@ import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 plugins {
     id("org.jetbrains.kotlin.jvm")
+    id("io.gitlab.arturbosch.detekt")
     id("org.jetbrains.compose")
     id("org.jetbrains.kotlin.plugin.compose")
     id("app.cash.sqldelight")
@@ -18,16 +19,16 @@ kotlin {
     sourceSets {
         main {
             kotlin.srcDir(rootProject.file("phone-app/src/commonMain/kotlin"))
-            kotlin.srcDir(rootProject.file("phone-app/src/desktopMain/kotlin"))
+            kotlin.srcDir("src/main/kotlin")
         }
         test {
-            kotlin.srcDir(rootProject.file("phone-app/src/desktopTest/kotlin"))
+            kotlin.srcDir("src/test/kotlin")
         }
     }
 }
 
 sourceSets.main {
-    resources.srcDir(rootProject.file("phone-app/src/desktopMain/resources"))
+    resources.srcDir("src/main/resources")
 }
 
 sqldelight {
@@ -68,7 +69,7 @@ compose.desktop {
             description = "Transfer images, text and BetterHvNote exports over BLE and Wi-Fi Direct"
             vendor = "BetterHv"
             windows {
-                iconFile.set(rootProject.file("phone-app/src/desktopMain/resources/icons/notelink.ico"))
+                iconFile.set(file("src/main/resources/icons/notelink.ico"))
                 menuGroup = "NoteLink"
                 upgradeUuid = "0ec5e7be-a75d-4aaa-b38d-f43f3823bd87"
             }
@@ -85,7 +86,7 @@ val addWindowsFirewallActions by tasks.registering(Exec::class) {
     outputs.dir(msiDirectory)
     commandLine(
         "powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
-        rootProject.file("phone-app/installer/add-firewall-actions.ps1").absolutePath,
+        rootProject.file("tools/windows-installer/add-firewall-actions.ps1").absolutePath,
         "-MsiDirectory", msiDirectory.get().asFile.absolutePath,
         "-ActionExecutable", actionExecutable.get().asFile.absolutePath
     )

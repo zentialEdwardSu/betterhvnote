@@ -8,6 +8,13 @@ import com.betterhv.note.doc.StrokeObject
 import com.betterhv.note.doc.ImageObject
 import com.betterhv.note.doc.TextFontFamily
 import com.betterhv.note.doc.TextObject
+import com.betterhv.note.doc.NotebookKind
+import com.betterhv.note.doc.PageKind
+import com.betterhv.note.doc.DEFAULT_TEMPLATE_ID
+import com.betterhv.note.doc.PdfAnchor
+import com.betterhv.note.doc.PdfAnchorKind
+import com.betterhv.note.doc.PdfPageSource
+import com.betterhv.note.doc.Transform2D
 import com.betterhv.note.ink.Bounds
 import com.betterhv.note.ink.InkPoint
 import com.betterhv.note.ink.PenStyle
@@ -57,6 +64,23 @@ class NotebookRepositoryInstrumentedTest {
         NotebookRepository(context).use { reopened ->
             assertEquals(secondId, reopened.openOrCreate().id)
             assertEquals(StartupBehavior.LAST_OPENED, reopened.startupBehavior())
+        }
+    }
+
+    @Test
+    fun pageTemplateRoundTripsAndDefaultsExistingWritablePagesToBlank() {
+        val notebookId: UUID
+        NotebookRepository(context).use { repository ->
+            notebookId = repository.createBlankNotebook("Template", 300f, 400f, "custom.lines")
+            val created = repository.loadNotebook(notebookId)!!.pageAt(0)!!
+            assertEquals("custom.lines", created.templateId)
+            created.setTemplate(DEFAULT_TEMPLATE_ID)
+            repository.persist(DocumentChange.fullPage(repository.loadNotebook(notebookId)!!.also {
+                it.attachPage(created)
+            }, created, "test:template"))
+        }
+        NotebookRepository(context).use { repository ->
+            assertEquals(DEFAULT_TEMPLATE_ID, repository.loadNotebook(notebookId)!!.pageAt(0)!!.templateId)
         }
     }
 
@@ -174,6 +198,84 @@ class NotebookRepositoryInstrumentedTest {
             repository.persistWithReceipt(change, receipt)
             repository.persistWithReceipt(change, receipt)
             assertEquals(objectId, repository.findTransferReceipt("phone", itemId))
+        }
+    }
+
+    @Test
+    fun pdfNotebookLinkedPageAndAnchorRoundTripWithCascade() {
+        NotebookRepository(context).use { repository ->
+            repository.openOrCreate()
+            val source = PdfPageSource(
+                0,
+                Bounds(0f, 0f, 612f, 792f),
+                Transform2D(96f / 72f, 0f, 0f, 96f / 72f, 0f, 0f)
+            )
+            val pdfId = repository.createPdfNotebook(
+                PdfImportCommit(
+                    title = "Paper",
+                    assetPath = "pdfs/test.pdf",
+                    displayName = "Paper.pdf",
+                    byteLength = 1024L,
+                    sha256 = "ab".repeat(32),
+                    pages = listOf(
+                        PdfImportedPage(816f, 1056f, source),
+                        PdfImportedPage(816f, 1056f, source.copy(sourcePageIndex = 1))
+                    )
+                )
+            )
+            val pdf = repository.loadNotebook(pdfId)!!
+            assertEquals(NotebookKind.PDF, pdf.kind)
+            val sourcePageId = pdf.pageOrder.first()
+            assertEquals(PageKind.PDF_SOURCE, pdf.metadata(sourcePageId)!!.kind)
+            assertEquals(2, repository.pdfDocument(pdfId)!!.pageCount)
+
+            val secondSourcePageId = pdf.pageOrder[1]
+            repository.setLastOpenedPage(pdfId, secondSourcePageId)
+            assertEquals(secondSourcePageId, repository.lastOpenedPageId(pdfId))
+            val restoredAtLastPage = repository.loadNotebook(pdfId)!!
+            assertEquals(secondSourcePageId, restoredAtLastPage.getPage(secondSourcePageId)?.id)
+            repository.setLastOpenedPage(pdfId, sourcePageId)
+
+            val notePageId = repository.createLinkedNotePage(sourcePageId, 1600f, 2560f)
+            val reloaded = repository.loadNotebook(pdfId)!!
+            assertEquals(listOf(sourcePageId, notePageId), reloaded.pageOrder.take(2))
+            val notePage = repository.loadPage(notePageId)!!
+            assertEquals(PageKind.LINKED_NOTE, notePage.kind)
+            assertEquals(sourcePageId, notePage.parentPdfPageId)
+            val objectId = UUID.randomUUID()
+            notePage.addObject(
+                TextObject(objectId, text = "linked", localBounds = Bounds(0f, 0f, 100f, 30f))
+            )
+            reloaded.attachPage(notePage)
+            reloaded.refreshPageMetadata(notePage)
+            repository.persist(DocumentChange.fullPage(reloaded, notePage, "test:linked-note"))
+            repository.savePdfAnchor(
+                PdfAnchor(
+                    sourcePageId = sourcePageId,
+                    notePageId = notePageId,
+                    noteObjectId = objectId,
+                    kind = PdfAnchorKind.REGION_TEXT,
+                    normalizedBounds = Bounds(0.1f, 0.2f, 0.4f, 0.3f),
+                    selectedText = "linked",
+                    ordinal = 1
+                )
+            )
+            assertEquals(1, repository.pdfAnchors(sourcePageId).size)
+            assertEquals(objectId, repository.pdfAnchorsForNotePage(notePageId).single().noteObjectId)
+            assertEquals(sourcePageId, repository.pdfAnchorForNoteObject(objectId)?.sourcePageId)
+
+            // Lifecycle/manual full-page saves must retain links for objects
+            // that are still present on the linked-note page.
+            repository.persist(DocumentChange.fullPage(reloaded, notePage, "test:retain-anchor-object"))
+            assertEquals(1, repository.pdfAnchors(sourcePageId).size)
+            assertEquals(objectId, repository.pdfAnchorsForNotePage(notePageId).single().noteObjectId)
+
+            notePage.removeObject(objectId)
+            reloaded.refreshPageMetadata(notePage)
+            repository.persist(DocumentChange.fullPage(reloaded, notePage, "test:remove-anchor-object"))
+            assertTrue(repository.pdfAnchors(sourcePageId).isEmpty())
+            assertTrue(repository.pdfAnchorsForNotePage(notePageId).isEmpty())
+            assertEquals(null, repository.pdfAnchorForNoteObject(objectId))
         }
     }
 }

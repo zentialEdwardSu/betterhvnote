@@ -37,13 +37,14 @@ class WindowsNativeContractTest {
         val library = FakeLibrary()
         val api = JnaWindowsNativeApi.forTesting(library)
 
-        api.startBle("desktop-device", "A desktop name that stays in GATT", 2, 3)
+        api.startBle("desktop-device", "A desktop name that stays in GATT", 2, 3, 4)
 
         val advertisement = library.lastAdvertisement
-        assertEquals(8, advertisement.size)
+        assertEquals(9, advertisement.size)
         val decoded = NoteLinkAdvertisementCodec.decode(advertisement)
         assertEquals(2, decoded.imageCount)
         assertEquals(3, decoded.textCount)
+        assertEquals(4, decoded.pdfCount)
         assertEquals("NoteLink", decoded.deviceName)
     }
 
@@ -111,10 +112,10 @@ class WindowsNativeContractTest {
     }
 
     @Test fun protocolGoldenBytesUseVersionTwo() {
-        assertEquals(BleCommand.Counts, BleQueueProtocol.decodeCommand(byteArrayOf(2, 1)))
+        assertEquals(BleCommand.Counts, BleQueueProtocol.decodeCommand(byteArrayOf(3, 1)))
         assertContentEquals(
-            byteArrayOf(2, 1, 0, 2, 0, 3),
-            BleQueueProtocol.encode(BleResponse.Counts(2, 3))
+            byteArrayOf(3, 1, 0, 2, 0, 3, 0, 4),
+            BleQueueProtocol.encode(BleResponse.Counts(2, 3, 4))
         )
     }
 

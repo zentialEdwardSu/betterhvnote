@@ -65,24 +65,26 @@ class JnaWindowsNativeApi private constructor(
     }
 
     @Synchronized
-    override fun startBle(deviceId: String, deviceName: String, imageCount: Int, textCount: Int) {
+    override fun startBle(
+        deviceId: String, deviceName: String, imageCount: Int, textCount: Int, pdfCount: Int
+    ) {
         require(deviceId.isNotBlank())
         initialize()
         if (bleRunning.get()) stopBle()
         bleDeviceId = deviceId
         bleDeviceName = deviceName
-        val identity = NoteLinkIdentityCodec.encode(DeviceId(deviceId), deviceName, imageCount, textCount)
-        val advertisement = advertisement(imageCount, textCount)
+        val identity = NoteLinkIdentityCodec.encode(DeviceId(deviceId), deviceName, imageCount, textCount, pdfCount)
+        val advertisement = advertisement(imageCount, textCount, pdfCount)
         checkCall(library.nl_ble_start(identity.memory(), identity.size, advertisement.memory(), advertisement.size), "Unable to start BLE")
         bleRunning.set(true)
     }
 
-    override fun updateBleCounts(imageCount: Int, textCount: Int) {
+    override fun updateBleCounts(imageCount: Int, textCount: Int, pdfCount: Int) {
         check(bleRunning.get()) { "BLE is not running" }
         val identity = NoteLinkIdentityCodec.encode(
-            DeviceId(bleDeviceId), bleDeviceName, imageCount, textCount
+            DeviceId(bleDeviceId), bleDeviceName, imageCount, textCount, pdfCount
         )
-        val advertisement = advertisement(imageCount, textCount)
+        val advertisement = advertisement(imageCount, textCount, pdfCount)
         checkCall(
             library.nl_ble_update(
                 identity.memory(), identity.size,
@@ -178,11 +180,13 @@ class JnaWindowsNativeApi private constructor(
         return output.getByteArray(0, result)
     }
 
-    private fun advertisement(imageCount: Int, textCount: Int): ByteArray = NoteLinkAdvertisementCodec.encode(
+    private fun advertisement(
+        imageCount: Int, textCount: Int, pdfCount: Int
+    ): ByteArray = NoteLinkAdvertisementCodec.encode(
         // A 128-bit service UUID plus this eight-byte payload fits in one
         // legacy connectable advertisement. The full name remains available
         // from the GATT identity characteristic after connection.
-        TransferCrypto.sha256(bleDeviceId.encodeToByteArray()), "", imageCount, textCount
+        TransferCrypto.sha256(bleDeviceId.encodeToByteArray()), "", imageCount, textCount, pdfCount
     )
 
     private fun checkCall(result: Int, operation: String) {

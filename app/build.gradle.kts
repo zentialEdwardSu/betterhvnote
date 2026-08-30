@@ -4,6 +4,7 @@ import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.plugin.compose")
+    id("io.gitlab.arturbosch.detekt")
 }
 
 extensions.configure<ApplicationExtension> {
@@ -86,6 +87,8 @@ dependencies {
     implementation("androidx.activity:activity-compose:1.9.3")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.7")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.7")
+    implementation("androidx.documentfile:documentfile:1.0.1")
+    implementation("com.google.code.gson:gson:2.11.0")
     implementation(platform("androidx.compose:compose-bom:2024.10.01"))
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-graphics")
@@ -93,9 +96,8 @@ dependencies {
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.material:material-icons-extended")
 
-    // Android's iText port combines revision-cached single-page PDFs. OpenPDF
-    // depends on java.awt.Color, which is unavailable on Android.
-    implementation("com.itextpdf:itextg:5.5.10")
+    // MuPDF writes editable Ink annotations and grafts cached PDF pages.
+    implementation("com.artifex.mupdf:fitz:1.28.0")
 
     // The ink core (com.betterhv.note.ink, excluding InkRenderer) has no Android
     // dependencies, so plain JUnit on the JVM covers it -- no Robolectric needed.

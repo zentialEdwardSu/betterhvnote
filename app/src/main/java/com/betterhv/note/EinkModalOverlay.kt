@@ -9,6 +9,8 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.material3.Surface
@@ -71,9 +73,14 @@ internal fun EinkModalOverlay(
 }
 
 @Composable
-internal fun EinkDialogAction(label: String, enabled: Boolean = true, onClick: () -> Unit) {
+internal fun EinkDialogAction(
+    label: String,
+    enabled: Boolean = true,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit
+) {
     Box(
-        modifier = Modifier
+        modifier = modifier
             .border(1.dp, if (enabled) Color.Black else Color.Gray, RectangleShape)
             .background(if (enabled) Color.White else Color(0xFFE8E8E8), RectangleShape)
             .clickable(enabled = enabled, onClick = onClick)
@@ -81,5 +88,31 @@ internal fun EinkDialogAction(label: String, enabled: Boolean = true, onClick: (
         contentAlignment = Alignment.Center
     ) {
         Text(label, color = if (enabled) Color.Black else Color.Gray)
+    }
+}
+
+/** Shared Note-style source/target chooser used by PDF and NoteLink flows. */
+@Composable
+internal fun EinkChoiceOverlay(
+    title: String,
+    description: String? = null,
+    choices: List<Pair<String, () -> Unit>>,
+    onDismissRequest: () -> Unit
+) {
+    EinkModalOverlay(
+        onDismissRequest = onDismissRequest,
+        position = EinkModalPosition.TOP
+    ) {
+        Column(
+            Modifier.fillMaxWidth().padding(20.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Text(title, color = Color.Black)
+            description?.let { Text(it, color = Color.DarkGray) }
+            choices.forEach { (label, action) ->
+                EinkDialogAction(label, modifier = Modifier.fillMaxWidth(), onClick = action)
+            }
+            EinkDialogAction("取消", modifier = Modifier.fillMaxWidth(), onClick = onDismissRequest)
+        }
     }
 }

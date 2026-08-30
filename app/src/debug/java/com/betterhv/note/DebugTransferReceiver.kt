@@ -95,9 +95,14 @@ class DebugTransferReceiver : BroadcastReceiver() {
                 val description = when (val payload = lease.payload) {
                     is RemotePayload.Text -> "TEXT:${payload.text}"
                     is RemotePayload.Image -> "IMAGE:${payload.stagedFile.length()}:${payload.item.sha256.toHex()}"
+                    is RemotePayload.Pdf -> "PDF:${payload.stagedFile.length()}:${payload.item.sha256.toHex()}"
                 }
                 if (release) lease.releaseAndAwait() else lease.commitAndAwait()
-                (lease.payload as? RemotePayload.Image)?.stagedFile?.delete()
+                when (val payload = lease.payload) {
+                    is RemotePayload.Image -> payload.stagedFile.delete()
+                    is RemotePayload.Pdf -> payload.stagedFile.delete()
+                    is RemotePayload.Text -> Unit
+                }
                 writeResult(context, "${if (release) "RELEASED" else "COMMITTED"}:$description")
             } catch (t: Throwable) {
                 Log.e(TAG, "Debug transfer failed", t)

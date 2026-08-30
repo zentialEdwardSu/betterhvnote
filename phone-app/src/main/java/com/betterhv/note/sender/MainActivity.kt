@@ -41,6 +41,7 @@ import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.OpenInNew
+import androidx.compose.material.icons.filled.PictureAsPdf
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Share
@@ -218,6 +219,17 @@ private fun BetterHvSendApp(
                 .onFailure { showNotice("图片加入失败：${it.message}") }
         }
     }
+    val pdfPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
+        scope.launch {
+            runCatching {
+                withContext(Dispatchers.IO) {
+                    uris.forEach { queue.enqueuePdf(it, pairing.pairedDevice?.id) }
+                }
+            }
+                .onSuccess { TransferForegroundService.sync(queueContext(queue), queue.items().isNotEmpty()) }
+                .onFailure { showNotice("PDF 加入失败：${it.message}") }
+        }
+    }
     val camera = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { ok ->
         val uri = cameraUri
         if (ok && uri != null) scope.launch {
@@ -312,6 +324,9 @@ private fun BetterHvSendApp(
                     }) { Icon(Icons.Default.CameraAlt, "拍照") }
                     FloatingActionButton(onClick = { imagePicker.launch(arrayOf("image/*")) }) {
                         Icon(Icons.Default.AddPhotoAlternate, "选择图片")
+                    }
+                    FloatingActionButton(onClick = { pdfPicker.launch(arrayOf("application/pdf")) }) {
+                        Icon(Icons.Default.PictureAsPdf, "选择 PDF")
                     }
                     FloatingActionButton(onClick = {
                         val context = queueContext(queue)

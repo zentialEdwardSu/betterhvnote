@@ -16,12 +16,17 @@ import com.betterhv.note.doc.TextObject
 import com.betterhv.note.doc.Transform2D
 import com.betterhv.note.ink.InkRenderer
 import com.betterhv.note.storage.PageSnapshot
+import com.betterhv.note.doc.PageKind
+import com.betterhv.note.template.TemplateStore
 import java.io.File
 import java.io.FileOutputStream
 import kotlin.math.roundToInt
 
 /** One Canvas rendering path is shared by screen-independent PNG and PDF output. */
-class PageRenderer(private val documentsDir: File) {
+class PageRenderer(
+    private val documentsDir: File,
+    private val templates: TemplateStore? = null
+) {
     private val inkRenderer = InkRenderer()
     private val imageRoot = File(documentsDir, "assets").canonicalFile.toPath()
 
@@ -35,6 +40,7 @@ class PageRenderer(private val documentsDir: File) {
         val bitmap = Bitmap.createBitmap(widthPx, heightPx, Bitmap.Config.ARGB_8888)
         Canvas(bitmap).apply {
             drawColor(backgroundColor)
+            renderTemplate(this, snapshot, RectF(0f, 0f, widthPx.toFloat(), heightPx.toFloat()))
             save()
             scale(widthPx / snapshot.metadata.width, heightPx / snapshot.metadata.height)
             renderSnapshot(this, snapshot)
@@ -43,7 +49,11 @@ class PageRenderer(private val documentsDir: File) {
         return bitmap
     }
 
-    fun renderSinglePagePdf(snapshot: PageSnapshot, output: File) {
+    /**
+     * Render the non-ink PDF page contents. Strokes are added afterwards as
+     * editable PDF Ink annotations by [PdfInkAnnotationWriter].
+     */
+    fun renderSinglePagePdfBase(snapshot: PageSnapshot, output: File) {
         output.parentFile?.mkdirs()
         val widthPoints = (snapshot.metadata.width * PDF_POINTS_PER_LOGICAL_PIXEL).roundToInt().coerceAtLeast(1)
         val heightPoints = (snapshot.metadata.height * PDF_POINTS_PER_LOGICAL_PIXEL).roundToInt().coerceAtLeast(1)
@@ -51,12 +61,17 @@ class PageRenderer(private val documentsDir: File) {
         try {
             val page = document.startPage(PdfDocument.PageInfo.Builder(widthPoints, heightPoints, 1).create())
             page.canvas.drawColor(Color.WHITE)
+            renderTemplate(
+                page.canvas,
+                snapshot,
+                RectF(0f, 0f, widthPoints.toFloat(), heightPoints.toFloat())
+            )
             page.canvas.save()
             page.canvas.scale(
                 widthPoints / snapshot.metadata.width,
                 heightPoints / snapshot.metadata.height
             )
-            renderSnapshot(page.canvas, snapshot)
+            renderSnapshot(page.canvas, snapshot, includeStrokes = false)
             page.canvas.restore()
             document.finishPage(page)
             FileOutputStream(output).use(document::writeTo)
@@ -65,8 +80,13 @@ class PageRenderer(private val documentsDir: File) {
         }
     }
 
-    private fun renderSnapshot(canvas: Canvas, snapshot: PageSnapshot) {
+    private fun renderSnapshot(
+        canvas: Canvas,
+        snapshot: PageSnapshot,
+        includeStrokes: Boolean = true
+    ) {
         snapshot.objects.sortedBy(PageObject::zIndex).forEach { obj ->
+            if (!includeStrokes && obj is StrokeObject) return@forEach
             val save = canvas.save()
             canvas.concat(obj.transform.toMatrix())
             when (obj) {
@@ -76,6 +96,14 @@ class PageRenderer(private val documentsDir: File) {
             }
             canvas.restoreToCount(save)
         }
+    }
+
+    private fun renderTemplate(canvas: Canvas, snapshot: PageSnapshot, target: RectF) {
+        if (snapshot.metadata.kind == PageKind.PDF_SOURCE) return
+        val store = templates ?: return
+        val definition = store.resolve(snapshot.metadata.templateId) ?: return
+        if (!definition.isCompatible(snapshot.metadata.width, snapshot.metadata.height)) return
+        store.renderer.draw(canvas, definition, target)
     }
 
     private fun drawText(canvas: Canvas, obj: TextObject) {

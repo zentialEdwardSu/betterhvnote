@@ -20,10 +20,12 @@ class PressureCurveTest {
 
     @Test
     fun `spec example matches documented formula`() {
-        // Spec §14: w = w0 * (0.25 + 0.75 * p^0.7)
+        // Spec §14 plus the brush engine's visual scale:
+        // w = w0 * s(type) * (0.25 + 0.75 * p^0.7)
         val style = PenStyle(baseWidth = 4.0f, pressureCurve = PressureCurve(0.25f, 0.7f))
         val p = 0.5f
-        val expected = 4.0f * (0.25f + 0.75f * Math.pow(0.5, 0.7).toFloat())
+        val expected = 4.0f * style.renderedWidthScale *
+            (0.25f + 0.75f * Math.pow(0.5, 0.7).toFloat())
         assertEquals(expected, style.widthAt(p), EPS)
     }
 

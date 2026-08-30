@@ -1,6 +1,7 @@
 package com.betterhv.note
 
 import android.graphics.Bitmap
+import android.content.Intent
 import android.os.SystemClock
 import android.view.InputDevice
 import android.view.MotionEvent
@@ -28,7 +29,12 @@ import java.io.File
 @RunWith(AndroidJUnit4::class)
 class RichObjectUiTest {
     @get:Rule
-    val rule = ActivityScenarioRule(MainActivity::class.java)
+    val rule = ActivityScenarioRule<MainActivity>(
+        Intent(
+            InstrumentationRegistry.getInstrumentation().targetContext,
+            MainActivity::class.java
+        ).putExtra(MainActivity.EXTRA_SKIP_TEMPLATE_DIRECTORY_PROMPT, true)
+    )
 
     private val device: UiDevice
         get() = UiDevice.getInstance(InstrumentationRegistry.getInstrumentation())
@@ -43,6 +49,21 @@ class RichObjectUiTest {
             activity.setShowWhenLocked(true)
         }
         device.waitForIdle()
+    }
+
+    @Test
+    fun bundledTemplatesAreCompatibleWithTheN10ProEditorPage() {
+        rule.scenario.onActivity { activity ->
+            val penView = requireNotNull(activity.currentPenViewForTest())
+            val (pageWidth, pageHeight) = penView.currentPageSize()
+            listOf("builtin.blank", "builtin.single-lines", "builtin.dotted").forEach { id ->
+                val definition = requireNotNull(penView.templateCatalog().find(id))
+                assertTrue(
+                    "$id should match editor page ${pageWidth}x$pageHeight",
+                    definition.isCompatible(pageWidth, pageHeight)
+                )
+            }
+        }
     }
 
     @Test
@@ -163,7 +184,7 @@ class RichObjectUiTest {
         sendSide1Click(menu.visibleCenter.x.toFloat(), menu.visibleCenter.y.toFloat())
         InstrumentationRegistry.getInstrumentation().waitForIdleSync()
 
-        requireNotNull(device.wait(Until.findObject(By.desc("开启调试模式")), UI_TIMEOUT)) {
+        requireNotNull(device.wait(Until.findObject(By.text("开启 Debug")), UI_TIMEOUT)) {
             "Side1 未打开快捷面板"
         }
         assertNull(device.findObject(By.text("Flush")))

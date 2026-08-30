@@ -47,6 +47,7 @@ import java.io.File
 import java.security.MessageDigest
 import java.util.Collections
 import java.util.UUID
+
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
 import java.net.ServerSocket
@@ -67,7 +68,16 @@ import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.withTimeout
+
+private inline fun <T> runCatchingCancellable(block: () -> T): Result<T> = try {
+    Result.success(block())
+} catch (cancelled: CancellationException) {
+    throw cancelled
+} catch (error: Throwable) {
+    Result.failure(error)
+}
 
 class PhoneTransferClient(context: Context) : AutoCloseable, TransferObservable {
     private val appContext = context.applicationContext
@@ -93,7 +103,8 @@ class PhoneTransferClient(context: Context) : AutoCloseable, TransferObservable 
         val client: PairedDevice,
         val advertisedName: String,
         val imageCount: Int,
-        val textCount: Int
+        val textCount: Int,
+        val pdfCount: Int
     )
 
     data class PairingCandidate(
@@ -117,12 +128,15 @@ class PhoneTransferClient(context: Context) : AutoCloseable, TransferObservable 
     ): List<AvailableNoteLink> = withContext(Dispatchers.IO) {
         val clients = pairing.pairedClients
         if (clients.isEmpty()) return@withContext emptyList()
-        val senders = runCatching {
+        val senders = (try {
             newScanner().discover(timeoutMillis, onUpdate = { partial ->
                 onUpdate(matchAvailable(clients, partial, kind))
             })
-        }.getOrElse { return@withContext emptyList() }
-            .mapNotNull { resolveAdvertisementIdentity(it) }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Throwable) {
+            return@withContext emptyList()
+        }).mapNotNull { resolveAdvertisementIdentity(it) }
         matchAvailable(clients, senders, kind).also(onUpdate)
     }
 
@@ -136,6 +150,7 @@ class PhoneTransferClient(context: Context) : AutoCloseable, TransferObservable 
                 val hasContent = when (kind) {
                     ContentKind.IMAGE -> candidate.imageCount > 0
                     ContentKind.TEXT -> candidate.textCount > 0
+                    ContentKind.PDF -> candidate.pdfCount > 0
                     null -> true
                 }
                 hasContent && if (client.legacy) {
@@ -143,14 +158,14 @@ class PhoneTransferClient(context: Context) : AutoCloseable, TransferObservable 
                 } else candidate.identityHash.equals(client.identityHash, ignoreCase = true)
             } ?: return@mapNotNull null
             recentSenders[client.id] = RecentSender(sender, SystemClock.elapsedRealtime())
-            AvailableNoteLink(client, sender.name, sender.imageCount, sender.textCount)
+            AvailableNoteLink(client, sender.name, sender.imageCount, sender.textCount, sender.pdfCount)
         }.sortedByDescending { it.client.lastUsedAt }
 
     suspend fun discoverPairingCandidates(timeoutMillis: Long = 8_000L): List<PairingCandidate> =
         withContext(Dispatchers.IO) {
             val pairedIds = pairing.pairedClients.map(PairedDevice::id).toSet()
             newScanner().discover(timeoutMillis).mapNotNull { sender ->
-                runCatching {
+                try {
                     withBleSession(sender.bluetoothAddress) { session ->
                         val identity = session.readIdentity()
                         val hash = AndroidPairingController.identityHash(identity.deviceId)
@@ -159,7 +174,11 @@ class PhoneTransferClient(context: Context) : AutoCloseable, TransferObservable 
                         }
                         PairingCandidate(identity.deviceId, identity.deviceName, hash, sender.bluetoothAddress)
                     }
-                }.getOrNull()?.takeUnless { it.deviceId in pairedIds }
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (_: Throwable) {
+                    null
+                }?.takeUnless { it.deviceId in pairedIds }
             }.distinctBy(PairingCandidate::deviceId).sortedBy(PairingCandidate::name)
         }
 
@@ -181,6 +200,9 @@ class PhoneTransferClient(context: Context) : AutoCloseable, TransferObservable 
                     }
                 }
                 pairing.markLastUsed(paired.id)
+            } catch (cancelled: CancellationException) {
+                pairing.unpair(paired.id)
+                throw cancelled
             } catch (t: Throwable) {
                 pairing.unpair(paired.id)
                 throw IllegalStateException("配对握手失败：${t.message ?: t.javaClass.simpleName}", t)
@@ -255,6 +277,9 @@ class PhoneTransferClient(context: Context) : AutoCloseable, TransferObservable 
             val payload = when (kind) {
                 ContentKind.TEXT -> receiveText(activeSession, authenticatedId, offer)
                 ContentKind.IMAGE -> receiveImage(activeSession, offer, authenticatedId, negotiation, key)
+                ContentKind.PDF -> receiveImage(activeSession, offer, authenticatedId, negotiation, key).let {
+                    RemotePayload.Pdf(it.item, it.stagedFile)
+                }
             }
             Log.i(TAG, "${kind.name.lowercase()} payload ready after ${elapsed(startedAt)} ms")
             mutableState.value = TransferState.AwaitingPlacement(offer.id)
@@ -268,7 +293,7 @@ class PhoneTransferClient(context: Context) : AutoCloseable, TransferObservable 
         } catch (t: Throwable) {
             val failedSession = session
             leasedItemId?.let { itemId ->
-                if (failedSession != null) runCatching { exchange(failedSession, authenticatedId, BleCommand.Release(itemId)) }
+                if (failedSession != null) runCatchingCancellable { exchange(failedSession, authenticatedId, BleCommand.Release(itemId)) }
             }
             failedSession?.let(::closeBleSession)
             mutableState.value = TransferState.Error(t.message ?: "手机传输失败")
@@ -347,7 +372,7 @@ class PhoneTransferClient(context: Context) : AutoCloseable, TransferObservable 
                     complete(artifact.id)
                     mutableState.value = TransferState.Idle
                 } catch (t: Throwable) {
-                    runCatching { exchange(session, authenticatedId, BleCommand.PushCancel(artifact.id)) }
+                    runCatchingCancellable { exchange(session, authenticatedId, BleCommand.PushCancel(artifact.id)) }
                     throw t
                 }
             }
@@ -392,7 +417,7 @@ class PhoneTransferClient(context: Context) : AutoCloseable, TransferObservable 
         val canLan = negotiation.ssidMatch == SsidMatch.MATCH && lanEndpoint != null &&
             TransferModes.contains(local.modes, TransferMode.LAN) &&
             TransferModes.contains(negotiation.remote.modes, TransferMode.LAN)
-        val firstFailure = if (canLan) runCatching {
+        val firstFailure = if (canLan) runCatchingCancellable {
             receiveImageAttempt(session, pairedPhoneId, item, incoming, key, TransferMode.LAN, lanEndpoint)
         }.fold({ return@coroutineScope it }, { it }) else null
         val wifiEndpoint = negotiation.remote.wifiDirectEndpoint
@@ -478,7 +503,7 @@ class PhoneTransferClient(context: Context) : AutoCloseable, TransferObservable 
         val canLan = negotiation.ssidMatch == SsidMatch.MATCH && remoteLan != null &&
             TransferModes.contains(local.modes, TransferMode.LAN) &&
             TransferModes.contains(negotiation.remote.modes, TransferMode.LAN)
-        val firstFailure = if (canLan) runCatching {
+        val firstFailure = if (canLan) runCatchingCancellable {
             sendExportAttempt(session, clientId, artifact, pairingKey, TransferMode.LAN, remoteLan, progressCallback)
         }.exceptionOrNull() else null
         if (canLan && firstFailure == null) return
@@ -669,6 +694,7 @@ class PhoneTransferClient(context: Context) : AutoCloseable, TransferObservable 
         val contentMatches = when (kind) {
             ContentKind.IMAGE -> sender.imageCount > 0
             ContentKind.TEXT -> sender.textCount > 0
+            ContentKind.PDF -> sender.pdfCount > 0
             null -> true
         }
         return contentMatches && (paired.legacy || sender.identityHash.equals(paired.identityHash, ignoreCase = true))
@@ -676,7 +702,7 @@ class PhoneTransferClient(context: Context) : AutoCloseable, TransferObservable 
 
     private suspend fun resolveAdvertisementIdentity(sender: DiscoveredSender): DiscoveredSender? {
         if (sender.identityHash.isNotBlank()) return sender
-        return runCatching {
+        return runCatchingCancellable {
             withBleSession(sender.bluetoothAddress) { session ->
                 val identity = session.readIdentity()
                 DiscoveredSender(
@@ -684,7 +710,8 @@ class PhoneTransferClient(context: Context) : AutoCloseable, TransferObservable 
                     deviceId = AndroidPairingController.identityHash(identity.deviceId),
                     name = identity.deviceName,
                     imageCount = identity.imageCount,
-                    textCount = identity.textCount
+                    textCount = identity.textCount,
+                    pdfCount = identity.pdfCount
                 )
             }
         }.getOrNull()
@@ -717,7 +744,7 @@ class PhoneTransferClient(context: Context) : AutoCloseable, TransferObservable 
     suspend fun recoverAfterWake() = withContext(Dispatchers.IO) {
         val sessions = synchronized(activeBleSessions) { activeBleSessions.toList() }
         sessions.forEach(::closeBleSession)
-        runCatching { wifiDirect.disconnectJoinedGroup() }
+        runCatchingCancellable { wifiDirect.disconnectJoinedGroup() }
         inboundReplay = BleReplayCache()
         activeOperationJob?.cancel(); activeOperationJob = null
         activeListeningSocket?.close(); activeListeningSocket = null
@@ -728,7 +755,7 @@ class PhoneTransferClient(context: Context) : AutoCloseable, TransferObservable 
 
     private fun newScanner() = BleReceiverScanner(appContext)
 
-    private fun localWifiIpv4Address(): String? = runCatching {
+    private fun localWifiIpv4Address(): String? = runCatchingCancellable {
         java.net.NetworkInterface.getNetworkInterfaces().toList()
             .asSequence()
             .filter { it.isUp && !it.isLoopback }

@@ -18,6 +18,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
@@ -25,11 +26,11 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.Button
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.TextButton
@@ -46,6 +47,8 @@ import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Cancel
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.MoveToInbox
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -80,6 +83,7 @@ import androidx.compose.ui.unit.IntOffset
 import com.betterhv.note.doc.ImageObject
 import com.betterhv.note.doc.TextFontFamily
 import com.betterhv.note.doc.TextObject
+import com.betterhv.note.ink.Bounds
 import com.betterhv.note.storage.ImportedImage
 import com.betterhv.transfer.android.TransferPermissions
 import com.betterhv.transfer.core.ContentKind
@@ -91,6 +95,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import com.betterhv.note.storage.StartupBehavior
 import com.betterhv.note.export.ExportViewModel
+import com.betterhv.note.template.TemplateStore
+import com.betterhv.note.doc.PageKind
 import java.util.UUID
 
 class MainActivity : ComponentActivity() {
@@ -106,7 +112,11 @@ class MainActivity : ComponentActivity() {
             AppRoot(
                 onView = { penView = it },
                 onTransientInputGuardReleaseReady = { releaseTransientInputGuards = it },
-                onHardwareKeyHandlerReady = { hardwareKeyHandler = it }
+                onHardwareKeyHandlerReady = { hardwareKeyHandler = it },
+                skipTemplateDirectoryPrompt = intent.getBooleanExtra(
+                    EXTRA_SKIP_TEMPLATE_DIRECTORY_PROMPT,
+                    false
+                )
             )
         }
     }
@@ -135,6 +145,12 @@ class MainActivity : ComponentActivity() {
         return super.dispatchKeyEvent(event)
     }
 
+    companion object {
+        /** Test-only escape hatch so UI automation is not covered by the system folder picker. */
+        const val EXTRA_SKIP_TEMPLATE_DIRECTORY_PROMPT =
+            "com.betterhv.note.extra.SKIP_TEMPLATE_DIRECTORY_PROMPT"
+    }
+
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
         if (hasFocus) N10ProHardwareKeys.enterNoteKeyScene(this)
@@ -161,12 +177,64 @@ private sealed interface TextEditorRequest {
     data class Existing(val objectId: UUID, override val initialText: String) : TextEditorRequest
 }
 
+private data class PendingLinkedNoteRequest(
+    val selection: PdfRegionSelection
+)
+
+private fun contentKindLabel(kind: ContentKind): String = when (kind) {
+    ContentKind.IMAGE -> "图片"
+    ContentKind.TEXT -> "文字"
+    ContentKind.PDF -> "PDF"
+}
+
+@Composable
+private fun PdfRegionActionPopup(
+    selection: PdfRegionSelection,
+    onEdit: () -> Unit,
+    onMoveToInbox: () -> Unit
+) {
+    val density = LocalDensity.current
+    val configuration = LocalConfiguration.current
+    val popupWidth = with(density) { 104.dp.toPx() }
+    val popupHeight = with(density) { 52.dp.toPx() }
+    val margin = with(density) { 8.dp.toPx() }
+    val screenWidth = with(density) { configuration.screenWidthDp.dp.toPx() }
+    val screenHeight = with(density) { configuration.screenHeightDp.dp.toPx() }
+    val x = ((selection.screenBounds.left + selection.screenBounds.right - popupWidth) / 2f)
+        .coerceIn(margin, (screenWidth - popupWidth - margin).coerceAtLeast(margin))
+    val preferredTop = selection.screenBounds.top - popupHeight - margin
+    val y = (if (preferredTop >= margin) preferredTop else selection.screenBounds.bottom + margin)
+        .coerceIn(margin, (screenHeight - popupHeight - margin).coerceAtLeast(margin))
+    Surface(
+        modifier = Modifier.offset { IntOffset(x.toInt(), y.toInt()) }
+            .border(1.dp, Color.Black, RectangleShape),
+        shape = RectangleShape,
+        color = Color.White,
+        tonalElevation = 0.dp,
+        shadowElevation = 0.dp
+    ) {
+        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            IconButton(
+                onClick = onEdit,
+                enabled = selection.selectedObjectIds.isNotEmpty(),
+                modifier = Modifier.size(48.dp)
+            ) {
+                Icon(Icons.Filled.Edit, contentDescription = "编辑选区批注")
+            }
+            IconButton(onClick = onMoveToInbox, modifier = Modifier.size(48.dp)) {
+                Icon(Icons.Filled.MoveToInbox, contentDescription = "发送至夹纸")
+            }
+        }
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun AppRoot(
     onView: (PenDrawView) -> Unit,
     onTransientInputGuardReleaseReady: ((() -> Unit)?) -> Unit,
-    onHardwareKeyHandlerReady: (((HardwareKeyId) -> Unit)?) -> Unit
+    onHardwareKeyHandlerReady: (((HardwareKeyId) -> Unit)?) -> Unit,
+    skipTemplateDirectoryPrompt: Boolean
 ) {
     val context = LocalContext.current
     val exportViewModel: ExportViewModel = viewModel()
@@ -235,6 +303,8 @@ private fun AppRoot(
         var pageManagerOpen by rememberSaveable { mutableStateOf(false) }
         var penSettingsOpen by remember { mutableStateOf(false) }
         var settingsOpen by rememberSaveable { mutableStateOf(false) }
+        var documentSettingsOpen by rememberSaveable { mutableStateOf(false) }
+        var templateChooserOpen by rememberSaveable { mutableStateOf(false) }
         var notebookManagerOpen by rememberSaveable { mutableStateOf(false) }
         var exportPanelOpen by rememberSaveable { mutableStateOf(false) }
         var exportInitialNotebookId by remember { mutableStateOf<UUID?>(null) }
@@ -242,6 +312,9 @@ private fun AppRoot(
         var notebookBusy by remember { mutableStateOf(false) }
         var pendingNotebookCreation by remember { mutableStateOf<NotebookCreationRequest?>(null) }
         var textEditorRequest by remember { mutableStateOf<TextEditorRequest?>(null) }
+        var pendingPdfRegion by remember { mutableStateOf<PdfRegionSelection?>(null) }
+        var pendingLinkedNoteRequest by remember { mutableStateOf<PendingLinkedNoteRequest?>(null) }
+        var templateCatalog by remember { mutableStateOf(TemplateStore.get(context).snapshot()) }
         var toolbarInteractionBlocked by remember { mutableStateOf(false) }
         var pageControlInteractionBlocked by remember { mutableStateOf(false) }
         var snackbarInteractionBlocked by remember { mutableStateOf(false) }
@@ -292,10 +365,12 @@ private fun AppRoot(
                             snackbarScope.launch {
                                 phoneTransfer.recoverAfterWake()
                                 penView?.recoverAfterWake()
+                                templateCatalog = penView?.refreshTemplates() ?: templateCatalog
                                 transferStatusRevision++
                             }
                         } else {
                             penView?.recoverAfterWake()
+                            templateCatalog = penView?.refreshTemplates() ?: templateCatalog
                             transferStatusRevision++
                         }
                     }
@@ -369,6 +444,7 @@ private fun AppRoot(
                     onView(it)
                     it.setOnDocChanged { docVersion++ }
                     it.setOnNotice(showNotice)
+                    it.setOnPdfRegionSelected { bounds -> pendingPdfRegion = bounds }
                     startupBehavior = it.startupBehavior()
                     it.autoCreatePageOnNextAtEnd = autoCreatePageOnNextAtEnd
                     insertion.attach(it)
@@ -384,17 +460,9 @@ private fun AppRoot(
         // registered PenDrawView. It only acts on the eraser tool; pen events
         // fall through to PenDrawView. See EraserOverlayView.
         penView?.let { pv ->
+            val linkedNotePlacementOpen = docVersion.let { pv.hasPendingLinkedNotePlacement() }
             AndroidView(
                 factory = { ctx -> EraserOverlayView(ctx, pv) },
-                modifier = Modifier.fillMaxSize()
-            )
-            // hvNote uses its non-hvpen MemoMarkView for lasso gestures.  Keep
-            // the same separation here: disabling ROM ink for lasso also stops
-            // hvpen point callbacks, while this overlay still receives the full
-            // standard Android touch stream. It is above the eraser overlay but
-            // lets tail-eraser events fall through to it.
-            AndroidView(
-                factory = { ctx -> LassoOverlayView(ctx, pv) },
                 modifier = Modifier.fillMaxSize()
             )
             AndroidView(
@@ -405,7 +473,15 @@ private fun AppRoot(
                 factory = {
                     ObjectEditOverlayView(it, pv).also { overlay ->
                         overlay.onPlacementTap = { x, y ->
-                            when (val request = insertion.state.value) {
+                            if (pv.hasPendingLinkedNotePlacement()) {
+                                notebookBusy = true
+                                pv.placePendingLinkedNote(x, y) { result ->
+                                    notebookBusy = false
+                                    result.onSuccess {
+                                        showNotice("已建立双向链接：点击截图或 PDF 框角落的 Link 图标即可跳转；Side1 仍用于编辑图片")
+                                    }
+                                }
+                            } else when (val request = insertion.state.value) {
                                 is InsertionState.ImageReady -> insertion.placeImage(x, y)
                                     .onSuccess { showNotice("图片已插入；使用 Side1 点击可编辑") }
                                     .onFailure { showNotice("图片插入失败：${it.message}") }
@@ -418,9 +494,18 @@ private fun AppRoot(
                 },
                 update = { overlay ->
                     overlay.onPlacementTap = if (
-                        insertionState is InsertionState.ImageReady || insertionState is InsertionState.TextReady
+                        linkedNotePlacementOpen || insertionState is InsertionState.ImageReady ||
+                        insertionState is InsertionState.TextReady
                     ) { x, y ->
-                        when (val request = insertion.state.value) {
+                        if (pv.hasPendingLinkedNotePlacement()) {
+                            notebookBusy = true
+                            pv.placePendingLinkedNote(x, y) { result ->
+                                notebookBusy = false
+                                result.onSuccess {
+                                    showNotice("已建立双向链接：点击截图或 PDF 框角落的 Link 图标即可跳转；Side1 仍用于编辑图片")
+                                }
+                            }
+                        } else when (val request = insertion.state.value) {
                             is InsertionState.ImageReady -> insertion.placeImage(x, y)
                                 .onSuccess { showNotice("图片已插入；使用 Side1 点击可编辑") }
                                 .onFailure { showNotice("图片插入失败：${it.message}") }
@@ -432,15 +517,45 @@ private fun AppRoot(
                     pv.setOnTextEditRequested { text ->
                         textEditorRequest = TextEditorRequest.Existing(text.id, text.text)
                     }
+                    pv.setOnPdfRegionSelected { bounds -> pendingPdfRegion = bounds }
                 },
                 modifier = Modifier.fillMaxSize()
             )
+            // Navigation/lasso must be the topmost transparent input layer.
+            // Otherwise a modifier gesture can be captured by the page-turn or
+            // object-edit layer before this view sees its ACTION_DOWN.
+            AndroidView(
+                factory = { ctx -> LassoOverlayView(ctx, pv) },
+                modifier = Modifier.fillMaxSize()
+            )
+        }
+        val templateDirectoryPicker = rememberLauncherForActivityResult(
+            ActivityResultContracts.OpenDocumentTree()
+        ) { uri ->
+            if (uri == null) return@rememberLauncherForActivityResult
+            snackbarScope.launch {
+                runCatching {
+                    withContext(Dispatchers.IO) { TemplateStore.get(context).connect(uri) }
+                }.onSuccess {
+                    templateCatalog = penView?.refreshTemplates(force = true) ?: it
+                    exportViewModel.refresh()
+                    showNotice("模板目录已连接")
+                }.onFailure { showNotice("模板目录连接失败：${it.message}") }
+            }
+        }
+        LaunchedEffect(Unit) {
+            val store = TemplateStore.get(context)
+            if (!skipTemplateDirectoryPrompt && !store.hasUsableDirectoryPermission()) {
+                val previous = appSettingsStore.templateDirectoryUri
+                    ?.let { runCatching { android.net.Uri.parse(it) }.getOrNull() }
+                templateDirectoryPicker.launch(previous)
+            }
         }
 
         val uiInputBlockState = UiInputBlockState(
             pageManagerOpen = pageManagerOpen,
             toolbarPopupOpen = penSettingsOpen,
-            settingsOpen = settingsOpen,
+            settingsOpen = settingsOpen || documentSettingsOpen || templateChooserOpen,
             notebookManagerOpen = notebookManagerOpen,
             notebookNameOpen = pendingNotebookCreation != null,
             insertionOpen = insertionState !is InsertionState.Idle,
@@ -451,7 +566,9 @@ private fun AppRoot(
             toolbarInteraction = toolbarInteractionBlocked,
             pageControlInteraction = pageControlInteractionBlocked,
             snackbarInteraction = snackbarInteractionBlocked,
-            debugInteraction = debugInteractionBlocked
+            debugInteraction = debugInteractionBlocked,
+            pdfRegionDialogOpen = pendingPdfRegion != null || pendingLinkedNoteRequest != null,
+            linkedNotePlacementOpen = penView?.hasPendingLinkedNotePlacement() == true
         )
         LaunchedEffect(penView, uiInputBlockState, docVersion) {
             penView?.setUiInputBlocked(uiInputBlockState.blocked)
@@ -460,10 +577,21 @@ private fun AppRoot(
         BackHandler(
             enabled = !notebookBusy && (
                 textEditorRequest != null || insertionState !is InsertionState.Idle || pendingNotebookCreation != null ||
-                    settingsOpen || notebookManagerOpen || pageManagerOpen || exportPanelOpen
+                    pendingPdfRegion != null || pendingLinkedNoteRequest != null ||
+                    penView?.hasPendingLinkedNotePlacement() == true || settingsOpen || documentSettingsOpen ||
+                    templateChooserOpen || notebookManagerOpen || pageManagerOpen || exportPanelOpen ||
+                    penView?.canNavigateDocumentBack() == true
                 )
         ) {
             when {
+                templateChooserOpen -> templateChooserOpen = false
+                documentSettingsOpen -> documentSettingsOpen = false
+                penView?.hasPendingLinkedNotePlacement() == true -> {
+                    penView?.cancelPendingLinkedNotePlacement()
+                    showNotice("已取消夹纸内容放置")
+                }
+                pendingLinkedNoteRequest != null -> pendingLinkedNoteRequest = null
+                pendingPdfRegion != null -> pendingPdfRegion = null
                 textEditorRequest != null -> {
                     if (textEditorRequest is TextEditorRequest.New) insertion.cancel()
                     textEditorRequest = null
@@ -474,6 +602,7 @@ private fun AppRoot(
                 notebookManagerOpen -> notebookManagerOpen = false
                 pageManagerOpen -> pageManagerOpen = false
                 exportPanelOpen -> exportPanelOpen = false
+                penView?.canNavigateDocumentBack() == true -> penView?.navigateDocumentBack()
             }
         }
 
@@ -529,6 +658,10 @@ private fun AppRoot(
                     toolKind = ToolKind.LASSO
                     penView?.setTool(ToolKind.LASSO)
                 }
+                ToolbarItem.NAVIGATION -> {
+                    toolKind = ToolKind.NAVIGATION
+                    penView?.setTool(ToolKind.NAVIGATION)
+                }
                 ToolbarItem.INSERT, ToolbarItem.MENU -> {
                     toolbarHidden = false
                     appSettingsStore.toolbarHidden = false
@@ -569,7 +702,8 @@ private fun AppRoot(
                 return@LaunchedEffect
             }
             if (penView?.isInputGestureActive() == true) return@LaunchedEffect
-            val modalWithoutShortcuts = penSettingsOpen || settingsOpen || notebookManagerOpen || exportPanelOpen ||
+            val modalWithoutShortcuts = penSettingsOpen || settingsOpen || documentSettingsOpen ||
+                templateChooserOpen || notebookManagerOpen || exportPanelOpen ||
                 textEditorRequest != null || pendingNotebookCreation != null || notebookBusy
             val scene = when {
                 pageManagerOpen -> ShortcutScene.PAGE_MANAGER
@@ -674,44 +808,62 @@ private fun AppRoot(
         }
         EditorToolbar(
             modifier = Modifier.fillMaxSize(),
-            dockEdge = dockEdge,
+            state = EditorToolbarState(
+                dockEdge = dockEdge,
+                dockFraction = dockFraction,
+                toolbarHidden = toolbarHidden,
+                visibleItems = visibleToolbarItems,
+                requestedItem = requestedToolbarItem,
+                hardwareShortcutAction = pendingFlyoutShortcutAction,
+                toolKind = toolKind,
+                pdfStudyMode = gen.let { penView?.isStudyNavigation() ?: true },
+                eraserMode = eraserMode,
+                canUndo = canUndo,
+                canRedo = canRedo,
+                hasSelection = hasSelection,
+                insertionActive = insertionState !is InsertionState.Idle,
+                pageManagerOpen = pageManagerOpen,
+                notebookManagerOpen = notebookManagerOpen,
+                exportPanelOpen = exportPanelOpen,
+                settingsOpen = settingsOpen,
+                documentSettingsOpen = documentSettingsOpen,
+                debugMode = debugMode,
+                penToolbarSettings = penToolbarSettings,
+            ),
+            actions = EditorToolbarActions(
             onDockEdgeChange = {
                 dockEdge = it
                 appSettingsStore.toolbarDockEdge = it
             },
-            dockFraction = dockFraction,
             onDockFractionChange = {
                 dockFraction = it
                 appSettingsStore.toolbarDockFraction = it
             },
-            toolbarHidden = toolbarHidden,
             onToolbarHiddenChange = {
                 toolbarHidden = it
                 appSettingsStore.toolbarHidden = it
             },
-            visibleItems = visibleToolbarItems,
-            requestedItem = requestedToolbarItem,
             onRequestedItemConsumed = { requestedToolbarItem = null },
-            hardwareShortcutAction = pendingFlyoutShortcutAction,
             onHardwareShortcutConsumed = { pendingFlyoutShortcutAction = null },
             onShortcutSceneChange = { toolbarShortcutScene = it },
-            toolKind = toolKind,
             onToolSelected = { kind ->
                 toolKind = kind
                 penView?.setTool(kind)
             },
-            eraserMode = eraserMode,
+            onPdfFit = {
+                if (penView?.fitPdf() != true) showNotice("当前页不是 PDF 源页")
+            },
+            onPdfNavigationModeToggle = {
+                val study = penView?.toggleStudyNavigation() ?: true
+                showNotice(if (study) "学习模式：翻页包含夹纸" else "阅读模式：翻页跳过夹纸")
+            },
             onEraserModeToggle = {
                 eraserMode = if (eraserMode == EraserMode.WHOLE_STROKE) EraserMode.POINT else EraserMode.WHOLE_STROKE
                 penView?.setEraserMode(eraserMode)
             },
-            canUndo = canUndo,
             onUndo = { penView?.undo() },
-            canRedo = canRedo,
             onRedo = { penView?.redo() },
-            hasSelection = hasSelection,
             onDelete = { penView?.deleteSelection() },
-            insertionActive = insertionState !is InsertionState.Idle,
             onInsertImage = {
                 beginInsertion(ContentKind.IMAGE)
             },
@@ -737,7 +889,6 @@ private fun AppRoot(
                     transferPermissionLauncher.launch(missing)
                 }
             },
-            pageManagerOpen = pageManagerOpen,
             onPageManagerToggle = {
                 pageManagerOpen = !pageManagerOpen
                 notebookManagerOpen = false
@@ -755,7 +906,6 @@ private fun AppRoot(
             onNextPage = {
                 if (penView?.navigatePage(1) != true) showNotice("已经是最后一页")
             },
-            notebookManagerOpen = notebookManagerOpen,
             onNotebookManagerToggle = {
                 notebookManagerOpen = !notebookManagerOpen
                 settingsOpen = false
@@ -777,7 +927,6 @@ private fun AppRoot(
                     pageManagerOpen = false
                 }
             },
-            exportPanelOpen = exportPanelOpen,
             onExportPanelToggle = {
                 exportPanelOpen = !exportPanelOpen
                 if (exportPanelOpen) {
@@ -788,8 +937,13 @@ private fun AppRoot(
                 settingsOpen = false
                 pageManagerOpen = false
             },
-            settingsOpen = settingsOpen,
-            debugMode = debugMode,
+            onDocumentSettingsOpen = {
+                templateCatalog = penView?.refreshTemplates() ?: templateCatalog
+                documentSettingsOpen = true
+                settingsOpen = false
+                notebookManagerOpen = false
+                pageManagerOpen = false
+            },
             onSettingsOpen = {
                 settingsOpen = true
                 notebookManagerOpen = false
@@ -799,7 +953,6 @@ private fun AppRoot(
                 debugMode = !debugMode
                 showNotice(if (debugMode) "调试模式已开启" else "调试模式已关闭")
             },
-            penToolbarSettings = penToolbarSettings,
             onPenSlotSelected = { slot ->
                 penToolbarSettings = penToolbarSettings.selectSlot(slot)
                 penSettingsStore.save(penToolbarSettings)
@@ -814,7 +967,8 @@ private fun AppRoot(
             onToolbarDragStateChange = { active ->
                 penView?.setToolbarDragActive(active)
             },
-            onInteractionBlockChange = { toolbarInteractionBlocked = it }
+            onInteractionBlockChange = { toolbarInteractionBlocked = it },
+            )
         )
 
         (insertionState as? InsertionState.ChoosingSource)?.let { choosing ->
@@ -826,7 +980,7 @@ private fun AppRoot(
                     Modifier.fillMaxWidth().padding(20.dp)
                 ) {
                     Text(
-                        if (choosing.kind == ContentKind.IMAGE) "插入图片" else "插入文字",
+                        "插入${contentKindLabel(choosing.kind)}",
                         fontSize = 24.sp
                     )
                     Button(
@@ -843,7 +997,7 @@ private fun AppRoot(
                         },
                         modifier = Modifier.fillMaxWidth().padding(top = 16.dp),
                         shape = RectangleShape
-                    ) { Text(if (choosing.kind == ContentKind.IMAGE) "从手机取下一张" else "从手机取下一段") }
+                    ) { Text("从手机取下一项${contentKindLabel(choosing.kind)}") }
                     Button(
                         onClick = {
                             if (choosing.kind == ContentKind.IMAGE) {
@@ -854,7 +1008,9 @@ private fun AppRoot(
                         },
                         modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
                         shape = RectangleShape
-                    ) { Text(if (choosing.kind == ContentKind.IMAGE) "从系统文件选择" else "手动输入") }
+                    ) {
+                        Text(if (choosing.kind == ContentKind.TEXT) "手动输入" else "从系统文件选择")
+                    }
                 }
             }
         }
@@ -867,9 +1023,11 @@ private fun AppRoot(
                 ) {
                     Text("选择 NoteLink", fontSize = 24.sp)
                     choosing.clients.forEach { available ->
-                        val count = if (choosing.kind == ContentKind.IMAGE) {
-                            available.imageCount
-                        } else available.textCount
+                        val count = when (choosing.kind) {
+                            ContentKind.IMAGE -> available.imageCount
+                            ContentKind.TEXT -> available.textCount
+                            ContentKind.PDF -> available.pdfCount
+                        }
                         Button(
                             onClick = {
                                 snackbarScope.launch {
@@ -891,13 +1049,7 @@ private fun AppRoot(
             EinkModalOverlay(onDismissRequest = insertion::cancel) {
                 Column(Modifier.padding(20.dp), verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(16.dp)) {
                     Text("正在查找 NoteLink", fontSize = 20.sp)
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        CircularProgressIndicator()
-                        Text(
-                            "等待 NoteLink 发送${if (waiting.kind == ContentKind.IMAGE) "图片" else "文字"}",
-                            modifier = Modifier.padding(start = 16.dp)
-                        )
-                    }
+                    Text("等待 NoteLink 发送${contentKindLabel(waiting.kind)}…")
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = androidx.compose.foundation.layout.Arrangement.End) {
                         EinkDialogAction("取消", onClick = insertion::cancel)
                     }
@@ -972,6 +1124,60 @@ private fun AppRoot(
                     textEditorRequest = null
                 }
             )
+        }
+
+        pendingPdfRegion?.let { selection ->
+            PdfRegionActionPopup(
+                selection = selection,
+                onEdit = {
+                    penView?.activatePdfRegionEdit(selection)
+                    pendingPdfRegion = null
+                },
+                onMoveToInbox = {
+                    pendingPdfRegion = null
+                    pendingLinkedNoteRequest = PendingLinkedNoteRequest(selection)
+                }
+            )
+        }
+
+        pendingLinkedNoteRequest?.let { request ->
+            val targets = penView?.linkedNoteTargetsForCurrentPdfSource().orEmpty()
+            val prepare: (UUID?) -> Unit = { targetPageId ->
+                pendingLinkedNoteRequest = null
+                notebookBusy = true
+                penView?.prepareLinkedNoteFromRegion(
+                    request.selection.normalizedBounds, LinkedNoteContent.REGION_IMAGE, targetPageId
+                ) { result ->
+                    notebookBusy = false
+                    result.onSuccess {
+                        toolKind = ToolKind.PEN
+                        penView?.setTool(ToolKind.PEN)
+                        showNotice("请在夹纸上点击放置位置")
+                    }
+                }
+            }
+            EinkChoiceOverlay(
+                onDismissRequest = { pendingLinkedNoteRequest = null },
+                title = "选择夹纸",
+                description = "新建一张夹纸，或放入当前 PDF 页已有夹纸。",
+                choices = buildList {
+                    add("新建夹纸" to { prepare(null) })
+                    targets.forEach { target -> add("夹纸 ${target.ordinal}" to { prepare(target.pageId) }) }
+                }
+            )
+        }
+
+        if (penView?.hasPendingLinkedNotePlacement() == true) {
+            Surface(
+                modifier = Modifier.align(Alignment.TopCenter).padding(top = 20.dp)
+                    .border(1.dp, Color.Black, RectangleShape),
+                shape = RectangleShape,
+                color = Color.White,
+                tonalElevation = 0.dp,
+                shadowElevation = 0.dp
+            ) {
+                Text("点击夹纸确定放置位置 · 返回键取消", Modifier.padding(horizontal = 18.dp, vertical = 10.dp))
+            }
         }
 
         val pages = gen.let { penView?.pageUiItems().orEmpty() }
@@ -1065,16 +1271,19 @@ private fun AppRoot(
         }
         if (notebookManagerOpen && penView != null) {
             NotebookManagerScreen(
-                summaries = notebookSummaries,
-                pages = pages,
-                currentToEndIds = penView!!.currentPageToEndIds(),
-                busy = notebookBusy,
-                notebookThumbnailSize = notebookThumbnailSize,
-                coverBitmap = { summary -> penView!!.notebookCoverThumbnail(summary) },
-                pageBitmap = { id -> penView!!.pageThumbnail(id) },
-                requestCovers = { summaries -> penView!!.requestNotebookCovers(summaries) },
-                requestPages = { ids -> penView!!.requestThumbnails(ids) },
-                onSwitchNotebook = { id ->
+                state = NotebookManagerState(
+                    summaries = notebookSummaries,
+                    pages = pages,
+                    currentToEndIds = penView!!.currentPageToEndIds(),
+                    busy = notebookBusy,
+                    thumbnailSize = notebookThumbnailSize,
+                ),
+                actions = NotebookManagerActions(
+                    coverBitmap = { summary -> penView!!.notebookCoverThumbnail(summary) },
+                    pageBitmap = { id -> penView!!.pageThumbnail(id) },
+                    requestCovers = { summaries -> penView!!.requestNotebookCovers(summaries) },
+                    requestPages = { ids -> penView!!.requestThumbnails(ids) },
+                    onSwitchNotebook = { id ->
                     if (id == penView!!.currentNotebookId()) {
                         notebookManagerOpen = false
                     } else {
@@ -1087,57 +1296,82 @@ private fun AppRoot(
                             }
                         }
                     }
-                },
-                onCreateFromCurrentToEnd = { ids ->
+                    },
+                    onCreateFromCurrentToEnd = { ids ->
                     pendingNotebookCreation = NotebookCreationRequest.Transfer(ids)
-                },
-                onCreateFromSelection = { ids ->
+                    },
+                    onCreateFromSelection = { ids ->
                     pendingNotebookCreation = NotebookCreationRequest.Transfer(ids)
-                },
-                onCreateBlank = {
+                    },
+                    onCreateBlank = {
                     pendingNotebookCreation = NotebookCreationRequest.Blank
-                },
-                onDeleteNotebook = { id ->
+                    },
+                    onImportLocalPdf = { uri ->
+                    notebookBusy = true
+                    penView!!.importPdf(uri) { result ->
+                        notebookBusy = false
+                        result.onSuccess {
+                            notebookManagerOpen = false
+                            showNotice("PDF 已导入")
+                        }
+                    }
+                    },
+                    onImportNoteLinkPdf = {
+                    notebookManagerOpen = false
+                    val missing = TransferPermissions.missingNotePermissions(context)
+                    if (missing.isEmpty()) {
+                        snackbarScope.launch { insertion.remote(ContentKind.PDF) }
+                    } else {
+                        permissionRemoteKind = ContentKind.PDF
+                        permissionRemoteAuto = false
+                        transferPermissionLauncher.launch(missing)
+                    }
+                    },
+                    onDeleteNotebook = { id ->
                     notebookBusy = true
                     penView!!.deleteNotebook(id) { result ->
                         notebookBusy = false
                         if (result.isSuccess) showNotice("已删除笔记本")
                     }
-                },
-                onExportNotebook = { id ->
+                    },
+                    onExportNotebook = { id ->
                     exportInitialNotebookId = id
                     exportCreationRequest++
                     notebookManagerOpen = false
                     exportPanelOpen = true
                     exportViewModel.refresh()
-                },
-                onNotice = showNotice,
-                onClose = { if (!notebookBusy) notebookManagerOpen = false }
+                    },
+                    onNotice = showNotice,
+                    onClose = { if (!notebookBusy) notebookManagerOpen = false },
+                )
             )
         }
 
         if (settingsOpen) {
             SettingsScreen(
-                debugMode = debugMode,
-                startupBehavior = startupBehavior,
-                pairedClients = pairedClients,
-                onlineClients = onlineNoteLinks,
-                pairingCandidates = pairingCandidates,
-                pairingScanActive = pairingScanActive,
-                pairingInProgress = pairingInProgress,
-                transferStatus = transferStatus,
-                transferSnapshot = transferSnapshot,
-                transferEvents = transferEvents,
-                transferEndpointName = pairedClients.firstOrNull { it.id == transferSnapshot.deviceId }?.name,
-                transferPermissionsGranted = missingTransferPermissions.isEmpty(),
-                skipSourceSelectionWhenQueueAvailable = skipSourceSelectionWhenQueueAvailable,
-                autoCreatePageOnNextAtEnd = autoCreatePageOnNextAtEnd,
-                showRecentTransferEvents = showRecentTransferEvents,
-                visibleToolbarItems = visibleToolbarItems,
-                shortcutBindings = shortcutBindings,
-                shortcutBindingRequest = shortcutBindingRequest,
-                onDebugModeChange = { debugMode = it },
-                onStartupBehaviorChange = { behavior ->
+                state = SettingsState(
+                    debugMode = debugMode,
+                    startupBehavior = startupBehavior,
+                    pairedClients = pairedClients,
+                    onlineClients = onlineNoteLinks,
+                    pairingCandidates = pairingCandidates,
+                    pairingScanActive = pairingScanActive,
+                    pairingInProgress = pairingInProgress,
+                    transferStatus = transferStatus,
+                    transferSnapshot = transferSnapshot,
+                    transferEvents = transferEvents,
+                    transferEndpointName = pairedClients.firstOrNull { it.id == transferSnapshot.deviceId }?.name,
+                    transferPermissionsGranted = missingTransferPermissions.isEmpty(),
+                    skipSourceSelectionWhenQueueAvailable = skipSourceSelectionWhenQueueAvailable,
+                    autoCreatePageOnNextAtEnd = autoCreatePageOnNextAtEnd,
+                    showRecentTransferEvents = showRecentTransferEvents,
+                    visibleToolbarItems = visibleToolbarItems,
+                    shortcutBindings = shortcutBindings,
+                    shortcutBindingRequest = shortcutBindingRequest,
+                ),
+                actions = SettingsActions(
+                    onDebugModeChange = { debugMode = it },
+                    onStartupBehaviorChange = { behavior ->
                     runCatching { penView?.setStartupBehavior(behavior) }
                         .onSuccess {
                             startupBehavior = behavior
@@ -1237,7 +1471,8 @@ private fun AppRoot(
                     showNotice("连接状态已刷新")
                 },
                 onCancelTransfer = phoneTransfer::cancel,
-                onClose = { settingsOpen = false }
+                    onClose = { settingsOpen = false },
+                )
             )
         }
 
@@ -1268,9 +1503,58 @@ private fun AppRoot(
             )
         }
 
+        if (documentSettingsOpen && penView != null) {
+            val pv = penView!!
+            DocumentSettingsOverlay(
+                template = templateCatalog.find(pv.currentPageTemplateId()),
+                templateEnabled = pv.currentPageKind() != PageKind.PDF_SOURCE,
+                preview = pv::templatePreview,
+                onTemplate = {
+                    templateCatalog = pv.refreshTemplates()
+                    templateChooserOpen = true
+                },
+                onDismiss = { documentSettingsOpen = false }
+            )
+        }
+
+        if (templateChooserOpen && penView != null) {
+            val pv = penView!!
+            val pageSize = pv.currentPageSize()
+            TemplateChooserOverlay(
+                catalog = templateCatalog,
+                selectedId = pv.currentPageTemplateId(),
+                pageWidth = pageSize.first,
+                pageHeight = pageSize.second,
+                preview = pv::templatePreview,
+                onSelect = { id ->
+                    if (pv.setCurrentPageTemplate(id)) {
+                        templateChooserOpen = false
+                        showNotice("Template 已更换为 ${templateCatalog.find(id)?.name ?: id}")
+                        exportViewModel.refresh()
+                    } else showNotice("该 Template 与当前页面不兼容")
+                },
+                onConnectDirectory = { templateDirectoryPicker.launch(null) },
+                onRefresh = { templateCatalog = pv.refreshTemplates(force = true) },
+                onDismiss = { templateChooserOpen = false }
+            )
+        }
+
         pendingNotebookCreation?.let { request ->
+            val pvForDialog = penView
+            val pageSize = pvForDialog?.currentPageSize() ?: (1860f to 2414f)
             NotebookNameDialog(
-                onConfirm = { title ->
+                catalog = templateCatalog,
+                pageWidth = pageSize.first,
+                pageHeight = pageSize.second,
+                preview = { id, previewWidth, previewHeight ->
+                    pvForDialog?.templatePreview(id, previewWidth, previewHeight)
+                },
+                onConnectDirectory = { templateDirectoryPicker.launch(null) },
+                onRefresh = {
+                    templateCatalog = pvForDialog?.refreshTemplates(force = true) ?: templateCatalog
+                },
+                templateEnabled = request == NotebookCreationRequest.Blank,
+                onConfirm = { title, templateId ->
                     pendingNotebookCreation = null
                     val pv = penView ?: return@NotebookNameDialog
                     notebookBusy = true
@@ -1282,7 +1566,7 @@ private fun AppRoot(
                         }
                     }
                     when (request) {
-                        NotebookCreationRequest.Blank -> pv.createBlankNotebook(title, complete)
+                        NotebookCreationRequest.Blank -> pv.createBlankNotebook(title, templateId, complete)
                         is NotebookCreationRequest.Transfer ->
                             pv.transferPagesToNewNotebook(request.pageIds, title, complete)
                     }

@@ -14,11 +14,13 @@ internal data class UiInputBlockState(
     val toolbarInteraction: Boolean = false,
     val pageControlInteraction: Boolean = false,
     val snackbarInteraction: Boolean = false,
-    val debugInteraction: Boolean = false
+    val debugInteraction: Boolean = false,
+    val pdfRegionDialogOpen: Boolean = false,
+    val linkedNotePlacementOpen: Boolean = false
 ) {
     val blocked: Boolean
         get() = pageManagerOpen || toolbarPopupOpen || settingsOpen || notebookManagerOpen ||
             notebookNameOpen || insertionOpen || textEditorOpen || notebookBusy || exportPanelOpen ||
             richObjectSelected || toolbarInteraction || pageControlInteraction || snackbarInteraction ||
-            debugInteraction
+            debugInteraction || pdfRegionDialogOpen || linkedNotePlacementOpen
 }
