@@ -1,6 +1,5 @@
 package com.betterhv.transfer.windows
 
-import com.sun.jna.Pointer
 import com.betterhv.transfer.core.BleCommand
 import com.betterhv.transfer.core.BleQueueProtocol
 import com.betterhv.transfer.core.BleResponse
@@ -8,6 +7,7 @@ import com.betterhv.transfer.core.BleTransportFrameCodec
 import com.betterhv.transfer.core.BleTransportReassembler
 import com.betterhv.transfer.core.NoteLinkAdvertisementCodec
 import com.betterhv.transfer.core.NoteLinkIdentityCodec
+import com.sun.jna.Pointer
 import java.util.ArrayDeque
 import kotlin.test.Test
 import kotlin.test.assertContentEquals
@@ -147,7 +147,12 @@ private class FakeLibrary : NoteLinkNativeLibrary {
 
     override fun nl_initialize() = 0.also { initializeCalls++ }
     override fun nl_capabilities() = 7
-    override fun nl_ble_start(identity: Pointer?, identityLength: Int, advertisement: Pointer?, advertisementLength: Int) =
+    override fun nl_ble_start(
+        identity: Pointer?,
+        identityLength: Int,
+        advertisement: Pointer?,
+        advertisementLength: Int
+    ) =
         0.also {
             bleStarts++
             lastIdentity = identity?.getByteArray(0, identityLength) ?: ByteArray(0)
@@ -180,8 +185,18 @@ private class FakeLibrary : NoteLinkNativeLibrary {
         ssid?.write(0, network, 0, network.size)
         return network.size
     }
-    override fun nl_protect(input: Pointer?, inputLength: Int, output: Pointer?, outputCapacity: Int) = transform(input, inputLength, output, outputCapacity)
-    override fun nl_unprotect(input: Pointer?, inputLength: Int, output: Pointer?, outputCapacity: Int) = transform(input, inputLength, output, outputCapacity)
+    override fun nl_protect(
+        input: Pointer?,
+        inputLength: Int,
+        output: Pointer?,
+        outputCapacity: Int
+    ) = transform(input, inputLength, output, outputCapacity)
+    override fun nl_unprotect(
+        input: Pointer?,
+        inputLength: Int,
+        output: Pointer?,
+        outputCapacity: Int
+    ) = transform(input, inputLength, output, outputCapacity)
     private fun transform(input: Pointer?, length: Int, output: Pointer?, capacity: Int): Int {
         if (output == null || capacity < length) return if (length == 0) 0 else -length
         val value = input?.getByteArray(0, length) ?: ByteArray(0)

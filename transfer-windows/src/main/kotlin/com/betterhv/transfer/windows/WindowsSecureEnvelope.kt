@@ -8,6 +8,7 @@ class WindowsReplayCache(private val capacity: Int = 256) {
     private val values = object : LinkedHashMap<String, Unit>(capacity, 0.75f, true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Unit>?) = size > capacity
     }
+
     @Synchronized fun accept(nonce: ByteArray) {
         val key = nonce.joinToString("") { "%02x".format(it) }
         require(values.put(key, Unit) == null) { "Replayed BLE control envelope" }

@@ -31,6 +31,11 @@ object WindowsFileTransfer {
         progress: (Long, Long) -> Unit = { _, _ -> },
         onListening: (ServerSocket) -> Unit = {}
     ): WindowsReceivedFile = SharedFileTransfer.receive(
-        destination, expectedItemId, key, probeKey, progress, onListening
+        destination,
+        expectedItemId,
+        key,
+        probeKey,
+        progress,
+        onListening
     ).let { WindowsReceivedFile(it.file, it.byteLength, it.sha256) }
 }

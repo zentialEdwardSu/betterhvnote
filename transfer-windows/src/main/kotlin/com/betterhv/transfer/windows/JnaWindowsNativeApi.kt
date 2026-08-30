@@ -1,15 +1,15 @@
 package com.betterhv.transfer.windows
 
+import com.betterhv.transfer.core.BleTransportFrameCodec
+import com.betterhv.transfer.core.BleTransportReassembler
+import com.betterhv.transfer.core.DeviceId
+import com.betterhv.transfer.core.NoteLinkAdvertisementCodec
+import com.betterhv.transfer.core.NoteLinkIdentityCodec
+import com.betterhv.transfer.core.TransferCrypto
 import com.sun.jna.Library
 import com.sun.jna.Memory
 import com.sun.jna.Native
 import com.sun.jna.Pointer
-import com.betterhv.transfer.core.DeviceId
-import com.betterhv.transfer.core.BleTransportFrameCodec
-import com.betterhv.transfer.core.BleTransportReassembler
-import com.betterhv.transfer.core.NoteLinkAdvertisementCodec
-import com.betterhv.transfer.core.NoteLinkIdentityCodec
-import com.betterhv.transfer.core.TransferCrypto
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption
 import java.util.concurrent.atomic.AtomicBoolean
@@ -66,7 +66,11 @@ class JnaWindowsNativeApi private constructor(
 
     @Synchronized
     override fun startBle(
-        deviceId: String, deviceName: String, imageCount: Int, textCount: Int, pdfCount: Int
+        deviceId: String,
+        deviceName: String,
+        imageCount: Int,
+        textCount: Int,
+        pdfCount: Int
     ) {
         require(deviceId.isNotBlank())
         initialize()
@@ -75,20 +79,29 @@ class JnaWindowsNativeApi private constructor(
         bleDeviceName = deviceName
         val identity = NoteLinkIdentityCodec.encode(DeviceId(deviceId), deviceName, imageCount, textCount, pdfCount)
         val advertisement = advertisement(imageCount, textCount, pdfCount)
-        checkCall(library.nl_ble_start(identity.memory(), identity.size, advertisement.memory(), advertisement.size), "Unable to start BLE")
+        checkCall(
+            library.nl_ble_start(identity.memory(), identity.size, advertisement.memory(), advertisement.size),
+            "Unable to start BLE"
+        )
         bleRunning.set(true)
     }
 
     override fun updateBleCounts(imageCount: Int, textCount: Int, pdfCount: Int) {
         check(bleRunning.get()) { "BLE is not running" }
         val identity = NoteLinkIdentityCodec.encode(
-            DeviceId(bleDeviceId), bleDeviceName, imageCount, textCount, pdfCount
+            DeviceId(bleDeviceId),
+            bleDeviceName,
+            imageCount,
+            textCount,
+            pdfCount
         )
         val advertisement = advertisement(imageCount, textCount, pdfCount)
         checkCall(
             library.nl_ble_update(
-                identity.memory(), identity.size,
-                advertisement.memory(), advertisement.size
+                identity.memory(),
+                identity.size,
+                advertisement.memory(),
+                advertisement.size
             ),
             "Unable to update BLE queue counts"
         )
@@ -99,8 +112,13 @@ class JnaWindowsNativeApi private constructor(
         require(timeoutMillis >= 0)
         val deadlineNanos = System.nanoTime() + timeoutMillis.toLong() * 1_000_000L
         while (true) {
-            val remainingMillis = if (timeoutMillis == 0) 0 else
-                ((deadlineNanos - System.nanoTime()).coerceAtLeast(0L) / 1_000_000L).coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
+            val remainingMillis = if (timeoutMillis == 0) {
+                0
+            } else {
+                ((deadlineNanos - System.nanoTime()).coerceAtLeast(0L) / 1_000_000L).coerceAtMost(
+                    Int.MAX_VALUE.toLong()
+                ).toInt()
+            }
             val packet = pollNativePacket(remainingMillis) ?: return null
             if (!BleTransportFrameCodec.isFrame(packet)) {
                 commandReassembler.reset()
@@ -181,12 +199,18 @@ class JnaWindowsNativeApi private constructor(
     }
 
     private fun advertisement(
-        imageCount: Int, textCount: Int, pdfCount: Int
+        imageCount: Int,
+        textCount: Int,
+        pdfCount: Int
     ): ByteArray = NoteLinkAdvertisementCodec.encode(
         // A 128-bit service UUID plus this eight-byte payload fits in one
         // legacy connectable advertisement. The full name remains available
         // from the GATT identity characteristic after connection.
-        TransferCrypto.sha256(bleDeviceId.encodeToByteArray()), "", imageCount, textCount, pdfCount
+        TransferCrypto.sha256(bleDeviceId.encodeToByteArray()),
+        "",
+        imageCount,
+        textCount,
+        pdfCount
     )
 
     private fun checkCall(result: Int, operation: String) {
