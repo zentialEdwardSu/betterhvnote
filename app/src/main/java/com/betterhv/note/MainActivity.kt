@@ -84,7 +84,6 @@ import com.betterhv.note.doc.ImageObject
 import com.betterhv.note.doc.TextFontFamily
 import com.betterhv.note.doc.TextObject
 import com.betterhv.note.ink.Bounds
-import com.betterhv.note.storage.ImportedImage
 import com.betterhv.transfer.android.TransferPermissions
 import com.betterhv.transfer.core.ContentKind
 import com.betterhv.transfer.core.TransferPhase
@@ -1480,26 +1479,30 @@ private fun AppRoot(
             val pv = penView!!
             val currentNotebookId = pv.currentNotebookId()
             ExportManagerScreen(
-                viewModel = exportViewModel,
-                initialNotebookId = exportInitialNotebookId ?: currentNotebookId,
-                creationRequest = exportCreationRequest,
-                currentNotebookId = currentNotebookId,
-                pairedClients = if (missingTransferPermissions.isEmpty()) {
-                    val onlineIds = onlineNoteLinks.map { it.client.id }.toSet()
-                    pairedClients.filter { it.id in onlineIds }
-                } else emptyList(),
-                pageBitmap = { id -> pv.pageThumbnail(id) },
-                requestThumbnails = { ids -> pv.requestThumbnails(ids) },
-                beforeExport = { notebookId ->
-                    if (notebookId == pv.currentNotebookId()) {
-                        pv.flushPersistenceForExport()
-                    } else true
-                },
-                sendToNoteLink = { clientId, artifact, progress ->
-                    phoneTransfer.sendExport(clientId, artifact, progress)
-                },
-                onNotice = showNotice,
-                onClose = { exportPanelOpen = false }
+                input = ExportManagerInput(
+                    viewModel = exportViewModel,
+                    initialNotebookId = exportInitialNotebookId ?: currentNotebookId,
+                    creationRequest = exportCreationRequest,
+                    currentNotebookId = currentNotebookId,
+                    pairedClients = if (missingTransferPermissions.isEmpty()) {
+                        val onlineIds = onlineNoteLinks.map { it.client.id }.toSet()
+                        pairedClients.filter { it.id in onlineIds }
+                    } else emptyList(),
+                    callbacks = ExportManagerCallbacks(
+                        pageBitmap = { id -> pv.pageThumbnail(id) },
+                        requestThumbnails = { ids -> pv.requestThumbnails(ids) },
+                        beforeExport = { notebookId ->
+                            if (notebookId == pv.currentNotebookId()) {
+                                pv.flushPersistenceForExport()
+                            } else true
+                        },
+                        sendToNoteLink = { clientId, artifact, progress ->
+                            phoneTransfer.sendExport(clientId, artifact, progress)
+                        },
+                        onNotice = showNotice,
+                        onClose = { exportPanelOpen = false },
+                    ),
+                ),
             )
         }
 

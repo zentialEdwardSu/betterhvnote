@@ -73,20 +73,81 @@ import java.util.UUID
 private val ExportBorder = Color(0xFFE3E3E1)
 private val ExportMuted = Color(0xFF787774)
 
+data class ExportManagerInput(
+    val viewModel: ExportViewModel,
+    val initialNotebookId: UUID,
+    val creationRequest: Long,
+    val currentNotebookId: UUID,
+    val pairedClients: List<PairedDevice>,
+    val callbacks: ExportManagerCallbacks,
+)
+
+data class ExportManagerCallbacks(
+    val pageBitmap: (UUID) -> Bitmap?,
+    val requestThumbnails: (List<UUID>) -> Unit,
+    val beforeExport: suspend (UUID) -> Boolean,
+    val sendToNoteLink: suspend (String, ExportArtifact, (Long, Long) -> Unit) -> Unit,
+    val onNotice: (String) -> Unit,
+    val onClose: () -> Unit,
+)
+
+data class ExportTaskCreatorCallbacks(
+    val pageBitmap: (UUID) -> Bitmap?,
+    val requestThumbnails: (List<UUID>) -> Unit,
+    val onCreate: (UUID, ExportScope, ExportFormat, List<UUID>) -> Unit,
+    val onBack: () -> Unit,
+)
+
+data class ExportTaskRowState(
+    val summary: ExportTaskSummary,
+    val active: Boolean,
+    val busy: Boolean,
+    val phoneTransferAvailable: Boolean,
+    val progress: ExportProgress?,
+)
+
+data class ExportTaskRowActions(
+    val onSave: () -> Unit,
+    val onSend: () -> Unit,
+    val onDelete: () -> Unit,
+)
+
+data class ExportManagerSurfaceState(
+    val exportState: ExportManagerState,
+    val viewModel: ExportViewModel,
+    val initialNotebookId: UUID,
+    val currentNotebookId: UUID,
+    val pairedClients: List<PairedDevice>,
+    val callbacks: ExportManagerCallbacks,
+    val creating: Boolean,
+)
+
+data class ExportManagerSurfaceActions(
+    val onCreatingChange: (Boolean) -> Unit,
+    val onDeleteTask: (ExportTaskSummary) -> Unit,
+    val onSendTask: (ExportTaskSummary) -> Unit,
+)
+
+data class ExportTaskListInput(
+    val exportState: ExportManagerState,
+    val viewModel: ExportViewModel,
+    val pairedClients: List<PairedDevice>,
+    val callbacks: ExportManagerCallbacks,
+)
+
+data class ExportTaskListActions(
+    val onDeleteTask: (ExportTaskSummary) -> Unit,
+    val onSendTask: (ExportTaskSummary) -> Unit,
+)
+
 @Composable
-fun ExportManagerScreen(
-    viewModel: ExportViewModel,
-    initialNotebookId: UUID,
-    creationRequest: Long,
-    currentNotebookId: UUID,
-    pairedClients: List<PairedDevice>,
-    pageBitmap: (UUID) -> Bitmap?,
-    requestThumbnails: (List<UUID>) -> Unit,
-    beforeExport: suspend (UUID) -> Boolean,
-    sendToNoteLink: suspend (String, ExportArtifact, (Long, Long) -> Unit) -> Unit,
-    onNotice: (String) -> Unit,
-    onClose: () -> Unit
-) {
+fun ExportManagerScreen(input: ExportManagerInput) {
+    val viewModel = input.viewModel
+    val initialNotebookId = input.initialNotebookId
+    val creationRequest = input.creationRequest
+    val currentNotebookId = input.currentNotebookId
+    val pairedClients = input.pairedClients
+    val callbacks = input.callbacks
     val state by viewModel.state.collectAsState()
     var creating by remember { mutableStateOf(false) }
     var deleteTask by remember { mutableStateOf<ExportTaskSummary?>(null) }
@@ -97,99 +158,173 @@ fun ExportManagerScreen(
     }
     LaunchedEffect(state.message) {
         state.message?.let {
-            onNotice(it)
+            callbacks.onNotice(it)
             viewModel.consumeMessage()
         }
     }
 
+    ExportManagerSurface(
+        state = ExportManagerSurfaceState(
+            exportState = state,
+            viewModel = viewModel,
+            initialNotebookId = initialNotebookId,
+            currentNotebookId = currentNotebookId,
+            pairedClients = pairedClients,
+            callbacks = callbacks,
+            creating = creating,
+        ),
+        actions = ExportManagerSurfaceActions(
+            onCreatingChange = { creating = it },
+            onDeleteTask = { deleteTask = it },
+            onSendTask = { sendTask = it },
+        ),
+    )
+
+    deleteTask?.let { summary ->
+        ExportDeleteTaskDialog(
+            onDismiss = { deleteTask = null },
+            onDelete = {
+                viewModel.deleteTask(summary.task.id)
+                deleteTask = null
+            },
+        )
+    }
+
+    sendTask?.let { summary ->
+        ExportSendTaskDialog(
+            clients = pairedClients,
+            onDismiss = { sendTask = null },
+            onSend = { client ->
+                sendTask = null
+                viewModel.sendToNoteLink(summary.task.id, callbacks.beforeExport) { artifact, progress ->
+                    callbacks.sendToNoteLink(client.id, artifact, progress)
+                }
+            },
+        )
+    }
+}
+
+@Composable
+private fun ExportManagerSurface(
+    state: ExportManagerSurfaceState,
+    actions: ExportManagerSurfaceActions,
+) {
+    val exportState = state.exportState
+    val viewModel = state.viewModel
+    val callbacks = state.callbacks
     Surface(Modifier.fillMaxSize(), color = Color.White, shape = RectangleShape) {
-        if (creating) {
+        if (state.creating) {
             ExportTaskCreator(
-                state = state,
-                initialNotebookId = initialNotebookId,
-                currentNotebookId = currentNotebookId,
-                pageBitmap = pageBitmap,
-                requestThumbnails = requestThumbnails,
-                onCreate = { notebookId, scope, format, ids ->
-                    viewModel.createTask(notebookId, scope, format, ids)
-                    creating = false
-                },
-                onBack = { creating = false }
+                state = exportState,
+                initialNotebookId = state.initialNotebookId,
+                currentNotebookId = state.currentNotebookId,
+                callbacks = ExportTaskCreatorCallbacks(
+                    pageBitmap = callbacks.pageBitmap,
+                    requestThumbnails = callbacks.requestThumbnails,
+                    onCreate = { notebookId, scope, format, ids ->
+                        viewModel.createTask(notebookId, scope, format, ids)
+                        actions.onCreatingChange(false)
+                    },
+                    onBack = { actions.onCreatingChange(false) },
+                ),
             )
         } else {
             Column(Modifier.fillMaxSize()) {
                 ExportTopBar(
-                    taskCount = state.tasks.size,
-                    busy = state.activeTaskId != null,
-                    onBack = onClose,
-                    onAdd = { creating = true }
+                    taskCount = exportState.tasks.size,
+                    busy = exportState.activeTaskId != null,
+                    onBack = callbacks.onClose,
+                    onAdd = { actions.onCreatingChange(true) },
                 )
                 HorizontalDivider(color = ExportBorder)
-                if (state.tasks.isEmpty()) {
-                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        Text("暂无导出任务", color = ExportMuted)
-                    }
-                } else {
-                    LazyColumn(Modifier.fillMaxSize()) {
-                        items(state.tasks, key = { it.task.id }) { summary ->
-                            ExportTaskRow(
-                                summary = summary,
-                                active = state.activeTaskId == summary.task.id,
-                                busy = state.activeTaskId != null,
-                                phoneTransferAvailable = pairedClients.isNotEmpty(),
-                                progress = state.progress,
-                                onSave = { viewModel.saveToDownloads(summary.task.id, beforeExport) },
-                                onSend = {
-                                    if (pairedClients.size == 1) {
-                                        val clientId = pairedClients.single().id
-                                        viewModel.sendToNoteLink(summary.task.id, beforeExport) { artifact, progress ->
-                                            sendToNoteLink(clientId, artifact, progress)
-                                        }
-                                    } else sendTask = summary
-                                },
-                                onDelete = { deleteTask = summary }
-                            )
-                            HorizontalDivider(color = ExportBorder)
-                        }
-                    }
-                }
+                ExportTaskList(
+                    input = ExportTaskListInput(
+                        exportState = exportState,
+                        viewModel = viewModel,
+                        pairedClients = state.pairedClients,
+                        callbacks = callbacks,
+                    ),
+                    actions = ExportTaskListActions(
+                        onDeleteTask = actions.onDeleteTask,
+                        onSendTask = actions.onSendTask,
+                    ),
+                )
             }
         }
     }
+}
 
-    deleteTask?.let { summary ->
-        EinkModalOverlay(onDismissRequest = { deleteTask = null }) {
-            Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                Text("删除导出任务？", fontSize = 20.sp, fontWeight = FontWeight.Medium)
-                Text("内部生成文件和增量缓存将被删除，Downloads 与 NoteLink 中的副本不受影响。")
-                Row(
-                    Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.End)
-                ) {
-                    EinkDialogAction("取消") { deleteTask = null }
-                    EinkDialogAction("删除") {
-                        viewModel.deleteTask(summary.task.id)
-                        deleteTask = null
-                    }
-                }
+@Composable
+private fun ExportTaskList(input: ExportTaskListInput, actions: ExportTaskListActions) {
+    val exportState = input.exportState
+    if (exportState.tasks.isEmpty()) {
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Text("暂无导出任务", color = ExportMuted)
+        }
+        return
+    }
+    LazyColumn(Modifier.fillMaxSize()) {
+        items(exportState.tasks, key = { it.task.id }) { summary ->
+            ExportTaskRow(
+                state = ExportTaskRowState(
+                    summary = summary,
+                    active = exportState.activeTaskId == summary.task.id,
+                    busy = exportState.activeTaskId != null,
+                    phoneTransferAvailable = input.pairedClients.isNotEmpty(),
+                    progress = exportState.progress,
+                ),
+                actions = ExportTaskRowActions(
+                    onSave = {
+                        input.viewModel.saveToDownloads(summary.task.id, input.callbacks.beforeExport)
+                    },
+                    onSend = {
+                        if (input.pairedClients.size == 1) {
+                            val clientId = input.pairedClients.single().id
+                            input.viewModel.sendToNoteLink(summary.task.id, input.callbacks.beforeExport) { artifact, progress ->
+                                input.callbacks.sendToNoteLink(clientId, artifact, progress)
+                            }
+                        } else {
+                            actions.onSendTask(summary)
+                        }
+                    },
+                    onDelete = { actions.onDeleteTask(summary) },
+                ),
+            )
+            HorizontalDivider(color = ExportBorder)
+        }
+    }
+}
+
+@Composable
+private fun ExportDeleteTaskDialog(onDismiss: () -> Unit, onDelete: () -> Unit) {
+    EinkModalOverlay(onDismissRequest = onDismiss) {
+        Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            Text("删除导出任务？", fontSize = 20.sp, fontWeight = FontWeight.Medium)
+            Text("内部生成文件和增量缓存将被删除，Downloads 与 NoteLink 中的副本不受影响。")
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.End),
+            ) {
+                EinkDialogAction("取消", onClick = onDismiss)
+                EinkDialogAction("删除", onClick = onDelete)
             }
         }
     }
+}
 
-    sendTask?.let { summary ->
-        EinkModalOverlay(onDismissRequest = { sendTask = null }) {
-            Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text("发送到 NoteLink", fontSize = 20.sp, fontWeight = FontWeight.Medium)
-                pairedClients.sortedByDescending(PairedDevice::lastUsedAt).forEach { client ->
-                    EinkDialogAction(client.name) {
-                        sendTask = null
-                        viewModel.sendToNoteLink(summary.task.id, beforeExport) { artifact, progress ->
-                            sendToNoteLink(client.id, artifact, progress)
-                        }
-                    }
-                }
-                EinkDialogAction("取消") { sendTask = null }
+@Composable
+private fun ExportSendTaskDialog(
+    clients: List<PairedDevice>,
+    onDismiss: () -> Unit,
+    onSend: (PairedDevice) -> Unit,
+) {
+    EinkModalOverlay(onDismissRequest = onDismiss) {
+        Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text("发送到 NoteLink", fontSize = 20.sp, fontWeight = FontWeight.Medium)
+            clients.sortedByDescending(PairedDevice::lastUsedAt).forEach { client ->
+                EinkDialogAction(client.name) { onSend(client) }
             }
+            EinkDialogAction("取消", onClick = onDismiss)
         }
     }
 }
@@ -212,15 +347,16 @@ private fun ExportTopBar(taskCount: Int, busy: Boolean, onBack: () -> Unit, onAd
 
 @Composable
 private fun ExportTaskRow(
-    summary: ExportTaskSummary,
-    active: Boolean,
-    busy: Boolean,
-    phoneTransferAvailable: Boolean,
-    progress: ExportProgress?,
-    onSave: () -> Unit,
-    onSend: () -> Unit,
-    onDelete: () -> Unit
+    state: ExportTaskRowState,
+    actions: ExportTaskRowActions,
 ) {
+    val summary = state.summary
+    val active = state.active
+    val availability = ExportActionAvailability.resolve(
+        summary.state,
+        state.busy,
+        state.phoneTransferAvailable,
+    )
     Column(Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 16.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
@@ -236,22 +372,22 @@ private fun ExportTaskRow(
                 CircularProgressIndicator(Modifier.size(28.dp), strokeWidth = 2.dp, color = Color.Black)
                 Spacer(Modifier.width(4.dp))
             }
-            val availability = ExportActionAvailability.resolve(summary.state, busy, phoneTransferAvailable)
-            IconButton(onClick = onSave, enabled = availability.saveEnabled) {
+            IconButton(onClick = actions.onSave, enabled = availability.saveEnabled) {
                 Icon(Icons.Filled.Download, "保存 ${summary.notebookTitle} 到 Downloads")
             }
-            IconButton(onClick = onSend, enabled = availability.sendEnabled) {
+            IconButton(onClick = actions.onSend, enabled = availability.sendEnabled) {
                 Icon(
                     Icons.AutoMirrored.Filled.Send,
-                    if (phoneTransferAvailable) "发送 ${summary.notebookTitle} 到 NoteLink"
+                    if (state.phoneTransferAvailable) "发送 ${summary.notebookTitle} 到 NoteLink"
                     else "NoteLink 未配对或不可用"
                 )
             }
-            IconButton(onClick = onDelete, enabled = availability.deleteEnabled) {
+            IconButton(onClick = actions.onDelete, enabled = availability.deleteEnabled) {
                 Icon(Icons.Filled.Delete, "删除导出任务")
             }
         }
-        if (active && progress != null) {
+        if (active && state.progress != null) {
+            val progress = state.progress
             val ratio = if (progress.total <= 0) 0f else progress.current.toFloat() / progress.total
             LinearProgressIndicator(
                 progress = { ratio.coerceIn(0f, 1f) },
@@ -267,10 +403,7 @@ private fun ExportTaskCreator(
     state: ExportManagerState,
     initialNotebookId: UUID,
     currentNotebookId: UUID,
-    pageBitmap: (UUID) -> Bitmap?,
-    requestThumbnails: (List<UUID>) -> Unit,
-    onCreate: (UUID, ExportScope, ExportFormat, List<UUID>) -> Unit,
-    onBack: () -> Unit
+    callbacks: ExportTaskCreatorCallbacks,
 ) {
     var notebookId by remember(state.notebooks, initialNotebookId) {
         mutableStateOf(state.notebooks.firstOrNull { it.id == initialNotebookId }?.id ?: state.notebooks.firstOrNull()?.id)
@@ -287,7 +420,7 @@ private fun ExportTaskCreator(
 
     LaunchedEffect(notebookId, scope) {
         if (notebookId == currentNotebookId && scope != ExportScope.ALL_PAGES) {
-            requestThumbnails(pages.map(PageUiInfo::id))
+            callbacks.requestThumbnails(pages.map(PageUiInfo::id))
         }
     }
 
@@ -296,13 +429,13 @@ private fun ExportTaskCreator(
             Modifier.fillMaxWidth().height(64.dp).padding(horizontal = 18.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回") }
+            IconButton(onClick = callbacks.onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回") }
             Text("新建导出任务", fontSize = 18.sp, fontWeight = FontWeight.Medium)
             Spacer(Modifier.weight(1f))
             val valid = notebookId != null && (scope == ExportScope.ALL_PAGES || selected.isNotEmpty())
             IconButton(
                 enabled = valid,
-                onClick = { notebookId?.let { onCreate(it, scope, format, selected.toList()) } }
+                onClick = { notebookId?.let { callbacks.onCreate(it, scope, format, selected.toList()) } }
             ) { Icon(Icons.Filled.Check, "创建") }
         }
         HorizontalDivider(color = ExportBorder)
@@ -344,7 +477,7 @@ private fun ExportTaskCreator(
             PageSelectionGrid(
                 pages = pages,
                 selectedIds = selected,
-                pageBitmap = { id -> if (notebookId == currentNotebookId) pageBitmap(id) else null },
+                    pageBitmap = { id -> if (notebookId == currentNotebookId) callbacks.pageBitmap(id) else null },
                 onToggle = { id ->
                     selected = if (scope == ExportScope.SINGLE_PAGE) setOf(id)
                     else if (id in selected) selected - id else selected + id

@@ -50,7 +50,9 @@ class PhoneQueueRepository(context: Context) : QueueStore, SenderContentProvider
                     var total = 0L
                     while (true) {
                         val count = input.read(buffer)
-                        if (count < 0) break
+                        if (count < 0) {
+                            break
+                        }
                         total += count
                         require(total <= TransferLimits.MAX_IMAGE_BYTES) { "图片不能超过 64 MiB" }
                         output.write(buffer, 0, count)
@@ -108,7 +110,9 @@ class PhoneQueueRepository(context: Context) : QueueStore, SenderContentProvider
                     var total = 0L
                     while (true) {
                         val count = input.read(buffer)
-                        if (count < 0) break
+                        if (count < 0) {
+                            break
+                        }
                         total += count
                         require(total <= TransferLimits.MAX_PDF_BYTES) { "PDF 不能超过 512 MiB" }
                         output.write(buffer, 0, count)
@@ -296,20 +300,47 @@ class PhoneQueueRepository(context: Context) : QueueStore, SenderContentProvider
         private var finished = false
         override val payloadFile: File? get() = this@PhoneQueueRepository.payloadFile(offer.item.id)
         override val text: String? get() = textValue(offer.item.id)
-        override fun heartbeat() { if (!finished) offer = offer.copy(item = coordinator.heartbeat(offer.item.id)); publish() }
-        override fun markTransferring() { if (!finished) offer = offer.copy(item = coordinator.transition(offer.item.id, QueueState.TRANSFERRING)); publish() }
-        override fun markAwaitingCommit() { if (!finished) offer = offer.copy(item = coordinator.transition(offer.item.id, QueueState.AWAITING_COMMIT)); publish() }
+        override fun heartbeat() {
+            if (!finished) {
+                offer = offer.copy(item = coordinator.heartbeat(offer.item.id))
+            }
+            publish()
+        }
+        override fun markTransferring() {
+            if (!finished) {
+                offer = offer.copy(item = coordinator.transition(offer.item.id, QueueState.TRANSFERRING))
+            }
+            publish()
+        }
+        override fun markAwaitingCommit() {
+            if (!finished) {
+                offer = offer.copy(item = coordinator.transition(offer.item.id, QueueState.AWAITING_COMMIT))
+            }
+            publish()
+        }
         override fun commit() {
             if (finished) return
             payloadFile?.delete(); coordinator.commit(offer.item.id); finished = true; publish()
         }
-        override fun release() { if (!finished) { coordinator.release(offer.item.id); finished = true; publish() } }
+        override fun release() {
+            if (!finished) {
+                coordinator.release(offer.item.id)
+                finished = true
+                publish()
+            }
+        }
     }
 
     private fun sha256(file: File): ByteArray = MessageDigest.getInstance("SHA-256").run {
         FileInputStream(file).use { input ->
             val buffer = ByteArray(64 * 1024)
-            while (true) { val count = input.read(buffer); if (count < 0) break; update(buffer, 0, count) }
+            while (true) {
+                val count = input.read(buffer)
+                if (count < 0) {
+                    break
+                }
+                update(buffer, 0, count)
+            }
         }
         digest()
     }

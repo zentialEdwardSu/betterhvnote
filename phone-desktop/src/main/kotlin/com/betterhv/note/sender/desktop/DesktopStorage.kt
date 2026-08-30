@@ -309,11 +309,36 @@ class DesktopQueueRepository(private val paths: DesktopPaths) : QueueStore, Auto
         private var finished = false
         override val file: File? get() = payloadPath(item.id)?.let(::File)?.takeIf(File::isFile)
         override val text: String? get() = text(item.id)
-        override fun heartbeat() { if (!finished) item = coordinator.heartbeat(item.id) }
-        override fun markTransferring() { if (!finished) item = coordinator.transition(item.id, QueueState.TRANSFERRING) }
-        override fun markAwaitingCommit() { if (!finished) item = coordinator.transition(item.id, QueueState.AWAITING_COMMIT) }
-        override fun commit() { if (!finished) { file?.delete(); coordinator.commit(item.id); finished = true; publish() } }
-        override fun release() { if (!finished) { coordinator.release(item.id); finished = true; publish() } }
+        override fun heartbeat() {
+            if (!finished) {
+                item = coordinator.heartbeat(item.id)
+            }
+        }
+        override fun markTransferring() {
+            if (!finished) {
+                item = coordinator.transition(item.id, QueueState.TRANSFERRING)
+            }
+        }
+        override fun markAwaitingCommit() {
+            if (!finished) {
+                item = coordinator.transition(item.id, QueueState.AWAITING_COMMIT)
+            }
+        }
+        override fun commit() {
+            if (!finished) {
+                file?.delete()
+                coordinator.commit(item.id)
+                finished = true
+                publish()
+            }
+        }
+        override fun release() {
+            if (!finished) {
+                coordinator.release(item.id)
+                finished = true
+                publish()
+            }
+        }
     }
 }
 
@@ -386,7 +411,13 @@ private fun Inbox_exports.inboxItem() = DesktopInboxItem(
 private fun sha256(file: File): ByteArray = MessageDigest.getInstance("SHA-256").run {
     FileInputStream(file).use { input ->
         val buffer = ByteArray(64 * 1024)
-        while (true) { val count = input.read(buffer); if (count < 0) break; update(buffer, 0, count) }
+        while (true) {
+            val count = input.read(buffer)
+            if (count < 0) {
+                break
+            }
+            update(buffer, 0, count)
+        }
     }
     digest()
 }

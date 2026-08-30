@@ -4,7 +4,6 @@ import com.betterhv.transfer.core.BleCommand
 import com.betterhv.transfer.core.BleQueueProtocol
 import com.betterhv.transfer.core.BleResponse
 import com.betterhv.transfer.core.CapabilityNegotiation
-import com.betterhv.transfer.core.ContentKind
 import com.betterhv.transfer.core.DeviceCapabilities
 import com.betterhv.transfer.core.NetworkEndpoint
 import com.betterhv.transfer.core.SsidMatch

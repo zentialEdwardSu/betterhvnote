@@ -205,7 +205,13 @@ class ExportInboxRepository(context: Context) : AutoCloseable {
     private fun sha256(file: File): ByteArray = MessageDigest.getInstance("SHA-256").run {
         FileInputStream(file).use { input ->
             val buffer = ByteArray(64 * 1024)
-            while (true) { val count = input.read(buffer); if (count < 0) break; update(buffer, 0, count) }
+            while (true) {
+                val count = input.read(buffer)
+                if (count < 0) {
+                    break
+                }
+                update(buffer, 0, count)
+            }
         }
         digest()
     }

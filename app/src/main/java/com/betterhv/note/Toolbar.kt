@@ -26,7 +26,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Redo
 import androidx.compose.material.icons.automirrored.filled.Undo
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.CropFree
 import androidx.compose.material.icons.filled.Delete
@@ -1193,9 +1192,3 @@ internal fun nearestDockEdge(
     DockEdge.END to (container.width - topLeft.x - toolbar.width).coerceAtLeast(0f)
 ).minBy { it.second }.first
 
-private fun alignmentFor(edge: DockEdge): Alignment = when (edge) {
-    DockEdge.TOP -> Alignment.TopCenter
-    DockEdge.BOTTOM -> Alignment.BottomCenter
-    DockEdge.START -> Alignment.CenterStart
-    DockEdge.END -> Alignment.CenterEnd
-}

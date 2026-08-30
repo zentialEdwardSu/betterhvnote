@@ -16,7 +16,6 @@ import android.bluetooth.le.AdvertiseSettings
 import android.content.Context
 import android.os.ParcelUuid
 import android.util.Log
-import com.betterhv.transfer.core.ContentKind
 import com.betterhv.transfer.core.ContentCounts
 import com.betterhv.transfer.core.BleTransportFrameCodec
 import com.betterhv.transfer.core.BleTransportReassembler

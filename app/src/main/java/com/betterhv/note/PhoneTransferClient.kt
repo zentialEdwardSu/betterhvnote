@@ -755,18 +755,6 @@ class PhoneTransferClient(context: Context) : AutoCloseable, TransferObservable 
 
     private fun newScanner() = BleReceiverScanner(appContext)
 
-    private fun localWifiIpv4Address(): String? = runCatchingCancellable {
-        java.net.NetworkInterface.getNetworkInterfaces().toList()
-            .asSequence()
-            .filter { it.isUp && !it.isLoopback }
-            .flatMap { it.inetAddresses.toList().asSequence() }
-            .filterIsInstance<java.net.Inet4Address>()
-            .mapNotNull { it.hostAddress }
-            .firstOrNull { address ->
-                !address.startsWith("127.") && !address.startsWith("169.254.")
-            }
-    }.getOrNull()
-
     private suspend fun openBleSession(bluetoothAddress: String): BleGattSession {
         // Every connection in this client follows a scan. Some vendor Android
         // controllers report status 133 when connectGatt starts in the same

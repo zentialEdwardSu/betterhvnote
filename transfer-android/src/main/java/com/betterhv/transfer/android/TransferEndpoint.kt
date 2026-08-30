@@ -3,7 +3,6 @@ package com.betterhv.transfer.android
 import com.betterhv.transfer.core.ContentKind
 import com.betterhv.transfer.core.ContentCounts
 import com.betterhv.transfer.core.PairedDevice
-import com.betterhv.transfer.core.QueueItem
 import com.betterhv.transfer.core.RemotePayload
 import com.betterhv.transfer.core.TransferLease
 import com.betterhv.transfer.core.TransferObservable
