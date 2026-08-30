@@ -54,22 +54,57 @@ internal val PAGE_MANAGER_SIDE_EXTRA_WIDTH = 48.dp
 internal val PAGE_MANAGER_CONTENT_PADDING = 6.dp
 internal val PAGE_MANAGER_HORIZONTAL_TITLE_WIDTH = 132.dp
 
+data class PageManagerPanelState(
+    val modifier: Modifier,
+    val dockEdge: DockEdge,
+    val thumbnailSize: DpSize,
+    val pages: List<PageUiInfo>,
+    val currentPageId: UUID?,
+)
+
+data class PageManagerPanelActions(
+    val thumbnail: (UUID) -> android.graphics.Bitmap?,
+    val requestThumbnails: (List<UUID>) -> Unit,
+    val onSelect: (UUID) -> Unit,
+    val onAddAfter: (UUID) -> UUID,
+    val onDelete: (UUID) -> Boolean,
+    val onMove: (UUID, Int) -> Boolean,
+    val onNotice: (String) -> Unit,
+)
+
+private data class PageThumbnailCardState(
+    val modifier: Modifier,
+    val info: PageUiInfo,
+    val bitmap: android.graphics.Bitmap?,
+    val current: Boolean,
+    val pendingDelete: Boolean,
+    val dragging: Boolean,
+)
+
+private data class PageThumbnailCardActions(
+    val onNormalClick: () -> Unit,
+    val onSide2Click: () -> Unit,
+    val onSide3Click: () -> Unit,
+)
+
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
 fun PageManagerPanel(
-    modifier: Modifier,
-    dockEdge: DockEdge,
-    thumbnailSize: DpSize,
-    pages: List<PageUiInfo>,
-    currentPageId: UUID?,
-    thumbnail: (UUID) -> android.graphics.Bitmap?,
-    requestThumbnails: (List<UUID>) -> Unit,
-    onSelect: (UUID) -> Unit,
-    onAddAfter: (UUID) -> UUID,
-    onDelete: (UUID) -> Boolean,
-    onMove: (UUID, Int) -> Boolean,
-    onNotice: (String) -> Unit
+    state: PageManagerPanelState,
+    actions: PageManagerPanelActions,
 ) {
+    val modifier = state.modifier
+    val dockEdge = state.dockEdge
+    val thumbnailSize = state.thumbnailSize
+    val pages = state.pages
+    val currentPageId = state.currentPageId
+    val thumbnail = actions.thumbnail
+    val requestThumbnails = actions.requestThumbnails
+    val onSelect = actions.onSelect
+    val onAddAfter = actions.onAddAfter
+    val onDelete = actions.onDelete
+    val onMove = actions.onMove
+    val onNotice = actions.onNotice
     var bookmarkedOnly by remember { mutableStateOf(false) }
     val displayedPages = if (bookmarkedOnly) pages.filter(PageUiInfo::bookmarked) else pages
     val currentIndex = displayedPages.indexOfFirst { it.id == currentPageId }.coerceAtLeast(0)
@@ -214,37 +249,41 @@ fun PageManagerPanel(
             Box(cardModifier)
         } else {
             PageThumbnailCard(
-                modifier = cardModifier.padding(2.dp),
-                info = info,
-                bitmap = thumbnail(info.id),
-                current = info.id == currentPageId,
-                pendingDelete = info.id == model.pendingDeleteId,
-                dragging = info.id == draggingId,
-                onNormalClick = {
-                    model = model.cancelDelete()
-                    onSelect(info.id)
-                },
-                onSide2Click = {
-                    model = model.cancelDelete()
-                    onAddAfter(info.id)
-                    if (bookmarkedOnly) bookmarkedOnly = false
-                    val fullIndex = pages.indexOfFirst { it.id == info.id }.coerceAtLeast(0)
-                    model = model.afterStructureChange(fullIndex + 1, pages.size + 1)
-                },
-                onSide3Click = {
-                    val now = SystemClock.uptimeMillis()
-                    val (updated, decision) = model.deleteClick(info.id, now)
-                    model = updated
-                    if (decision == DeleteDecision.ARMED) {
-                        onNotice("再次按 Side3 删除第 ${info.pageNumber} 页")
-                    } else if (onDelete(info.id)) {
-                        onNotice("已删除第 ${info.pageNumber} 页")
-                        model = model.afterStructureChange(
-                            currentIndex,
-                            (displayedPages.size - 1).coerceAtLeast(0)
-                        )
-                    }
-                }
+                state = PageThumbnailCardState(
+                    modifier = cardModifier.padding(2.dp),
+                    info = info,
+                    bitmap = thumbnail(info.id),
+                    current = info.id == currentPageId,
+                    pendingDelete = info.id == model.pendingDeleteId,
+                    dragging = info.id == draggingId,
+                ),
+                actions = PageThumbnailCardActions(
+                    onNormalClick = {
+                        model = model.cancelDelete()
+                        onSelect(info.id)
+                    },
+                    onSide2Click = {
+                        model = model.cancelDelete()
+                        onAddAfter(info.id)
+                        if (bookmarkedOnly) bookmarkedOnly = false
+                        val fullIndex = pages.indexOfFirst { it.id == info.id }.coerceAtLeast(0)
+                        model = model.afterStructureChange(fullIndex + 1, pages.size + 1)
+                    },
+                    onSide3Click = {
+                        val now = SystemClock.uptimeMillis()
+                        val (updated, decision) = model.deleteClick(info.id, now)
+                        model = updated
+                        if (decision == DeleteDecision.ARMED) {
+                            onNotice("再次按 Side3 删除第 ${info.pageNumber} 页")
+                        } else if (onDelete(info.id)) {
+                            onNotice("已删除第 ${info.pageNumber} 页")
+                            model = model.afterStructureChange(
+                                currentIndex,
+                                (displayedPages.size - 1).coerceAtLeast(0)
+                            )
+                        }
+                    },
+                ),
             )
         }
     }
@@ -356,16 +395,18 @@ private fun PageManagerTab(
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
 private fun PageThumbnailCard(
-    modifier: Modifier,
-    info: PageUiInfo,
-    bitmap: android.graphics.Bitmap?,
-    current: Boolean,
-    pendingDelete: Boolean,
-    dragging: Boolean,
-    onNormalClick: () -> Unit,
-    onSide2Click: () -> Unit,
-    onSide3Click: () -> Unit
+    state: PageThumbnailCardState,
+    actions: PageThumbnailCardActions,
 ) {
+    val modifier = state.modifier
+    val info = state.info
+    val bitmap = state.bitmap
+    val current = state.current
+    val pendingDelete = state.pendingDelete
+    val dragging = state.dragging
+    val onNormalClick = actions.onNormalClick
+    val onSide2Click = actions.onSide2Click
+    val onSide3Click = actions.onSide3Click
     val stylus = remember(info.id) { StylusClickResolver() }
     val border = when {
         pendingDelete -> Color(0xFFB00020)

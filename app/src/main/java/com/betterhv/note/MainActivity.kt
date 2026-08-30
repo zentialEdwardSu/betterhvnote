@@ -1233,33 +1233,37 @@ private fun AppRoot(
                     )
             }
             PageManagerPanel(
-                modifier = managerModifier,
-                dockEdge = dockEdge,
-                thumbnailSize = thumbnailSize,
-                pages = pages,
-                currentPageId = currentPageId,
-                thumbnail = { id -> penView?.pageThumbnail(id) },
-                requestThumbnails = { ids -> penView?.requestThumbnails(ids) },
-                onSelect = { id ->
-                    penView?.switchToPage(id)
-                    pageManagerOpen = false
-                },
-                onAddAfter = { id ->
-                    val newId = penView!!.addPageAfter(id, activate = true)
-                    showNotice("已新增第 ${penView!!.currentPageIndex() + 1} 页")
-                    newId
-                },
-                onDelete = { id ->
-                    val pv = penView!!
-                    if (!pv.canDeletePage()) {
-                        showNotice("最后一页不能删除")
-                        false
-                    } else {
-                        pv.deletePage(id)
-                    }
-                },
-                onMove = { id, target -> penView!!.movePage(id, target) },
-                onNotice = showNotice
+                state = PageManagerPanelState(
+                    modifier = managerModifier,
+                    dockEdge = dockEdge,
+                    thumbnailSize = thumbnailSize,
+                    pages = pages,
+                    currentPageId = currentPageId,
+                ),
+                actions = PageManagerPanelActions(
+                    thumbnail = { id -> penView?.pageThumbnail(id) },
+                    requestThumbnails = { ids -> penView?.requestThumbnails(ids) },
+                    onSelect = { id ->
+                        penView?.switchToPage(id)
+                        pageManagerOpen = false
+                    },
+                    onAddAfter = { id ->
+                        val newId = penView!!.addPageAfter(id, activate = true)
+                        showNotice("已新增第 ${penView!!.currentPageIndex() + 1} 页")
+                        newId
+                    },
+                    onDelete = { id ->
+                        val pv = penView!!
+                        if (!pv.canDeletePage()) {
+                            showNotice("最后一页不能删除")
+                            false
+                        } else {
+                            pv.deletePage(id)
+                        }
+                    },
+                    onMove = { id, target -> penView!!.movePage(id, target) },
+                    onNotice = showNotice,
+                ),
             )
         }
 
@@ -1524,21 +1528,25 @@ private fun AppRoot(
             val pv = penView!!
             val pageSize = pv.currentPageSize()
             TemplateChooserOverlay(
-                catalog = templateCatalog,
-                selectedId = pv.currentPageTemplateId(),
-                pageWidth = pageSize.first,
-                pageHeight = pageSize.second,
-                preview = pv::templatePreview,
-                onSelect = { id ->
-                    if (pv.setCurrentPageTemplate(id)) {
-                        templateChooserOpen = false
-                        showNotice("Template 已更换为 ${templateCatalog.find(id)?.name ?: id}")
-                        exportViewModel.refresh()
-                    } else showNotice("该 Template 与当前页面不兼容")
-                },
-                onConnectDirectory = { templateDirectoryPicker.launch(null) },
-                onRefresh = { templateCatalog = pv.refreshTemplates(force = true) },
-                onDismiss = { templateChooserOpen = false }
+                state = TemplateChooserState(
+                    catalog = templateCatalog,
+                    selectedId = pv.currentPageTemplateId(),
+                    pageWidth = pageSize.first,
+                    pageHeight = pageSize.second,
+                    preview = pv::templatePreview,
+                ),
+                actions = TemplateChooserActions(
+                    onSelect = { id ->
+                        if (pv.setCurrentPageTemplate(id)) {
+                            templateChooserOpen = false
+                            showNotice("Template 已更换为 ${templateCatalog.find(id)?.name ?: id}")
+                            exportViewModel.refresh()
+                        } else showNotice("该 Template 与当前页面不兼容")
+                    },
+                    onConnectDirectory = { templateDirectoryPicker.launch(null) },
+                    onRefresh = { templateCatalog = pv.refreshTemplates(force = true) },
+                    onDismiss = { templateChooserOpen = false },
+                ),
             )
         }
 
@@ -1546,35 +1554,41 @@ private fun AppRoot(
             val pvForDialog = penView
             val pageSize = pvForDialog?.currentPageSize() ?: (1860f to 2414f)
             NotebookNameDialog(
-                catalog = templateCatalog,
-                pageWidth = pageSize.first,
-                pageHeight = pageSize.second,
-                preview = { id, previewWidth, previewHeight ->
-                    pvForDialog?.templatePreview(id, previewWidth, previewHeight)
-                },
-                onConnectDirectory = { templateDirectoryPicker.launch(null) },
-                onRefresh = {
-                    templateCatalog = pvForDialog?.refreshTemplates(force = true) ?: templateCatalog
-                },
-                templateEnabled = request == NotebookCreationRequest.Blank,
-                onConfirm = { title, templateId ->
-                    pendingNotebookCreation = null
-                    val pv = penView ?: return@NotebookNameDialog
-                    notebookBusy = true
-                    val complete: (Result<UUID>) -> Unit = { result ->
-                        notebookBusy = false
-                        if (result.isSuccess) {
-                            notebookManagerOpen = false
-                            showNotice("已创建笔记本“$title”")
+                state = NotebookNameDialogState(
+                    catalog = templateCatalog,
+                    pageWidth = pageSize.first,
+                    pageHeight = pageSize.second,
+                    templateEnabled = request == NotebookCreationRequest.Blank,
+                ),
+                actions = NotebookNameDialogActions(
+                    preview = { id, previewWidth, previewHeight ->
+                        pvForDialog?.templatePreview(id, previewWidth, previewHeight)
+                    },
+                    onConnectDirectory = { templateDirectoryPicker.launch(null) },
+                    onRefresh = {
+                        templateCatalog = pvForDialog?.refreshTemplates(force = true) ?: templateCatalog
+                    },
+                    onConfirm = { title, templateId ->
+                        pendingNotebookCreation = null
+                        val pv = penView
+                        if (pv != null) {
+                            notebookBusy = true
+                            val complete: (Result<UUID>) -> Unit = { result ->
+                                notebookBusy = false
+                                if (result.isSuccess) {
+                                    notebookManagerOpen = false
+                                    showNotice("已创建笔记本“$title”")
+                                }
+                            }
+                            when (request) {
+                                NotebookCreationRequest.Blank -> pv.createBlankNotebook(title, templateId, complete)
+                                is NotebookCreationRequest.Transfer ->
+                                    pv.transferPagesToNewNotebook(request.pageIds, title, complete)
+                            }
                         }
-                    }
-                    when (request) {
-                        NotebookCreationRequest.Blank -> pv.createBlankNotebook(title, templateId, complete)
-                        is NotebookCreationRequest.Transfer ->
-                            pv.transferPagesToNewNotebook(request.pageIds, title, complete)
-                    }
-                },
-                onDismiss = { if (!notebookBusy) pendingNotebookCreation = null }
+                    },
+                    onDismiss = { if (!notebookBusy) pendingNotebookCreation = null },
+                ),
             )
         }
 

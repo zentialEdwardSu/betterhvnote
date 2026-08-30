@@ -25,18 +25,23 @@ import android.graphics.Bitmap
 import com.betterhv.note.doc.DEFAULT_TEMPLATE_ID
 import com.betterhv.note.template.TemplateCatalogSnapshot
 
+data class NotebookNameDialogState(
+    val catalog: TemplateCatalogSnapshot,
+    val pageWidth: Float,
+    val pageHeight: Float,
+    val templateEnabled: Boolean = true,
+)
+
+data class NotebookNameDialogActions(
+    val preview: (String, Int, Int) -> Bitmap?,
+    val onConnectDirectory: () -> Unit,
+    val onRefresh: () -> Unit,
+    val onConfirm: (String, String) -> Unit,
+    val onDismiss: () -> Unit,
+)
+
 @Composable
-fun NotebookNameDialog(
-    catalog: TemplateCatalogSnapshot,
-    pageWidth: Float,
-    pageHeight: Float,
-    preview: (String, Int, Int) -> Bitmap?,
-    onConnectDirectory: () -> Unit,
-    onRefresh: () -> Unit,
-    templateEnabled: Boolean = true,
-    onConfirm: (String, String) -> Unit,
-    onDismiss: () -> Unit
-) {
+fun NotebookNameDialog(state: NotebookNameDialogState, actions: NotebookNameDialogActions) {
     var title by remember { mutableStateOf("") }
     var selectedTemplateId by remember { mutableStateOf(DEFAULT_TEMPLATE_ID) }
     var chooserOpen by remember { mutableStateOf(false) }
@@ -47,7 +52,7 @@ fun NotebookNameDialog(
         focusRequester.requestFocus()
         keyboard?.show()
     }
-    EinkModalOverlay(onDismissRequest = onDismiss, position = EinkModalPosition.TOP) {
+    EinkModalOverlay(onDismissRequest = actions.onDismiss, position = EinkModalPosition.TOP) {
         Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
             Text("命名笔记本", fontSize = 22.sp)
             OutlinedTextField(
@@ -58,10 +63,10 @@ fun NotebookNameDialog(
                 label = { Text("笔记本名称") },
                 shape = RectangleShape
             )
-            if (templateEnabled) {
+            if (state.templateEnabled) {
                 TemplateSelectionRow(
-                    definition = catalog.find(selectedTemplateId),
-                    preview = preview,
+                    definition = state.catalog.find(selectedTemplateId),
+                    preview = actions.preview,
                     onClick = {
                         keyboard?.hide()
                         chooserOpen = true
@@ -72,26 +77,30 @@ fun NotebookNameDialog(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.End)
             ) {
-                EinkDialogAction("取消", onClick = onDismiss)
+                EinkDialogAction("取消", onClick = actions.onDismiss)
                 EinkDialogAction(
                     "创建",
                     enabled = normalized.isNotEmpty(),
-                    onClick = { onConfirm(normalized, selectedTemplateId) }
+                    onClick = { actions.onConfirm(normalized, selectedTemplateId) }
                 )
             }
         }
     }
-    if (chooserOpen && templateEnabled) {
+    if (chooserOpen && state.templateEnabled) {
         TemplateChooserOverlay(
-            catalog = catalog,
-            selectedId = selectedTemplateId,
-            pageWidth = pageWidth,
-            pageHeight = pageHeight,
-            preview = preview,
-            onSelect = { selectedTemplateId = it; chooserOpen = false },
-            onConnectDirectory = onConnectDirectory,
-            onRefresh = onRefresh,
-            onDismiss = { chooserOpen = false }
+            state = TemplateChooserState(
+                catalog = state.catalog,
+                selectedId = selectedTemplateId,
+                pageWidth = state.pageWidth,
+                pageHeight = state.pageHeight,
+                preview = actions.preview,
+            ),
+            actions = TemplateChooserActions(
+                onSelect = { selectedTemplateId = it; chooserOpen = false },
+                onConnectDirectory = actions.onConnectDirectory,
+                onRefresh = actions.onRefresh,
+                onDismiss = { chooserOpen = false },
+            ),
         )
     }
 }

@@ -12,6 +12,9 @@
 - Reduced export UI parameter lists with explicit input, state, and action
   objects; split the export manager surface, task list, and dialogs into
   focused composables.
+- Applied the same state/action boundary to notebook, page-manager, template,
+  and notebook-naming composables; extracted notebook covers and toolbars into
+  focused children.
 - Moved the active desktop implementation and tests into `phone-desktop/src`
   and the MSI customization scripts into `tools/windows-installer`.
 - Removed the JVM `PageRendererTest` placeholder; the real renderer coverage is

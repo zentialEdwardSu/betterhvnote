@@ -47,6 +47,21 @@ import com.betterhv.note.template.TemplateDefinition
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
+data class TemplateChooserState(
+    val catalog: TemplateCatalogSnapshot,
+    val selectedId: String?,
+    val pageWidth: Float,
+    val pageHeight: Float,
+    val preview: (String, Int, Int) -> Bitmap?,
+)
+
+data class TemplateChooserActions(
+    val onSelect: (String) -> Unit,
+    val onConnectDirectory: () -> Unit,
+    val onRefresh: () -> Unit,
+    val onDismiss: () -> Unit,
+)
+
 @Composable
 fun TemplateSelectionRow(
     definition: TemplateDefinition?,
@@ -72,37 +87,27 @@ fun TemplateSelectionRow(
 }
 
 @Composable
-fun TemplateChooserOverlay(
-    catalog: TemplateCatalogSnapshot,
-    selectedId: String?,
-    pageWidth: Float,
-    pageHeight: Float,
-    preview: (String, Int, Int) -> Bitmap?,
-    onSelect: (String) -> Unit,
-    onConnectDirectory: () -> Unit,
-    onRefresh: () -> Unit,
-    onDismiss: () -> Unit
-) {
-    EinkModalOverlay(onDismissRequest = onDismiss) {
+fun TemplateChooserOverlay(state: TemplateChooserState, actions: TemplateChooserActions) {
+    EinkModalOverlay(onDismissRequest = actions.onDismiss) {
         Column(Modifier.fillMaxSize().padding(18.dp)) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
                     Text("Template", fontSize = 24.sp)
                     Text(
-                        if (catalog.directoryUri == null) "正在使用内置模板 · 尚未连接公共目录"
+                        if (state.catalog.directoryUri == null) "正在使用内置模板 · 尚未连接公共目录"
                         else "公共目录已连接 · 返回应用或点击刷新可同步外部修改",
                         color = Color(0xFF666666), fontSize = 12.sp
                     )
                 }
-                IconButton(onClick = onConnectDirectory) {
+                IconButton(onClick = actions.onConnectDirectory) {
                     Icon(Icons.Filled.FolderOpen, contentDescription = "连接或更换模板目录")
                 }
-                IconButton(onClick = onRefresh) {
+                IconButton(onClick = actions.onRefresh) {
                     Icon(Icons.Filled.Refresh, contentDescription = "刷新模板目录")
                 }
-                EinkDialogAction("完成", onClick = onDismiss)
+                EinkDialogAction("完成", onClick = actions.onDismiss)
             }
-            catalog.errors.firstOrNull()?.let {
+            state.catalog.errors.firstOrNull()?.let {
                 Text(it, color = Color(0xFF8B0000), fontSize = 12.sp, modifier = Modifier.padding(vertical = 6.dp))
             }
             LazyVerticalGrid(
@@ -111,17 +116,17 @@ fun TemplateChooserOverlay(
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                items(catalog.templates, key = TemplateDefinition::id) { definition ->
-                    val compatible = definition.isCompatible(pageWidth, pageHeight)
+                items(state.catalog.templates, key = TemplateDefinition::id) { definition ->
+                    val compatible = definition.isCompatible(state.pageWidth, state.pageHeight)
                     val enabled = compatible && definition.availability != TemplateAvailability.INVALID
                     Column(
                         Modifier.background(Color.White).border(
-                            if (definition.id == selectedId) 3.dp else 1.dp,
-                            if (definition.id == selectedId) Color.Black else Color(0xFFC8C8C8),
+                            if (definition.id == state.selectedId) 3.dp else 1.dp,
+                            if (definition.id == state.selectedId) Color.Black else Color(0xFFC8C8C8),
                             RectangleShape
-                        ).clickable(enabled = enabled) { onSelect(definition.id) }.padding(8.dp)
+                        ).clickable(enabled = enabled) { actions.onSelect(definition.id) }.padding(8.dp)
                     ) {
-                        TemplatePreview(definition, preview, Modifier.fillMaxWidth().height(160.dp))
+                        TemplatePreview(definition, state.preview, Modifier.fillMaxWidth().height(160.dp))
                         Text(definition.name, fontWeight = FontWeight.Medium, maxLines = 1)
                         Text(definition.description, color = Color(0xFF666666), fontSize = 12.sp, maxLines = 2)
                         when {
