@@ -33,13 +33,12 @@ jobs:
         with:
           cache-provider: basic
 
-      - name: Install pinned Android native tools
-        shell: bash
-        run: |
-          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
-            'build-tools;34.0.0' \
-            'ndk;30.0.15729638' \
-            'cmake;4.1.2'
+      - name: Set up Android SDK and native tools
+        uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699 # v4.0.1
+        with:
+          accept-android-sdk-licenses: true
+          log-accepted-android-sdk-licenses: false
+          packages: 'platform-tools build-tools;34.0.0 ndk;30.0.15729638 cmake;4.1.2'
 
       - name: Make Gradle wrapper executable
         shell: bash
