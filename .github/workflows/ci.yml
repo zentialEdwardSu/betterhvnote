@@ -35,7 +35,11 @@ jobs:
 
       - name: Install pinned Android native tools
         shell: bash
-        run: sdkmanager 'build-tools;34.0.0' 'ndk;30.0.15729638' 'cmake;4.1.2'
+        run: |
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
+            'build-tools;34.0.0' \
+            'ndk;30.0.15729638' \
+            'cmake;4.1.2'
 
       - name: Make Gradle wrapper executable
         shell: bash
@@ -78,7 +82,7 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           $zip = Get-Item 'phone-desktop/build/distributions/NoteLink-*-windows-x64.zip'
-          $target = Join-Path $env:RUNNER_TEMP 'notelink-portable-check'
+          $target = Join-Path $env:RUNNER_TEMP ("notelink-portable-check-{0}" -f [guid]::NewGuid())
           Expand-Archive -LiteralPath $zip.FullName -DestinationPath $target
           $roots = @(Get-ChildItem -LiteralPath $target -Directory)
           if ($roots.Count -ne 1) { throw "Expected one archive root, found $($roots.Count)" }
@@ -89,7 +93,7 @@ jobs:
           if (-not (Test-Path -LiteralPath (Join-Path $root.FullName 'runtime') -PathType Container)) {
             throw 'Missing runtime directory'
           }
-          if (-not (Get-ChildItem -LiteralPath $root.FullName -Recurse -Filter 'notelink_windows.dll')) {
+          if (-not (Test-Path -LiteralPath (Join-Path $root.FullName 'notelink_windows.dll') -PathType Leaf)) {
             throw 'Missing notelink_windows.dll'
           }
           @('Allow-NoteLink-Firewall.ps1', 'Remove-NoteLink-Firewall.ps1') | ForEach-Object {

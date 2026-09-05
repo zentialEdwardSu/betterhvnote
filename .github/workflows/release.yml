@@ -83,7 +83,11 @@ jobs:
 
       - name: Install pinned Android native tools
         shell: bash
-        run: sdkmanager 'build-tools;34.0.0' 'ndk;30.0.15729638' 'cmake;4.1.2'
+        run: |
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
+            'build-tools;34.0.0' \
+            'ndk;30.0.15729638' \
+            'cmake;4.1.2'
 
       - name: Run release quality checks
         shell: bash
@@ -117,7 +121,11 @@ jobs:
 
       - name: Install pinned Android native tools
         shell: bash
-        run: sdkmanager 'build-tools;34.0.0' 'ndk;30.0.15729638' 'cmake;4.1.2'
+        run: |
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
+            'build-tools;34.0.0' \
+            'ndk;30.0.15729638' \
+            'cmake;4.1.2'
 
       - name: Restore signing key
         shell: bash
@@ -224,14 +232,16 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           $zip = Get-Item "phone-desktop/build/distributions/NoteLink-$env:VERSION-windows-x64.zip"
-          $target = Join-Path $env:RUNNER_TEMP 'notelink-release-check'
+          $target = Join-Path $env:RUNNER_TEMP ("notelink-release-check-{0}" -f [guid]::NewGuid())
           Expand-Archive -LiteralPath $zip.FullName -DestinationPath $target
           $root = Join-Path $target "NoteLink-$env:VERSION"
           @('NoteLink.exe', 'README.txt', 'Allow-NoteLink-Firewall.ps1', 'Remove-NoteLink-Firewall.ps1') | ForEach-Object {
             if (-not (Test-Path -LiteralPath (Join-Path $root $_) -PathType Leaf)) { throw "Missing $_" }
           }
           if (-not (Test-Path -LiteralPath (Join-Path $root 'runtime') -PathType Container)) { throw 'Missing runtime directory' }
-          if (-not (Get-ChildItem -LiteralPath $root -Recurse -Filter 'notelink_windows.dll')) { throw 'Missing notelink_windows.dll' }
+          if (-not (Test-Path -LiteralPath (Join-Path $root 'notelink_windows.dll') -PathType Leaf)) {
+            throw 'Missing notelink_windows.dll'
+          }
           @('Allow-NoteLink-Firewall.ps1', 'Remove-NoteLink-Firewall.ps1') | ForEach-Object {
             $tokens = $null
             $errors = $null

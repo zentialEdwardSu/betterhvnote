@@ -100,19 +100,26 @@ compose.desktop {
 }
 
 val packagePortableZip by tasks.registering(Zip::class) {
-    dependsOn("createDistributable")
+    dependsOn("createDistributable", ":transfer-windows:buildWindowsNative")
     val archiveRoot = "NoteLink-$noteLinkVersion"
     val applicationImage = layout.buildDirectory.dir("compose/binaries/main/app/NoteLink")
+    val windowsNativeDll = project(":transfer-windows").layout.buildDirectory
+        .file("generated/native-resources/win32-x86-64/notelink_windows.dll")
     inputs.dir(applicationImage)
+    inputs.file(windowsNativeDll)
     inputs.dir(layout.projectDirectory.dir("src/main/portable"))
     archiveFileName.set("NoteLink-$noteLinkVersion-windows-x64.zip")
     destinationDirectory.set(layout.buildDirectory.dir("distributions"))
     duplicatesStrategy = DuplicatesStrategy.FAIL
     from(applicationImage) { into(archiveRoot) }
+    from(windowsNativeDll) { into(archiveRoot) }
     from(layout.projectDirectory.dir("src/main/portable")) { into(archiveRoot) }
     doFirst {
         require(applicationImage.get().asFile.resolve("NoteLink.exe").isFile) {
             "Compose Desktop application image is missing NoteLink.exe"
+        }
+        require(windowsNativeDll.get().asFile.isFile) {
+            "Windows native library is missing notelink_windows.dll"
         }
     }
 }
