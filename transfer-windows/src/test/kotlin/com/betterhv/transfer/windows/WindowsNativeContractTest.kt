@@ -127,6 +127,17 @@ class WindowsNativeContractTest {
         assertFailsWith<IllegalArgumentException> { WindowsSecureEnvelope.open(key, envelope, replay, now = 1_000) }
     }
 
+    @Test fun identifiedEnvelopeSupportsKeySelectionWithoutPoisoningReplayCache() {
+        val key = ByteArray(32) { it.toByte() }
+        val wrongKey = ByteArray(32) { (it + 1).toByte() }
+        val replay = WindowsReplayCache()
+        val envelope = WindowsSecureEnvelope.seal(key, "note-2", byteArrayOf(4, 5, 6), now = 1_000)
+
+        assertEquals("note-2", WindowsSecureEnvelope.senderDeviceId(envelope))
+        runCatching { WindowsSecureEnvelope.open(wrongKey, envelope, replay, now = 1_000) }
+        assertContentEquals(byteArrayOf(4, 5, 6), WindowsSecureEnvelope.open(key, envelope, replay, now = 1_000))
+    }
+
     private fun reassemble(frames: Iterable<ByteArray>): ByteArray? {
         val receiver = BleTransportReassembler()
         var complete: ByteArray? = null

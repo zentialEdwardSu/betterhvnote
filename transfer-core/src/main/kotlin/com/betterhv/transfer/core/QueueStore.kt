@@ -73,6 +73,7 @@ class QueueCoordinator(
         val now = clock()
         val item = store.next(kind, deviceId, now) ?: return null
         return item.copy(
+            destinationDeviceId = item.destinationDeviceId ?: deviceId,
             state = QueueState.LEASED,
             leaseExpiresAt = now + TransferLimits.LEASE_TIMEOUT_MILLIS,
             failureReason = null

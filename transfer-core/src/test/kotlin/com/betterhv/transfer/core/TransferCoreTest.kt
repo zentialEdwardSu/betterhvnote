@@ -46,6 +46,20 @@ class TransferCoreTest {
         assertNull(store.find(value.id))
     }
 
+    @Test fun `leasing an unassigned item binds it to the first device`() {
+        val store = InMemoryQueueStore()
+        val value = item(ContentKind.TEXT, 0)
+        store.insert(value)
+        val coordinator = QueueCoordinator(store)
+
+        val leased = requireNotNull(coordinator.leaseNext(ContentKind.TEXT, "note-a"))
+
+        assertEquals("note-a", leased.destinationDeviceId)
+        assertEquals("note-a", store.find(value.id)?.destinationDeviceId)
+        coordinator.release(value.id)
+        assertNull(coordinator.leaseNext(ContentKind.TEXT, "note-b"))
+    }
+
     @Test fun `pairing derives the same secret and verification code`() {
         val a = TransferCrypto.generatePairingKeyPair()
         val b = TransferCrypto.generatePairingKeyPair()

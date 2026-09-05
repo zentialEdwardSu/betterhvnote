@@ -7,7 +7,6 @@
     <ID>ArgumentListWrapping:AndroidEndpoints.kt$AndroidSenderEndpoint$( context, deviceId, deviceName, provider::counts, commandHandler )</ID>
     <ID>ArgumentListWrapping:AndroidPairingController.kt$AndroidPairingController$( TABLE, COLUMNS, null, null, null, null, "last_used_at DESC, paired_at DESC" )</ID>
     <ID>ArgumentListWrapping:AndroidPairingController.kt$AndroidPairingController$( TABLE, arrayOf("encrypted_secret"), "device_id=?", arrayOf(deviceId), null, null, null )</ID>
-    <ID>ArgumentListWrapping:AndroidPairingController.kt$AndroidPairingController$( TABLE, arrayOf("encrypted_secret"), "device_id=?", arrayOf(oldDeviceId), null, null, null )</ID>
     <ID>ArgumentListWrapping:AndroidPairingController.kt$AndroidPairingController$( deviceId = localDeviceId, deviceName = localDeviceName, publicKey = pair.public.encoded, nonce = TransferCrypto.randomBytes(16) )</ID>
     <ID>ArgumentListWrapping:AndroidPairingController.kt$AndroidPairingController$( local.deviceId, offer.deviceId, offer.deviceName.ifBlank { remoteDeviceName }, TransferCrypto.verificationCode(key, transcript), key )</ID>
     <ID>ArgumentListWrapping:AndroidPairingController.kt$AndroidPairingController$( sixDigitCode.encodeToByteArray(), "BetterHv-manual-v1".encodeToByteArray(), "paired-device".encodeToByteArray(), 32 )</ID>
@@ -66,7 +65,6 @@
     <ID>MagicNumber:BleReceiverScanner.kt$BleReceiverScanner$60_000L</ID>
     <ID>MagicNumber:BleSecureEnvelope.kt$BleReplayCache.&lt;no name provided&gt;$0.75f</ID>
     <ID>MagicNumber:BleSecureEnvelope.kt$BleSecureEnvelope$12</ID>
-    <ID>MagicNumber:BleSecureEnvelope.kt$BleSecureEnvelope$16</ID>
     <ID>MagicNumber:BleSenderPeripheral.kt$BleSenderPeripheral$23</ID>
     <ID>MagicNumber:BleSenderPeripheral.kt$BleSenderPeripheral$3</ID>
     <ID>MagicNumber:BleSenderPeripheral.kt$BleSenderPeripheral$33</ID>

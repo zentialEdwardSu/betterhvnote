@@ -141,20 +141,38 @@ class AndroidPairingController(context: Context) : PairingController {
     fun resolveLegacyIdentity(oldDeviceId: String, identity: BleIdentity): PairedDevice {
         val old = requireNotNull(pairedClient(oldDeviceId)) { "旧配对设备不存在" }
         require(old.legacy) { "配对设备不需要身份迁移" }
+        return replaceIdentity(old, identity.deviceId, identity.deviceName)
+    }
+
+    /** Binds a manual-code pairing placeholder to the authenticated peer identity. */
+    fun resolveIdentity(oldDeviceId: String, deviceId: String, deviceName: String? = null): PairedDevice {
+        val old = requireNotNull(pairedClient(oldDeviceId)) { "配对设备不存在" }
+        if (old.id == deviceId) return markLastUsed(deviceId)
+        return replaceIdentity(old, deviceId, deviceName ?: old.name)
+    }
+
+    private fun replaceIdentity(old: PairedDevice, deviceId: String, deviceName: String): PairedDevice {
+        require(pairedClient(deviceId) == null) { "该设备身份已存在" }
         val secret = database.readableDatabase.query(
-            TABLE, arrayOf("encrypted_secret"), "device_id=?", arrayOf(oldDeviceId), null, null, null
+            TABLE,
+            arrayOf("encrypted_secret"),
+            "device_id=?",
+            arrayOf(old.id),
+            null,
+            null,
+            null
         ).use { cursor -> require(cursor.moveToFirst()); cursor.getString(0) }
         val resolved = old.copy(
-            id = identity.deviceId,
-            name = identity.deviceName,
-            identityHash = identityHash(identity.deviceId),
+            id = deviceId,
+            name = deviceName,
+            identityHash = identityHash(deviceId),
             lastUsedAt = System.currentTimeMillis(),
             legacy = false
         )
         val writable = database.writableDatabase
         writable.beginTransaction()
         try {
-            writable.delete(TABLE, "device_id=?", arrayOf(oldDeviceId))
+            writable.delete(TABLE, "device_id=?", arrayOf(old.id))
             insert(writable, resolved, secret)
             writable.setTransactionSuccessful()
         } finally {

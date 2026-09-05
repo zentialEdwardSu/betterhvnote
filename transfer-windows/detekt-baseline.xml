@@ -18,7 +18,6 @@
     <ID>MagicNumber:JnaWindowsNativeApi.kt$JnaWindowsNativeApi$1_000_000L</ID>
     <ID>MagicNumber:WindowsSecureEnvelope.kt$WindowsReplayCache.&lt;no name provided&gt;$0.75f</ID>
     <ID>MagicNumber:WindowsSecureEnvelope.kt$WindowsSecureEnvelope$12</ID>
-    <ID>MagicNumber:WindowsSecureEnvelope.kt$WindowsSecureEnvelope$16</ID>
     <ID>MaxLineLength:WindowsSecureEnvelope.kt$WindowsSecureEnvelope$fun</ID>
     <ID>MaximumLineLength:WindowsSecureEnvelope.kt$WindowsSecureEnvelope$ </ID>
     <ID>ReturnCount:JnaWindowsNativeApi.kt$JnaWindowsNativeApi$override fun pollBleCommand(timeoutMillis: Int): ByteArray?</ID>
