@@ -255,7 +255,7 @@ fun NotebookManagerScreen(
                             } else {
                                 pendingDeleteId = summary.id
                                 pendingDeleteAt = now
-                                actions.onNotice("再次点击删除图标以删除“${summary.title}”")
+                                actions.onNotice(noteText("再次点击删除图标以删除“${summary.title}”", "Tap Delete again to remove \"${summary.title}\""))
                             }
                         },
                         onExport = { summary -> actions.onExportNotebook(summary.id) },
@@ -274,16 +274,16 @@ fun NotebookManagerScreen(
                     border = androidx.compose.foundation.BorderStroke(1.dp, Color.Black),
                     tonalElevation = 0.dp,
                     shadowElevation = 0.dp
-                ) { Text("处理中…", Modifier.padding(horizontal = 24.dp, vertical = 14.dp)) }
+                ) { Text(noteText("处理中…", "Working..."), Modifier.padding(horizontal = 24.dp, vertical = 14.dp)) }
             }
         }
         if (pdfSourceChooserOpen && !state.busy) {
             EinkChoiceOverlay(
-                title = "导入 PDF",
-                description = "选择 PDF 来源。导入后会创建独立的 PDF 笔记本。",
+                title = noteText("导入 PDF", "Import PDF"),
+                description = noteText("选择 PDF 来源。导入后会创建独立的 PDF 笔记本。", "Choose a PDF source. Importing creates a separate PDF notebook."),
                 onDismissRequest = { pdfSourceChooserOpen = false },
                 choices = listOf(
-                    "本地文件" to {
+                    noteText("本地文件", "Local file") to {
                         pdfSourceChooserOpen = false
                         pdfPicker.launch(arrayOf("application/pdf"))
                     },
@@ -309,19 +309,19 @@ private fun NotebookTopBar(
         NotionIconButton(
             state = NotionIconButtonState(
                 icon = Icons.AutoMirrored.Filled.ArrowBack,
-                contentDescription = "返回",
+                contentDescription = noteText("返回", "Back"),
                 enabled = !state.busy,
             ),
             onClick = actions.onBack,
         )
         Text(
-            if (state.selecting) "选择页面" else "笔记本",
+            if (state.selecting) noteText("选择页面", "Select pages") else noteText("笔记本", "Notebooks"),
             fontSize = 18.sp,
             fontWeight = FontWeight.Medium,
             modifier = Modifier.padding(start = 8.dp)
         )
         Text(
-            if (state.selecting) "${state.selectedCount} 已选择" else "${state.notebookCount} 本",
+            if (state.selecting) noteText("${state.selectedCount} 已选择", "${state.selectedCount} selected") else noteText("${state.notebookCount} 本", "${state.notebookCount} notebooks"),
             color = NotionMuted,
             fontSize = 13.sp,
             modifier = Modifier.padding(start = 10.dp)
@@ -338,7 +338,7 @@ private fun NotebookTopBarActions(state: NotebookTopBarState, actions: NotebookT
         NotionIconButton(
             state = NotionIconButtonState(
                 icon = Icons.Filled.Check,
-                contentDescription = "将选中的 ${state.selectedCount} 页创建为新笔记本",
+                contentDescription = noteText("将选中的 ${state.selectedCount} 页创建为新笔记本", "Create a notebook from ${state.selectedCount} selected pages"),
                 enabled = state.selectedCount > 0 && !state.busy,
                 outlined = true,
             ),
@@ -349,7 +349,7 @@ private fun NotebookTopBarActions(state: NotebookTopBarState, actions: NotebookT
             NotionIconButton(
                 state = NotionIconButtonState(
                     icon = Icons.Filled.PictureAsPdf,
-                    contentDescription = "导入 PDF",
+                    contentDescription = noteText("导入 PDF", "Import PDF"),
                     enabled = !state.busy,
                     outlined = true,
                 ),
@@ -357,19 +357,19 @@ private fun NotebookTopBarActions(state: NotebookTopBarState, actions: NotebookT
             )
             CreateNotebookIconButton(
                 action = NotebookCreateAction.CURRENT_TO_END,
-                contentDescription = "当前页至末页创建新笔记本",
+                contentDescription = noteText("当前页至末页创建新笔记本", "Create notebook from current through last page"),
                 enabled = state.canCreateCurrentToEnd && !state.busy,
                 onClick = actions.onCreateCurrentToEnd,
             )
             CreateNotebookIconButton(
                 action = NotebookCreateAction.SELECTION,
-                contentDescription = "选择页面创建新笔记本",
+                contentDescription = noteText("选择页面创建新笔记本", "Select pages for a new notebook"),
                 enabled = state.canSelectPages && !state.busy,
                 onClick = actions.onSelectPages,
             )
             CreateNotebookIconButton(
                 action = NotebookCreateAction.BLANK,
-                contentDescription = "创建空白笔记本",
+                contentDescription = noteText("创建空白笔记本", "Create blank notebook"),
                 enabled = !state.busy,
                 onClick = actions.onCreateBlank,
             )
@@ -490,7 +490,7 @@ private fun NotebookCover(state: NotebookSummaryCardState) {
         state.bitmap?.let {
             Image(
                 it.asImageBitmap(),
-                contentDescription = "${summary.title} 封面",
+                contentDescription = noteText("${summary.title} 封面", "${summary.title} cover"),
                 modifier = Modifier.fillMaxSize(),
                 contentScale = ContentScale.Fit,
             )
@@ -536,8 +536,8 @@ private fun NotebookSummaryFooter(
             Text(
                 buildString {
                     append(summary.pageCount)
-                    append(" 页")
-                    if (summary.isCurrent) append("  ·  当前")
+                    append(noteText(" 页", " pages"))
+                    if (summary.isCurrent) append(noteText("  ·  当前", "  ·  Current"))
                     if (summary.isWorkingCopy) append("  ·  Working Copy")
                 },
                 color = if (state.pendingDelete) Color(0xFFB00020) else NotionMuted,
@@ -550,7 +550,7 @@ private fun NotebookSummaryFooter(
         NotionIconButton(
             state = NotionIconButtonState(
                 icon = Icons.Filled.IosShare,
-                contentDescription = "导出 ${summary.title}",
+                contentDescription = noteText("导出 ${summary.title}", "Export ${summary.title}"),
                 enabled = state.enabled,
                 size = 34.dp,
             ),
@@ -561,9 +561,9 @@ private fun NotebookSummaryFooter(
                 state = NotionIconButtonState(
                     icon = Icons.Filled.Delete,
                     contentDescription = if (state.pendingDelete) {
-                        "确认删除 ${summary.title}"
+                        noteText("确认删除 ${summary.title}", "Confirm deleting ${summary.title}")
                     } else {
-                        "删除 ${summary.title}"
+                        noteText("删除 ${summary.title}", "Delete ${summary.title}")
                     },
                     enabled = state.enabled,
                     active = state.pendingDelete,

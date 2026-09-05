@@ -7,8 +7,24 @@
     <ID>ArgumentListWrapping:ExportDownloads.kt$ExportDownloads$( temp.toPath(), target.toPath(), StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING )</ID>
     <ID>ArgumentListWrapping:ExportEngine.kt$ExportEngine$( snapshot, (snapshot.metadata.width * 2f).toInt(), (snapshot.metadata.height * 2f).toInt() )</ID>
     <ID>ArgumentListWrapping:ExportEngine.kt$ExportEngine$( source.toPath(), target.toPath(), StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING )</ID>
-    <ID>ArgumentListWrapping:ExportPanel.kt$( "${summary.notebookTitle} · ${summary.pageCount} 页 · ${summary.task.format.name}", color = ExportMuted, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis )</ID>
-    <ID>ArgumentListWrapping:ExportPanel.kt$("全部页面", scope == ExportScope.ALL_PAGES)</ID>
+    <ID>ArgumentListWrapping:ExportPanel.kt$( noteText("${summary.notebookTitle} · ${summary.pageCount} 页 · ${summary.task.format.name}", "${summary.notebookTitle} · ${summary.pageCount} pages · ${summary.task.format.name}"), color = ExportMuted, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis )</ID>
+    <ID>ArgumentListWrapping:ExportPanel.kt$("$taskCount 项", "$taskCount tasks")</ID>
+    <ID>ArgumentListWrapping:ExportPanel.kt$("${summary.notebookTitle} · ${summary.pageCount} 页 · ${summary.task.format.name}", "${summary.notebookTitle} · ${summary.pageCount} pages · ${summary.task.format.name}")</ID>
+    <ID>ArgumentListWrapping:ExportPanel.kt$("保存 ${summary.notebookTitle} 到 Downloads", "Save ${summary.notebookTitle} to Downloads")</ID>
+    <ID>ArgumentListWrapping:ExportPanel.kt$("全部页面", "All pages")</ID>
+    <ID>ArgumentListWrapping:ExportPanel.kt$("内部生成文件和增量缓存将被删除，Downloads 与 NoteLink 中的副本不受影响。", "Generated files and incremental caches will be deleted. Copies in Downloads and NoteLink are unaffected.")</ID>
+    <ID>ArgumentListWrapping:ExportPanel.kt$("单页", "Single page")</ID>
+    <ID>ArgumentListWrapping:ExportPanel.kt$("发送 ${summary.notebookTitle} 到 NoteLink", "Send ${summary.notebookTitle} to NoteLink")</ID>
+    <ID>ArgumentListWrapping:ExportPanel.kt$("将持续跟随 ${pages.size} 个页面，并增量更新变化内容", "Tracks ${pages.size} pages and incrementally updates changes")</ID>
+    <ID>ArgumentListWrapping:ExportPanel.kt$("选择页面", "Selected pages")</ID>
+    <ID>ArgumentListWrapping:ExportPanel.kt$(Icons.Filled.Download, noteText("保存 ${summary.notebookTitle} 到 Downloads", "Save ${summary.notebookTitle} to Downloads"))</ID>
+    <ID>ArgumentListWrapping:ExportPanel.kt$(noteText("$taskCount 项", "$taskCount tasks"), color = ExportMuted, fontSize = 13.sp, modifier = Modifier.padding(start = 10.dp))</ID>
+    <ID>ArgumentListWrapping:ExportPanel.kt$(noteText("全部页面", "All pages"), scope == ExportScope.ALL_PAGES)</ID>
+    <ID>ArgumentListWrapping:ExportPanel.kt$(noteText("内部生成文件和增量缓存将被删除，Downloads 与 NoteLink 中的副本不受影响。", "Generated files and incremental caches will be deleted. Copies in Downloads and NoteLink are unaffected."))</ID>
+    <ID>ArgumentListWrapping:ExportPanel.kt$(noteText("单页", "Single page"), scope == ExportScope.SINGLE_PAGE)</ID>
+    <ID>ArgumentListWrapping:ExportPanel.kt$(noteText("将持续跟随 ${pages.size} 个页面，并增量更新变化内容", "Tracks ${pages.size} pages and incrementally updates changes"), color = ExportMuted)</ID>
+    <ID>ArgumentListWrapping:ExportPanel.kt$(noteText("选择页面", "Selected pages"), scope == ExportScope.SELECTED_PAGES)</ID>
+    <ID>ArgumentListWrapping:ExportPanel.kt$(start = 10.dp)</ID>
     <ID>ArgumentListWrapping:ExportPanel.kt$(state.notebooks.firstOrNull { it.id == initialNotebookId }?.id ?: state.notebooks.firstOrNull()?.id)</ID>
     <ID>ArgumentListWrapping:ExportPanel.kt$(summary.task.id, input.callbacks.beforeExport)</ID>
     <ID>ArgumentListWrapping:ExportPanel.kt$(taskTitle(summary), fontSize = 16.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)</ID>
@@ -36,14 +52,84 @@
     <ID>ArgumentListWrapping:HitTest.kt$HitTest$( ax, ay, bx, by, polygon[j * 2], polygon[j * 2 + 1], polygon[i * 2], polygon[i * 2 + 1] )</ID>
     <ID>ArgumentListWrapping:InsertionCoordinator.kt$InsertionCoordinator$( text, x, y, requireNotNull(ready.sourceDeviceId), ready.lease.offer.item.id )</ID>
     <ID>ArgumentListWrapping:MainActivity.kt$( request.selection.normalizedBounds, LinkedNoteContent.REGION_IMAGE, targetPageId )</ID>
+    <ID>ArgumentListWrapping:MainActivity.kt$("${available.client.name} · $count 项", "${available.client.name} · $count items")</ID>
     <ID>ArgumentListWrapping:MainActivity.kt$("NoteLinkPairing", "failed device=${candidate.deviceId} error=${it.message}")</ID>
     <ID>ArgumentListWrapping:MainActivity.kt$("NoteLinkPairing", "start device=${candidate.deviceId} address=${candidate.bluetoothAddress}")</ID>
+    <ID>ArgumentListWrapping:MainActivity.kt$("Template 已更换为 ${templateCatalog.find(id)?.name ?: id}", "Template changed to ${templateCatalog.find(id)?.name ?: id}")</ID>
+    <ID>ArgumentListWrapping:MainActivity.kt$("WLAN 已关闭", "Wi-Fi is off")</ID>
+    <ID>ArgumentListWrapping:MainActivity.kt$("从手机取下一项${contentKindLabel(choosing.kind)}", "Get next ${contentKindLabel(choosing.kind)} from phone")</ID>
+    <ID>ArgumentListWrapping:MainActivity.kt$("从系统文件选择", "Choose system file")</ID>
+    <ID>ArgumentListWrapping:MainActivity.kt$("保存设置失败：${it.message}", "Could not save setting: ${it.message}")</ID>
+    <ID>ArgumentListWrapping:MainActivity.kt$("图片已导入，请点击页面确定位置", "Image imported. Tap the page to place it.")</ID>
+    <ID>ArgumentListWrapping:MainActivity.kt$("学习模式：翻页包含夹纸", "Study mode: navigation includes linked notes")</ID>
+    <ID>ArgumentListWrapping:MainActivity.kt$("已取消书签", "Bookmark removed")</ID>
+    <ID>ArgumentListWrapping:MainActivity.kt$("已就绪，插入时按需连接手机", "Ready; connects to the phone when needed")</ID>
+    <ID>ArgumentListWrapping:MainActivity.kt$("已新增第 ${penView!!.currentPageIndex() + 1} 页", "Added page ${penView!!.currentPageIndex() + 1}")</ID>
+    <ID>ArgumentListWrapping:MainActivity.kt$("已新增第 ${pv.currentPageIndex() + 1} 页", "Added page ${pv.currentPageIndex() + 1}")</ID>
+    <ID>ArgumentListWrapping:MainActivity.kt$("已添加书签", "Bookmark added")</ID>
+    <ID>ArgumentListWrapping:MainActivity.kt$("当前页不是 PDF 源页", "The current page is not a PDF source page")</ID>
+    <ID>ArgumentListWrapping:MainActivity.kt$("手动输入", "Enter manually")</ID>
+    <ID>ArgumentListWrapping:MainActivity.kt$("插入文字", "Insert text")</ID>
+    <ID>ArgumentListWrapping:MainActivity.kt$("文字插入失败：${it.message}", "Text insertion failed: ${it.message}")</ID>
+    <ID>ArgumentListWrapping:MainActivity.kt$("新建一张夹纸，或放入当前 PDF 页已有夹纸。", "Create a linked note or use one already attached to this PDF page.")</ID>
+    <ID>ArgumentListWrapping:MainActivity.kt$("无法打开 Release 页面：${it.message}", "Cannot open release page: ${it.message}")</ID>
+    <ID>ArgumentListWrapping:MainActivity.kt$("最后一页不能删除", "The last page cannot be deleted")</ID>
+    <ID>ArgumentListWrapping:MainActivity.kt$("模板目录连接失败：${it.message}", "Could not connect template folder: ${it.message}")</ID>
+    <ID>ArgumentListWrapping:MainActivity.kt$("点击夹纸确定放置位置 · 返回键取消", "Tap the linked note to place · Back to cancel")</ID>
+    <ID>ArgumentListWrapping:MainActivity.kt$("等待 NoteLink 发送${contentKindLabel(waiting.kind)}…", "Waiting for NoteLink to send ${contentKindLabel(waiting.kind)}...")</ID>
+    <ID>ArgumentListWrapping:MainActivity.kt$("编辑文字", "Edit text")</ID>
+    <ID>ArgumentListWrapping:MainActivity.kt$("蓝牙已关闭", "Bluetooth is off")</ID>
+    <ID>ArgumentListWrapping:MainActivity.kt$("设备不支持 BLE", "This device does not support BLE")</ID>
+    <ID>ArgumentListWrapping:MainActivity.kt$("设备不支持 Wi-Fi Direct", "This device does not support Wi-Fi Direct")</ID>
+    <ID>ArgumentListWrapping:MainActivity.kt$("该 Template 与当前页面不兼容", "This template is not compatible with the current page")</ID>
+    <ID>ArgumentListWrapping:MainActivity.kt$("请先与手机配对", "Pair with a phone first")</ID>
+    <ID>ArgumentListWrapping:MainActivity.kt$("请点击页面确定文字位置", "Tap the page to place the text")</ID>
+    <ID>ArgumentListWrapping:MainActivity.kt$("调试模式已关闭", "Debug mode disabled")</ID>
+    <ID>ArgumentListWrapping:MainActivity.kt$("调试模式已开启", "Debug mode enabled")</ID>
+    <ID>ArgumentListWrapping:MainActivity.kt$("阅读模式：翻页跳过夹纸", "Reading mode: navigation skips linked notes")</ID>
+    <ID>ArgumentListWrapping:MainActivity.kt$("需要附近设备权限才能从手机获取", "Nearby devices permission is required to receive from a phone")</ID>
     <ID>ArgumentListWrapping:MainActivity.kt$('_', ' ')</ID>
     <ID>ArgumentListWrapping:MainActivity.kt$(16.dp)</ID>
     <ID>ArgumentListWrapping:MainActivity.kt$(20.dp)</ID>
     <ID>ArgumentListWrapping:MainActivity.kt$(Modifier.fillMaxWidth(), horizontalArrangement = androidx.compose.foundation.layout.Arrangement.End)</ID>
     <ID>ArgumentListWrapping:MainActivity.kt$(Modifier.padding(20.dp), verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(16.dp))</ID>
+    <ID>ArgumentListWrapping:MainActivity.kt$(PackageManager.FEATURE_BLUETOOTH_LE)</ID>
+    <ID>ArgumentListWrapping:MainActivity.kt$(PackageManager.FEATURE_WIFI_DIRECT)</ID>
+    <ID>ArgumentListWrapping:MainActivity.kt$(choosing.kind)</ID>
+    <ID>ArgumentListWrapping:MainActivity.kt$(horizontal = 18.dp, vertical = 10.dp)</ID>
+    <ID>ArgumentListWrapping:MainActivity.kt$(id)</ID>
+    <ID>ArgumentListWrapping:MainActivity.kt$(if (choosing.kind == ContentKind.TEXT) noteText("手动输入", "Enter manually") else noteText("从系统文件选择", "Choose system file"))</ID>
+    <ID>ArgumentListWrapping:MainActivity.kt$(if (debugMode) noteText("调试模式已开启", "Debug mode enabled") else noteText("调试模式已关闭", "Debug mode disabled"))</ID>
+    <ID>ArgumentListWrapping:MainActivity.kt$(if (isBookmarked) noteText("已添加书签", "Bookmark added") else noteText("已取消书签", "Bookmark removed"))</ID>
+    <ID>ArgumentListWrapping:MainActivity.kt$(if (request is TextEditorRequest.New) noteText("插入文字", "Insert text") else noteText("编辑文字", "Edit text"), fontSize = 20.sp)</ID>
+    <ID>ArgumentListWrapping:MainActivity.kt$(if (study) noteText("学习模式：翻页包含夹纸", "Study mode: navigation includes linked notes") else noteText("阅读模式：翻页跳过夹纸", "Reading mode: navigation skips linked notes"))</ID>
+    <ID>ArgumentListWrapping:MainActivity.kt$(if (value) noteText("已添加书签", "Bookmark added") else noteText("已取消书签", "Bookmark removed"))</ID>
+    <ID>ArgumentListWrapping:MainActivity.kt$(noteText("${available.client.name} · $count 项", "${available.client.name} · $count items"))</ID>
+    <ID>ArgumentListWrapping:MainActivity.kt$(noteText("Template 已更换为 ${templateCatalog.find(id)?.name ?: id}", "Template changed to ${templateCatalog.find(id)?.name ?: id}"))</ID>
+    <ID>ArgumentListWrapping:MainActivity.kt$(noteText("从手机取下一项${contentKindLabel(choosing.kind)}", "Get next ${contentKindLabel(choosing.kind)} from phone"))</ID>
+    <ID>ArgumentListWrapping:MainActivity.kt$(noteText("保存设置失败：${it.message}", "Could not save setting: ${it.message}"))</ID>
+    <ID>ArgumentListWrapping:MainActivity.kt$(noteText("图片已导入，请点击页面确定位置", "Image imported. Tap the page to place it."))</ID>
+    <ID>ArgumentListWrapping:MainActivity.kt$(noteText("夹纸 ${target.ordinal}", "Linked note ${target.ordinal}") to { prepare(target.pageId) })</ID>
+    <ID>ArgumentListWrapping:MainActivity.kt$(noteText("已新增第 ${penView!!.currentPageIndex() + 1} 页", "Added page ${penView!!.currentPageIndex() + 1}"))</ID>
+    <ID>ArgumentListWrapping:MainActivity.kt$(noteText("已新增第 ${pv.currentPageIndex() + 1} 页", "Added page ${pv.currentPageIndex() + 1}"))</ID>
+    <ID>ArgumentListWrapping:MainActivity.kt$(noteText("当前页不是 PDF 源页", "The current page is not a PDF source page"))</ID>
+    <ID>ArgumentListWrapping:MainActivity.kt$(noteText("文字插入失败：${it.message}", "Text insertion failed: ${it.message}"))</ID>
+    <ID>ArgumentListWrapping:MainActivity.kt$(noteText("无法打开 Release 页面：${it.message}", "Cannot open release page: ${it.message}"))</ID>
+    <ID>ArgumentListWrapping:MainActivity.kt$(noteText("最后一页不能删除", "The last page cannot be deleted"))</ID>
+    <ID>ArgumentListWrapping:MainActivity.kt$(noteText("模板目录连接失败：${it.message}", "Could not connect template folder: ${it.message}"))</ID>
+    <ID>ArgumentListWrapping:MainActivity.kt$(noteText("点击夹纸确定放置位置 · 返回键取消", "Tap the linked note to place · Back to cancel"), Modifier.padding(horizontal = 18.dp, vertical = 10.dp))</ID>
+    <ID>ArgumentListWrapping:MainActivity.kt$(noteText("等待 NoteLink 发送${contentKindLabel(waiting.kind)}…", "Waiting for NoteLink to send ${contentKindLabel(waiting.kind)}..."))</ID>
+    <ID>ArgumentListWrapping:MainActivity.kt$(noteText("该 Template 与当前页面不兼容", "This template is not compatible with the current page"))</ID>
+    <ID>ArgumentListWrapping:MainActivity.kt$(noteText("请点击页面确定文字位置", "Tap the page to place the text"))</ID>
+    <ID>ArgumentListWrapping:MainActivity.kt$(noteText("需要附近设备权限才能从手机获取", "Nearby devices permission is required to receive from a phone"))</ID>
     <ID>ArgumentListWrapping:MainActivity.kt$(snapshot.phase.name.replace('_', ' '), snapshot.mode?.name, "SSID ${snapshot.ssidMatch.name}")</ID>
+    <ID>ArgumentListWrapping:MainActivity.kt$(waiting.kind)</ID>
+    <ID>ArgumentListWrapping:NotebookManagerScreen.kt$("${state.notebookCount} 本", "${state.notebookCount} notebooks")</ID>
+    <ID>ArgumentListWrapping:NotebookManagerScreen.kt$("${state.selectedCount} 已选择", "${state.selectedCount} selected")</ID>
+    <ID>ArgumentListWrapping:NotebookManagerScreen.kt$("再次点击删除图标以删除“${summary.title}”", "Tap Delete again to remove \"${summary.title}\"")</ID>
+    <ID>ArgumentListWrapping:NotebookManagerScreen.kt$("将选中的 ${state.selectedCount} 页创建为新笔记本", "Create a notebook from ${state.selectedCount} selected pages")</ID>
+    <ID>ArgumentListWrapping:NotebookManagerScreen.kt$("选择 PDF 来源。导入后会创建独立的 PDF 笔记本。", "Choose a PDF source. Importing creates a separate PDF notebook.")</ID>
+    <ID>ArgumentListWrapping:NotebookManagerScreen.kt$(noteText("再次点击删除图标以删除“${summary.title}”", "Tap Delete again to remove \"${summary.title}\""))</ID>
     <ID>ArgumentListWrapping:NotebookRepository.kt$NotebookRepository$( "images", arrayOf("asset_path"), null, null, null, null, null )</ID>
     <ID>ArgumentListWrapping:NotebookRepository.kt$NotebookRepository$( "images", arrayOf("asset_path", "mime_type", "pixel_width", "pixel_height", "exif_orientation"), "object_id=?", arrayOf(id.toString()), null, null, null )</ID>
     <ID>ArgumentListWrapping:NotebookRepository.kt$NotebookRepository$( "metadata", arrayOf("value"), "key=?", arrayOf(key), null, null, null )</ID>
@@ -91,6 +177,13 @@
     <ID>ArgumentListWrapping:NotebookRepository.kt$NotebookRepository$(c.getString(4))</ID>
     <ID>ArgumentListWrapping:NotebookRepository.kt$NotebookRepository$(mutation.objectId.toString(), mutation.pageId.toString())</ID>
     <ID>ArgumentListWrapping:PageManagerPanel.kt$( tool, event.buttonState or PenButtonTracker.currentButtonState, event.source )</ID>
+    <ID>ArgumentListWrapping:PageManagerPanel.kt$("再次按 Side3 删除第 ${info.pageNumber} 页", "Press Side3 again to delete page ${info.pageNumber}")</ID>
+    <ID>ArgumentListWrapping:PageManagerPanel.kt$("已经是最后一组缩略图", "Already at the last thumbnail group")</ID>
+    <ID>ArgumentListWrapping:PageManagerPanel.kt$("已经是第一组缩略图", "Already at the first thumbnail group")</ID>
+    <ID>ArgumentListWrapping:PageManagerPanel.kt$("页面 ${currentIndex + 1}/${displayedPages.size.coerceAtLeast(1)}", "Page ${currentIndex + 1}/${displayedPages.size.coerceAtLeast(1)}")</ID>
+    <ID>ArgumentListWrapping:PageManagerPanel.kt$(1)</ID>
+    <ID>ArgumentListWrapping:PageManagerPanel.kt$(if (side1Delta &lt; 0) noteText("已经是第一组缩略图", "Already at the first thumbnail group") else noteText("已经是最后一组缩略图", "Already at the last thumbnail group"))</ID>
+    <ID>ArgumentListWrapping:PageManagerPanel.kt$(noteText("再次按 Side3 删除第 ${info.pageNumber} 页", "Press Side3 again to delete page ${info.pageNumber}"))</ID>
     <ID>ArgumentListWrapping:PageRenderer.kt$PageRenderer$( bitmap, null, RectF(0f, 0f, obj.pixelWidth.toFloat(), obj.pixelHeight.toFloat()), Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG) )</ID>
     <ID>ArgumentListWrapping:PageRenderer.kt$PageRenderer$(when (orientation) { 2 -&gt; floatArrayOf(-1f, 0f, width, 0f, 1f, 0f, 0f, 0f, 1f) 3 -&gt; floatArrayOf(-1f, 0f, width, 0f, -1f, height, 0f, 0f, 1f) 4 -&gt; floatArrayOf(1f, 0f, 0f, 0f, -1f, height, 0f, 0f, 1f) 5 -&gt; floatArrayOf(0f, 1f, 0f, 1f, 0f, 0f, 0f, 0f, 1f) 6 -&gt; floatArrayOf(0f, -1f, height, 1f, 0f, 0f, 0f, 0f, 1f) 7 -&gt; floatArrayOf(0f, -1f, height, -1f, 0f, width, 0f, 0f, 1f) 8 -&gt; floatArrayOf(0f, 1f, 0f, -1f, 0f, width, 0f, 0f, 1f) else -&gt; floatArrayOf(1f, 0f, 0f, 0f, 1f, 0f, 0f, 0f, 1f) })</ID>
     <ID>ArgumentListWrapping:PdfAssetStore.kt$PdfAssetStore$( "pdf-incoming/${temp.name}", sanitizeDisplayName(displayName), total, digest.digest().joinToString("") { "%02x".format(it) } )</ID>
@@ -126,7 +219,6 @@
     <ID>ArgumentListWrapping:PhoneTransferClient.kt$PhoneTransferClient$( incoming, item.id, fileKey, probeKey = if (mode == TransferMode.LAN) probeKey else null, progress = { done, total -&gt; updateProgress(item.id, done, total, meter) }, onListening = { activeListeningSocket = it } )</ID>
     <ID>ArgumentListWrapping:PhoneTransferClient.kt$PhoneTransferClient$( session, clientId, BleCommand.PrepareFileTransfer(artifact.id, mode, receiverEndpoint, nonce) )</ID>
     <ID>ArgumentListWrapping:PhoneTransferClient.kt$PhoneTransferClient$( session, clientId, BleCommand.PrepareFileTransfer(item.id, mode, receiverEndpoint, nonce) )</ID>
-    <ID>ArgumentListWrapping:PhoneTransferClient.kt$PhoneTransferClient$( session, clientId, artifact, pairingKey, TransferMode.WIFI_DIRECT, NetworkEndpoint(joined.groupOwnerAddress, wifi.port), progressCallback )</ID>
     <ID>ArgumentListWrapping:PhoneTransferClient.kt$PhoneTransferClient$( session, pairedPhoneId, item, incoming, key, TransferMode.WIFI_DIRECT, receiverEndpoint )</ID>
     <ID>ArgumentListWrapping:PhoneTransferClient.kt$PhoneTransferClient$( wifiEndpoint.deviceAddress, "NoteLink", wifiEndpoint.networkName, wifiEndpoint.passphrase )</ID>
     <ID>ArgumentListWrapping:PhoneTransferClient.kt$PhoneTransferClient$(artifact.id)</ID>
@@ -145,16 +237,62 @@
     <ID>ArgumentListWrapping:SelectionToolTest.kt$SelectionToolTest$( UUID.randomUUID(), stroke = Stroke(listOf(point(20f, 20f), point(80f, 80f)), PenStyle()) )</ID>
     <ID>ArgumentListWrapping:SelectionToolTest.kt$SelectionToolTest$( UUID.randomUUID(), transform = Transform2D.translate(30f, 30f), text = "note", localBounds = Bounds(0f, 0f, 40f, 20f) )</ID>
     <ID>ArgumentListWrapping:SelectionToolTest.kt$SelectionToolTest$( UUID.randomUUID(), transform = Transform2D.translate(60f, 50f), assetPath = "assets/test.png", mimeType = "image/png", pixelWidth = 20, pixelHeight = 20 )</ID>
-    <ID>ArgumentListWrapping:SettingsScreen.kt$( "最近使用 ${DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT).format(Date(client.lastUsedAt))}", fontSize = 12.sp, color = Color.DarkGray )</ID>
+    <ID>ArgumentListWrapping:SettingsScreen.kt$( noteText("最近使用", "Last used") + " ${DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT).format(Date(client.lastUsedAt))}", fontSize = 12.sp, color = Color.DarkGray )</ID>
     <ID>ArgumentListWrapping:SettingsScreen.kt$( transferSnapshot, transferEvents, transferEndpointName, showRecentTransferEvents, onCancelTransfer )</ID>
     <ID>ArgumentListWrapping:SettingsScreen.kt$("BLE", snapshot.phase.name.replace('_', ' '), snapshot.mode?.name, "SSID ${snapshot.ssidMatch.name}")</ID>
-    <ID>ArgumentListWrapping:SettingsScreen.kt$("授予权限")</ID>
+    <ID>ArgumentListWrapping:SettingsScreen.kt$("NoteLink 客户端", "NoteLink clients")</ID>
+    <ID>ArgumentListWrapping:SettingsScreen.kt$("不可重试", "not retryable")</ID>
+    <ID>ArgumentListWrapping:SettingsScreen.kt$("刷新状态", "Refresh status")</ID>
+    <ID>ArgumentListWrapping:SettingsScreen.kt$("发现新版本 ${checkState.info.latestVersion.display}：${checkState.info.releaseTitle}", "New version ${checkState.info.latestVersion.display}: ${checkState.info.releaseTitle}")</ID>
+    <ID>ArgumentListWrapping:SettingsScreen.kt$("可重试", "retryable")</ID>
+    <ID>ArgumentListWrapping:SettingsScreen.kt$("工具栏显示", "Toolbar items")</ID>
+    <ID>ArgumentListWrapping:SettingsScreen.kt$("开源许可", "Open-source licenses")</ID>
+    <ID>ArgumentListWrapping:SettingsScreen.kt$("当前版本 $currentVersion", "Current version $currentVersion")</ID>
+    <ID>ArgumentListWrapping:SettingsScreen.kt$("所选 NoteLink 显示的六位配对码", "Six-digit code shown by the selected NoteLink")</ID>
+    <ID>ArgumentListWrapping:SettingsScreen.kt$("扫描新客户端", "Scan for clients")</ID>
+    <ID>ArgumentListWrapping:SettingsScreen.kt$("按实体键识别", "Identify hardware key")</ID>
+    <ID>ArgumentListWrapping:SettingsScreen.kt$("授予权限", "Grant permission")</ID>
+    <ID>ArgumentListWrapping:SettingsScreen.kt$("旧配对，连接后自动识别", "Legacy pairing; identified on connection")</ID>
+    <ID>ArgumentListWrapping:SettingsScreen.kt$("末页按下一页时自动新增页面", "Create a page when navigating past the last page")</ID>
+    <ID>ArgumentListWrapping:SettingsScreen.kt$("查看 Release", "View release")</ID>
+    <ID>ArgumentListWrapping:SettingsScreen.kt$("检查中", "Checking")</ID>
+    <ID>ArgumentListWrapping:SettingsScreen.kt$("检查更新", "Check for updates")</ID>
+    <ID>ArgumentListWrapping:SettingsScreen.kt$("正在扫描", "Scanning")</ID>
+    <ID>ArgumentListWrapping:SettingsScreen.kt$("清空本场景", "Clear this context")</ID>
+    <ID>ArgumentListWrapping:SettingsScreen.kt$("移除", "Remove")</ID>
+    <ID>ArgumentListWrapping:SettingsScreen.kt$("端点", "Endpoint")</ID>
+    <ID>ArgumentListWrapping:SettingsScreen.kt$("重新进入应用时", "When reopening the app")</ID>
+    <ID>ArgumentListWrapping:SettingsScreen.kt$("队列有内容时直接从 NoteLink 获取", "Get directly from NoteLink when its queue is not empty")</ID>
     <ID>ArgumentListWrapping:SettingsScreen.kt$('_', ' ')</ID>
-    <ID>ArgumentListWrapping:SettingsScreen.kt$(Date(client.lastUsedAt))</ID>
-    <ID>ArgumentListWrapping:SettingsScreen.kt$(DateFormat.SHORT, DateFormat.SHORT)</ID>
-    <ID>ArgumentListWrapping:SettingsScreen.kt$(client.lastUsedAt)</ID>
-    <ID>ArgumentListWrapping:SettingsScreen.kt$(if (client.legacy) "旧配对，连接后自动识别" else client.id, fontSize = 12.sp, color = Color.DarkGray)</ID>
+    <ID>ArgumentListWrapping:SettingsScreen.kt$(action?.localizedLabel() ?: noteText("未绑定", "Unassigned"), color = Color.DarkGray, maxLines = 2)</ID>
+    <ID>ArgumentListWrapping:SettingsScreen.kt$(available.info.releaseUrl)</ID>
+    <ID>ArgumentListWrapping:SettingsScreen.kt$(bottom = 12.dp)</ID>
+    <ID>ArgumentListWrapping:SettingsScreen.kt$(bottom = 8.dp)</ID>
+    <ID>ArgumentListWrapping:SettingsScreen.kt$(client.id)</ID>
+    <ID>ArgumentListWrapping:SettingsScreen.kt$(if (checkState is UpdateCheckState.Checking) noteText("检查中", "Checking") else noteText("检查更新", "Check for updates"))</ID>
+    <ID>ArgumentListWrapping:SettingsScreen.kt$(if (client.legacy) noteText("旧配对，连接后自动识别", "Legacy pairing; identified on connection") else client.id, fontSize = 12.sp, color = Color.DarkGray)</ID>
+    <ID>ArgumentListWrapping:SettingsScreen.kt$(if (pairingScanActive) noteText("正在扫描", "Scanning") else noteText("扫描新客户端", "Scan for clients"))</ID>
+    <ID>ArgumentListWrapping:SettingsScreen.kt$(noteText("NoteLink 客户端", "NoteLink clients"), fontSize = 20.sp, modifier = Modifier.padding(bottom = 8.dp))</ID>
+    <ID>ArgumentListWrapping:SettingsScreen.kt$(noteText("刷新状态", "Refresh status"))</ID>
+    <ID>ArgumentListWrapping:SettingsScreen.kt$(noteText("工具栏显示", "Toolbar items"), fontSize = 20.sp, modifier = Modifier.padding(bottom = 12.dp))</ID>
+    <ID>ArgumentListWrapping:SettingsScreen.kt$(noteText("开源许可", "Open-source licenses"), onClick = { showOpenSourceLicenses = true })</ID>
+    <ID>ArgumentListWrapping:SettingsScreen.kt$(noteText("当前版本 $currentVersion", "Current version $currentVersion"), color = Color.DarkGray, modifier = Modifier.padding(top = 4.dp))</ID>
+    <ID>ArgumentListWrapping:SettingsScreen.kt$(noteText("所选 NoteLink 显示的六位配对码", "Six-digit code shown by the selected NoteLink"))</ID>
+    <ID>ArgumentListWrapping:SettingsScreen.kt$(noteText("按实体键识别", "Identify hardware key"))</ID>
+    <ID>ArgumentListWrapping:SettingsScreen.kt$(noteText("授予权限", "Grant permission"))</ID>
+    <ID>ArgumentListWrapping:SettingsScreen.kt$(noteText("查看 Release", "View release"))</ID>
+    <ID>ArgumentListWrapping:SettingsScreen.kt$(noteText("清空本场景", "Clear this context"))</ID>
+    <ID>ArgumentListWrapping:SettingsScreen.kt$(noteText("移除", "Remove"))</ID>
+    <ID>ArgumentListWrapping:SettingsScreen.kt$(noteText("重新进入应用时", "When reopening the app"), modifier = Modifier.padding(top = 24.dp, bottom = 8.dp))</ID>
+    <ID>ArgumentListWrapping:SettingsScreen.kt$(onClick = onRefreshTransferStatus)</ID>
     <ID>ArgumentListWrapping:SettingsScreen.kt$(onClick = onTransferPermissions)</ID>
+    <ID>ArgumentListWrapping:SettingsScreen.kt$(onClick = { onOpenRelease(available.info.releaseUrl) })</ID>
+    <ID>ArgumentListWrapping:SettingsScreen.kt$(onClick = { onShortcutSceneClear(shortcutScene) })</ID>
+    <ID>ArgumentListWrapping:SettingsScreen.kt$(onClick = { onStartShortcutCapture(shortcutScene) })</ID>
+    <ID>ArgumentListWrapping:SettingsScreen.kt$(onClick = { onUnpairClient(client.id) })</ID>
+    <ID>ArgumentListWrapping:SettingsScreen.kt$(shortcutScene)</ID>
+    <ID>ArgumentListWrapping:SettingsScreen.kt$(top = 24.dp, bottom = 8.dp)</ID>
+    <ID>ArgumentListWrapping:SettingsScreen.kt$(top = 4.dp)</ID>
     <ID>ArgumentListWrapping:StrokeGeometry.kt$StrokeGeometry$( point.x - halfWidth, point.y + halfWidth, point.x + halfWidth, point.y + halfWidth )</ID>
     <ID>ArgumentListWrapping:StrokeGeometry.kt$StrokeGeometry$( point.x - halfWidth, point.y - halfWidth, point.x + halfWidth, point.y + halfWidth )</ID>
     <ID>ArgumentListWrapping:StrokeGeometry.kt$StrokeGeometry$( point.x - halfWidth, point.y - halfWidth, point.x + halfWidth, point.y - halfWidth )</ID>
@@ -164,9 +302,22 @@
     <ID>ArgumentListWrapping:TemplateStore.kt$TemplateStore$( temporary.toPath(), target.toPath(), StandardCopyOption.REPLACE_EXISTING )</ID>
     <ID>ArgumentListWrapping:TemplateUi.kt$( Modifier.fillMaxWidth(), shape = RectangleShape, color = Color(0xFFF2F2F2) )</ID>
     <ID>ArgumentListWrapping:TemplateUi.kt$( definition?.description.orEmpty(), color = Color(0xFF666666), fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis )</ID>
-    <ID>ArgumentListWrapping:TemplateUi.kt$( if (state.catalog.directoryUri == null) "正在使用内置模板 · 尚未连接公共目录" else "公共目录已连接 · 返回应用或点击刷新可同步外部修改", color = Color(0xFF666666), fontSize = 12.sp )</ID>
+    <ID>ArgumentListWrapping:TemplateUi.kt$( if (state.catalog.directoryUri == null) noteText("正在使用内置模板 · 尚未连接公共目录", "Using built-in templates · no shared folder connected") else noteText("公共目录已连接 · 返回应用或点击刷新可同步外部修改", "Shared folder connected · return or refresh to sync changes"), color = Color(0xFF666666), fontSize = 12.sp )</ID>
+    <ID>ArgumentListWrapping:TemplateUi.kt$("Template\nPDF 页面使用原始文档背景", "Template\nPDF pages use the original document background")</ID>
+    <ID>ArgumentListWrapping:TemplateUi.kt$("公共目录已连接 · 返回应用或点击刷新可同步外部修改", "Shared folder connected · return or refresh to sync changes")</ID>
+    <ID>ArgumentListWrapping:TemplateUi.kt$("外部来源不可用 · 使用缓存", "External source unavailable · using cache")</ID>
+    <ID>ArgumentListWrapping:TemplateUi.kt$("宽高比与当前页面不一致", "Aspect ratio does not match this page")</ID>
+    <ID>ArgumentListWrapping:TemplateUi.kt$("正在使用内置模板 · 尚未连接公共目录", "Using built-in templates · no shared folder connected")</ID>
+    <ID>ArgumentListWrapping:TemplateUi.kt$("连接或更换模板目录", "Connect or change template folder")</ID>
+    <ID>ArgumentListWrapping:TemplateUi.kt$(0xFF666666)</ID>
     <ID>ArgumentListWrapping:TemplateUi.kt$(0xFF8B0000)</ID>
+    <ID>ArgumentListWrapping:TemplateUi.kt$(0xFF8B5A00)</ID>
+    <ID>ArgumentListWrapping:TemplateUi.kt$(16.dp)</ID>
+    <ID>ArgumentListWrapping:TemplateUi.kt$(Icons.Filled.FolderOpen, contentDescription = noteText("连接或更换模板目录", "Connect or change template folder"))</ID>
     <ID>ArgumentListWrapping:TemplateUi.kt$(definition.error, color = Color(0xFF8B0000), fontSize = 11.sp)</ID>
+    <ID>ArgumentListWrapping:TemplateUi.kt$(noteText("Template\nPDF 页面使用原始文档背景", "Template\nPDF pages use the original document background"), Modifier.padding(16.dp), color = Color(0xFF666666))</ID>
+    <ID>ArgumentListWrapping:TemplateUi.kt$(noteText("外部来源不可用 · 使用缓存", "External source unavailable · using cache"), color = Color(0xFF8B5A00), fontSize = 11.sp)</ID>
+    <ID>ArgumentListWrapping:TemplateUi.kt$(noteText("宽高比与当前页面不一致", "Aspect ratio does not match this page"), color = Color(0xFF8B0000), fontSize = 11.sp)</ID>
     <ID>ArgumentListWrapping:ThumbnailManager.kt$ThumbnailManager$( image, null, RectF(0f, 0f, obj.pixelWidth.toFloat(), obj.pixelHeight.toFloat()), Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG) )</ID>
     <ID>ArgumentListWrapping:ThumbnailManager.kt$ThumbnailManager$(when (obj.exifOrientation) { 2 -&gt; floatArrayOf(-1f, 0f, w, 0f, 1f, 0f, 0f, 0f, 1f) 3 -&gt; floatArrayOf(-1f, 0f, w, 0f, -1f, h, 0f, 0f, 1f) 4 -&gt; floatArrayOf(1f, 0f, 0f, 0f, -1f, h, 0f, 0f, 1f) 5 -&gt; floatArrayOf(0f, 1f, 0f, 1f, 0f, 0f, 0f, 0f, 1f) 6 -&gt; floatArrayOf(0f, -1f, h, 1f, 0f, 0f, 0f, 0f, 1f) 7 -&gt; floatArrayOf(0f, -1f, h, -1f, 0f, w, 0f, 0f, 1f) 8 -&gt; floatArrayOf(0f, 1f, 0f, -1f, 0f, w, 0f, 0f, 1f) else -&gt; floatArrayOf(1f, 0f, 0f, 0f, 1f, 0f, 0f, 0f, 1f) })</ID>
     <ID>ArgumentListWrapping:Toolbar.kt$( "Marker", painterResource(R.drawable.ic_ink_highlighter), PenType.Marker, settings, onSettingsChange )</ID>
@@ -176,10 +327,22 @@
     <ID>ArgumentListWrapping:Toolbar.kt$( 0, (containerSize.width - toolbarSize.width).coerceAtLeast(0) )</ID>
     <ID>ArgumentListWrapping:Toolbar.kt$( 0f, (containerSize.height - toolbarSize.height).coerceAtLeast(0).toFloat() )</ID>
     <ID>ArgumentListWrapping:Toolbar.kt$( 0f, (containerSize.width - toolbarSize.width).coerceAtLeast(0).toFloat() )</ID>
-    <ID>ArgumentListWrapping:Toolbar.kt$("局部擦除", onClick = { if (eraserMode != EraserMode.POINT) onToggle() }, selected = eraserMode == EraserMode.POINT)</ID>
-    <ID>ArgumentListWrapping:Toolbar.kt$("整笔擦除", onClick = { if (eraserMode != EraserMode.WHOLE_STROKE) onToggle() }, selected = eraserMode == EraserMode.WHOLE_STROKE)</ID>
+    <ID>ArgumentListWrapping:Toolbar.kt$("关闭 Debug", "Disable debug")</ID>
+    <ID>ArgumentListWrapping:Toolbar.kt$("学习模式", "Study mode")</ID>
+    <ID>ArgumentListWrapping:Toolbar.kt$("局部擦除", "Partial erase")</ID>
+    <ID>ArgumentListWrapping:Toolbar.kt$("开启 Debug", "Enable debug")</ID>
+    <ID>ArgumentListWrapping:Toolbar.kt$("手动输入", "Enter manually")</ID>
+    <ID>ArgumentListWrapping:Toolbar.kt$("拖动工具栏；点击隐藏", "Drag toolbar; tap to hide")</ID>
+    <ID>ArgumentListWrapping:Toolbar.kt$("整笔擦除", "Whole stroke")</ID>
+    <ID>ArgumentListWrapping:Toolbar.kt$("系统文件", "System file")</ID>
+    <ID>ArgumentListWrapping:Toolbar.kt$("阅读模式", "Reading mode")</ID>
+    <ID>ArgumentListWrapping:Toolbar.kt$(Icons.Filled.OpenWith, contentDescription = noteText("拖动工具栏；点击隐藏", "Drag toolbar; tap to hide"), tint = Color.Black)</ID>
+    <ID>ArgumentListWrapping:Toolbar.kt$(if (debugMode) noteText("关闭 Debug", "Disable debug") else noteText("开启 Debug", "Enable debug"), onDebugToggle, debugMode)</ID>
     <ID>ArgumentListWrapping:Toolbar.kt$(if (resolvedHeaderWidth == null) Modifier.fillMaxWidth() else Modifier.width(resolvedHeaderWidth))</ID>
+    <ID>ArgumentListWrapping:Toolbar.kt$(if (studyMode) noteText("学习模式", "Study mode") else noteText("阅读模式", "Reading mode"), onClick = onModeToggle, selected = true)</ID>
     <ID>ArgumentListWrapping:Toolbar.kt$(modifier.size(44.dp).clickable(onClick = onClick), contentAlignment = when (edge) { DockEdge.START -&gt; Alignment.CenterStart DockEdge.END -&gt; Alignment.CenterEnd DockEdge.TOP -&gt; Alignment.TopCenter DockEdge.BOTTOM -&gt; Alignment.BottomCenter })</ID>
+    <ID>ArgumentListWrapping:Toolbar.kt$(noteText("局部擦除", "Partial erase"), onClick = { if (eraserMode != EraserMode.POINT) onToggle() }, selected = eraserMode == EraserMode.POINT)</ID>
+    <ID>ArgumentListWrapping:Toolbar.kt$(noteText("整笔擦除", "Whole stroke"), onClick = { if (eraserMode != EraserMode.WHOLE_STROKE) onToggle() }, selected = eraserMode == EraserMode.WHOLE_STROKE)</ID>
     <ID>ArgumentListWrapping:Toolbar.kt$(resolvedHeaderWidth)</ID>
     <ID>ArgumentListWrapping:Transform2D.kt$Transform2D.Companion$( a = cos, b = sin, c = -sin, d = cos, tx = centerX - cos * centerX + sin * centerY, ty = centerY - sin * centerX - cos * centerY )</ID>
     <ID>ArgumentListWrapping:Transform2D.kt$Transform2D.Companion$( a = scale, b = 0f, c = 0f, d = scale, tx = centerX - scale * centerX, ty = centerY - scale * centerY )</ID>
@@ -200,6 +363,8 @@
     <ID>CyclomaticComplexMethod:InsertionCoordinator.kt$InsertionCoordinator$suspend fun remote(clientId: String, kind: ContentKind)</ID>
     <ID>CyclomaticComplexMethod:LassoOverlayView.kt$LassoOverlayView$override fun onTouchEvent(event: MotionEvent): Boolean</ID>
     <ID>CyclomaticComplexMethod:MainActivity.kt$@OptIn(ExperimentalMaterial3Api::class) @Composable private fun AppRoot( onView: (PenDrawView) -&gt; Unit, onTransientInputGuardReleaseReady: ((() -&gt; Unit)?) -&gt; Unit, onHardwareKeyHandlerReady: (((HardwareKeyId) -&gt; Unit)?) -&gt; Unit, skipTemplateDirectoryPrompt: Boolean )</ID>
+    <ID>CyclomaticComplexMethod:NoteI18n.kt$fun ShortcutAction.localizedLabel(): String</ID>
+    <ID>CyclomaticComplexMethod:NoteI18n.kt$fun ToolbarItem.localizedLabel(): String</ID>
     <ID>CyclomaticComplexMethod:ObjectEditOverlayView.kt$ObjectEditOverlayView$override fun onTouchEvent(event: MotionEvent): Boolean</ID>
     <ID>CyclomaticComplexMethod:PageManagerPanel.kt$@OptIn(ExperimentalComposeUiApi::class) @Composable fun PageManagerPanel( state: PageManagerPanelState, actions: PageManagerPanelActions, )</ID>
     <ID>CyclomaticComplexMethod:PdfInkAppearance.kt$PdfInkAppearance$fun buildAppearance(bounds: PdfInkBounds): PdfInkAppearanceContent</ID>
@@ -233,10 +398,10 @@
     <ID>ImportOrdering:ExportPanel.kt$import android.graphics.Bitmap import androidx.compose.foundation.background import androidx.compose.foundation.border import androidx.compose.foundation.clickable import androidx.compose.foundation.rememberScrollState import androidx.compose.foundation.verticalScroll import androidx.compose.foundation.layout.Arrangement import androidx.compose.foundation.layout.Box import androidx.compose.foundation.layout.Column import androidx.compose.foundation.layout.Row import androidx.compose.foundation.layout.Spacer import androidx.compose.foundation.layout.fillMaxSize import androidx.compose.foundation.layout.fillMaxWidth import androidx.compose.foundation.layout.height import androidx.compose.foundation.layout.heightIn import androidx.compose.foundation.layout.padding import androidx.compose.foundation.layout.size import androidx.compose.foundation.layout.width import androidx.compose.foundation.lazy.LazyColumn import androidx.compose.foundation.lazy.items import androidx.compose.material.icons.Icons import androidx.compose.material.icons.automirrored.filled.ArrowBack import androidx.compose.material.icons.automirrored.filled.Send import androidx.compose.material.icons.filled.Add import androidx.compose.material.icons.filled.Check import androidx.compose.material.icons.filled.Delete import androidx.compose.material.icons.filled.Download import androidx.compose.material.icons.filled.ExpandMore import androidx.compose.material3.CircularProgressIndicator import androidx.compose.material3.HorizontalDivider import androidx.compose.material3.Icon import androidx.compose.material3.IconButton import androidx.compose.material3.LinearProgressIndicator import androidx.compose.material3.Surface import androidx.compose.material3.Text import androidx.compose.runtime.Composable import androidx.compose.runtime.LaunchedEffect import androidx.compose.runtime.collectAsState import androidx.compose.runtime.getValue import androidx.compose.runtime.mutableStateOf import androidx.compose.runtime.remember import androidx.compose.runtime.setValue import androidx.compose.ui.Alignment import androidx.compose.ui.Modifier import androidx.compose.ui.graphics.Color import androidx.compose.ui.graphics.RectangleShape import androidx.compose.ui.layout.onSizeChanged import androidx.compose.ui.platform.LocalDensity import androidx.compose.ui.text.font.FontWeight import androidx.compose.ui.text.style.TextOverflow import androidx.compose.ui.unit.IntOffset import androidx.compose.ui.unit.dp import androidx.compose.ui.unit.sp import androidx.compose.ui.window.Popup import androidx.compose.ui.window.PopupProperties import com.betterhv.note.export.ExportArtifact import com.betterhv.note.export.ExportActionAvailability import com.betterhv.note.export.ExportFormat import com.betterhv.note.export.ExportManagerState import com.betterhv.note.export.ExportNotebookOption import com.betterhv.note.export.ExportProgress import com.betterhv.note.export.ExportScope import com.betterhv.note.export.ExportTaskState import com.betterhv.note.export.ExportTaskSummary import com.betterhv.note.export.ExportViewModel import com.betterhv.transfer.core.PairedDevice import java.text.DateFormat import java.util.Date import java.util.UUID</ID>
     <ID>ImportOrdering:ExportRevisionTest.kt$import java.util.UUID import org.junit.Assert.assertEquals import org.junit.Assert.assertNotEquals import org.junit.Test</ID>
     <ID>ImportOrdering:ExportTaskRepository.kt$import android.content.ContentValues import android.content.Context import android.database.sqlite.SQLiteDatabase import com.betterhv.note.storage.SQLiteStore import com.betterhv.note.doc.PageKind import com.betterhv.note.template.TemplateStore import java.io.File import java.util.UUID</ID>
-    <ID>ImportOrdering:ExportViewModel.kt$import android.app.Application import androidx.lifecycle.AndroidViewModel import androidx.lifecycle.viewModelScope import com.betterhv.note.storage.NotebookRepository import com.betterhv.note.template.TemplateStore import java.io.File import java.util.UUID import kotlinx.coroutines.Dispatchers import kotlinx.coroutines.Job import kotlinx.coroutines.flow.MutableStateFlow import kotlinx.coroutines.flow.StateFlow import kotlinx.coroutines.flow.asStateFlow import kotlinx.coroutines.launch import kotlinx.coroutines.withContext</ID>
+    <ID>ImportOrdering:ExportViewModel.kt$import android.app.Application import androidx.lifecycle.AndroidViewModel import androidx.lifecycle.viewModelScope import com.betterhv.note.noteText import com.betterhv.note.storage.NotebookRepository import com.betterhv.note.template.TemplateStore import java.io.File import java.util.UUID import kotlinx.coroutines.Dispatchers import kotlinx.coroutines.Job import kotlinx.coroutines.flow.MutableStateFlow import kotlinx.coroutines.flow.StateFlow import kotlinx.coroutines.flow.asStateFlow import kotlinx.coroutines.launch import kotlinx.coroutines.withContext</ID>
     <ID>ImportOrdering:ImageAssetStore.kt$import android.content.Context import android.graphics.BitmapFactory import android.graphics.Bitmap import android.media.ExifInterface import android.net.Uri import java.io.File import java.io.FileInputStream import java.util.UUID</ID>
     <ID>ImportOrdering:InsertionCoordinator.kt$import android.net.Uri import com.betterhv.note.storage.ImportedImage import com.betterhv.transfer.android.ReceivedLease import com.betterhv.transfer.core.ContentKind import com.betterhv.transfer.core.RemotePayload import java.util.UUID import kotlinx.coroutines.CancellationException import kotlinx.coroutines.CoroutineScope import kotlinx.coroutines.Dispatchers import kotlinx.coroutines.SupervisorJob import kotlinx.coroutines.cancel import kotlinx.coroutines.flow.MutableStateFlow import kotlinx.coroutines.flow.StateFlow import kotlinx.coroutines.launch import kotlinx.coroutines.withContext import kotlinx.coroutines.suspendCancellableCoroutine import kotlin.coroutines.resume</ID>
-    <ID>ImportOrdering:MainActivity.kt$import android.os.Bundle import android.os.Build import android.bluetooth.BluetoothManager import android.content.Context import android.content.pm.PackageManager import android.net.wifi.WifiManager import android.view.KeyEvent import android.view.MotionEvent import androidx.activity.compose.rememberLauncherForActivityResult import androidx.activity.result.contract.ActivityResultContracts import androidx.activity.ComponentActivity import androidx.activity.compose.BackHandler import androidx.activity.compose.setContent import androidx.compose.foundation.background import androidx.compose.foundation.border import androidx.compose.foundation.layout.Box import androidx.compose.foundation.layout.Column import androidx.compose.foundation.layout.Row import androidx.compose.foundation.layout.Arrangement import androidx.compose.foundation.layout.height import androidx.compose.foundation.layout.fillMaxHeight import androidx.compose.foundation.layout.fillMaxSize import androidx.compose.foundation.layout.fillMaxWidth import androidx.compose.foundation.layout.padding import androidx.compose.foundation.layout.offset import androidx.compose.foundation.layout.width import androidx.compose.foundation.layout.size import androidx.compose.foundation.lazy.LazyColumn import androidx.compose.foundation.lazy.items import androidx.compose.foundation.lazy.rememberLazyListState import androidx.compose.material3.Button import androidx.compose.material3.ExperimentalMaterial3Api import androidx.compose.material3.OutlinedTextField import androidx.compose.material3.TextButton import androidx.compose.material3.Icon import androidx.compose.material3.IconButton import androidx.compose.material3.LinearProgressIndicator import androidx.compose.material3.SnackbarDuration import androidx.compose.material3.SnackbarHost import androidx.compose.material3.SnackbarHostState import androidx.compose.material3.Surface import androidx.compose.material3.Text import androidx.compose.material.icons.Icons import androidx.compose.material.icons.filled.Bookmark import androidx.compose.material.icons.filled.Check import androidx.compose.material.icons.filled.Cancel import androidx.compose.material.icons.filled.Delete import androidx.compose.material.icons.filled.Edit import androidx.compose.material.icons.filled.MoveToInbox import androidx.compose.runtime.LaunchedEffect import androidx.compose.runtime.Composable import androidx.compose.runtime.DisposableEffect import androidx.compose.runtime.collectAsState import androidx.compose.runtime.getValue import androidx.compose.runtime.mutableIntStateOf import androidx.compose.runtime.mutableStateOf import androidx.compose.runtime.remember import androidx.compose.runtime.rememberCoroutineScope import androidx.compose.runtime.saveable.rememberSaveable import androidx.compose.runtime.setValue import androidx.compose.ui.Alignment import androidx.compose.ui.Modifier import androidx.compose.ui.focus.FocusRequester import androidx.compose.ui.focus.focusRequester import androidx.compose.ui.graphics.Color import androidx.compose.ui.graphics.RectangleShape import androidx.compose.ui.platform.LocalSoftwareKeyboardController import androidx.compose.ui.text.font.FontFamily import androidx.compose.ui.unit.dp import androidx.compose.ui.unit.sp import androidx.compose.ui.viewinterop.AndroidView import androidx.compose.ui.platform.LocalContext import androidx.compose.ui.platform.LocalConfiguration import androidx.compose.ui.platform.LocalDensity import androidx.lifecycle.compose.LocalLifecycleOwner import androidx.lifecycle.Lifecycle import androidx.lifecycle.LifecycleEventObserver import androidx.lifecycle.viewmodel.compose.viewModel import androidx.compose.ui.unit.DpSize import androidx.compose.ui.unit.IntOffset import com.betterhv.note.doc.ImageObject import com.betterhv.note.doc.TextFontFamily import com.betterhv.note.doc.TextObject import com.betterhv.note.ink.Bounds import com.betterhv.transfer.android.TransferPermissions import com.betterhv.transfer.core.ContentKind import com.betterhv.transfer.core.TransferPhase import com.betterhv.transfer.core.TransferSnapshot import com.betterhv.transfer.core.isActiveTransferPhase import kotlinx.coroutines.Dispatchers import kotlinx.coroutines.launch import kotlinx.coroutines.withContext import com.betterhv.note.storage.StartupBehavior import com.betterhv.note.export.ExportViewModel import com.betterhv.note.template.TemplateStore import com.betterhv.note.doc.PageKind import java.util.UUID</ID>
+    <ID>ImportOrdering:MainActivity.kt$import android.bluetooth.BluetoothManager import android.content.Context import android.content.Intent import android.content.pm.PackageManager import android.net.wifi.WifiManager import android.os.Build import android.os.Bundle import android.view.KeyEvent import android.view.MotionEvent import androidx.activity.ComponentActivity import androidx.activity.compose.BackHandler import androidx.activity.compose.rememberLauncherForActivityResult import androidx.activity.compose.setContent import androidx.activity.result.contract.ActivityResultContracts import androidx.compose.foundation.background import androidx.compose.foundation.border import androidx.compose.foundation.layout.Arrangement import androidx.compose.foundation.layout.Box import androidx.compose.foundation.layout.Column import androidx.compose.foundation.layout.fillMaxHeight import androidx.compose.foundation.layout.fillMaxSize import androidx.compose.foundation.layout.fillMaxWidth import androidx.compose.foundation.layout.height import androidx.compose.foundation.layout.offset import androidx.compose.foundation.layout.padding import androidx.compose.foundation.layout.Row import androidx.compose.foundation.layout.size import androidx.compose.foundation.layout.width import androidx.compose.foundation.lazy.items import androidx.compose.foundation.lazy.LazyColumn import androidx.compose.foundation.lazy.rememberLazyListState import androidx.compose.material.icons.filled.Bookmark import androidx.compose.material.icons.filled.Cancel import androidx.compose.material.icons.filled.Check import androidx.compose.material.icons.filled.Delete import androidx.compose.material.icons.filled.Edit import androidx.compose.material.icons.filled.MoveToInbox import androidx.compose.material.icons.Icons import androidx.compose.material3.Button import androidx.compose.material3.ExperimentalMaterial3Api import androidx.compose.material3.Icon import androidx.compose.material3.IconButton import androidx.compose.material3.LinearProgressIndicator import androidx.compose.material3.OutlinedTextField import androidx.compose.material3.SnackbarDuration import androidx.compose.material3.SnackbarHost import androidx.compose.material3.SnackbarHostState import androidx.compose.material3.Surface import androidx.compose.material3.Text import androidx.compose.material3.TextButton import androidx.compose.runtime.collectAsState import androidx.compose.runtime.Composable import androidx.compose.runtime.DisposableEffect import androidx.compose.runtime.LaunchedEffect import androidx.compose.runtime.getValue import androidx.compose.runtime.mutableIntStateOf import androidx.compose.runtime.mutableStateOf import androidx.compose.runtime.remember import androidx.compose.runtime.rememberCoroutineScope import androidx.compose.runtime.saveable.rememberSaveable import androidx.compose.runtime.setValue import androidx.compose.ui.Alignment import androidx.compose.ui.focus.focusRequester import androidx.compose.ui.focus.FocusRequester import androidx.compose.ui.graphics.Color import androidx.compose.ui.graphics.RectangleShape import androidx.compose.ui.Modifier import androidx.compose.ui.platform.LocalConfiguration import androidx.compose.ui.platform.LocalContext import androidx.compose.ui.platform.LocalDensity import androidx.compose.ui.platform.LocalSoftwareKeyboardController import androidx.compose.ui.text.font.FontFamily import androidx.compose.ui.unit.dp import androidx.compose.ui.unit.DpSize import androidx.compose.ui.unit.IntOffset import androidx.compose.ui.unit.sp import androidx.compose.ui.viewinterop.AndroidView import androidx.lifecycle.compose.LocalLifecycleOwner import androidx.lifecycle.Lifecycle import androidx.lifecycle.LifecycleEventObserver import androidx.lifecycle.viewmodel.compose.viewModel import androidx.core.net.toUri import com.betterhv.note.doc.ImageObject import com.betterhv.note.doc.PageKind import com.betterhv.note.doc.TextFontFamily import com.betterhv.note.doc.TextObject import com.betterhv.note.export.ExportViewModel import com.betterhv.note.ink.Bounds import com.betterhv.note.storage.StartupBehavior import com.betterhv.note.template.TemplateStore import com.betterhv.transfer.android.TransferPermissions import com.betterhv.transfer.core.ContentKind import com.betterhv.transfer.core.isActiveTransferPhase import com.betterhv.transfer.core.TransferPhase import com.betterhv.transfer.core.TransferSnapshot import com.betterhv.update.UpdateChecker import com.betterhv.update.UpdateCheckState import com.betterhv.update.UpdateProduct import com.betterhv.update.UpdateUiState import kotlinx.coroutines.Dispatchers import kotlinx.coroutines.launch import kotlinx.coroutines.withContext import java.util.UUID</ID>
     <ID>ImportOrdering:NotebookManagerScreen.kt$import android.graphics.Bitmap import android.net.Uri import android.os.SystemClock import androidx.compose.foundation.Image import androidx.compose.foundation.background import androidx.compose.foundation.border import androidx.compose.foundation.clickable import androidx.compose.foundation.layout.Arrangement import androidx.compose.foundation.layout.Box import androidx.compose.foundation.layout.Column import androidx.compose.foundation.layout.Row import androidx.compose.foundation.layout.Spacer import androidx.compose.foundation.layout.fillMaxSize import androidx.compose.foundation.layout.fillMaxWidth import androidx.compose.foundation.layout.height import androidx.compose.foundation.layout.padding import androidx.compose.foundation.layout.size import androidx.compose.foundation.layout.width import androidx.compose.foundation.lazy.grid.GridCells import androidx.compose.foundation.lazy.grid.LazyVerticalGrid import androidx.compose.foundation.lazy.grid.items import androidx.compose.material.icons.Icons import androidx.compose.material.icons.automirrored.filled.ArrowBack import androidx.compose.material.icons.filled.Add import androidx.compose.material.icons.filled.Check import androidx.compose.material.icons.filled.ContentCut import androidx.compose.material.icons.filled.Delete import androidx.compose.material.icons.filled.IosShare import androidx.compose.material.icons.filled.PictureAsPdf import androidx.compose.material.icons.filled.Workspaces import androidx.compose.material3.HorizontalDivider import androidx.compose.material3.Icon import androidx.compose.material3.Surface import androidx.compose.material3.Text import androidx.activity.compose.rememberLauncherForActivityResult import androidx.activity.result.contract.ActivityResultContracts import androidx.compose.runtime.Composable import androidx.compose.runtime.LaunchedEffect import androidx.compose.runtime.getValue import androidx.compose.runtime.mutableLongStateOf import androidx.compose.runtime.mutableStateOf import androidx.compose.runtime.remember import androidx.compose.runtime.setValue import androidx.compose.ui.Alignment import androidx.compose.ui.Modifier import androidx.compose.ui.graphics.Color import androidx.compose.ui.graphics.RectangleShape import androidx.compose.ui.graphics.asImageBitmap import androidx.compose.ui.graphics.vector.ImageVector import androidx.compose.ui.layout.ContentScale import androidx.compose.ui.text.font.FontWeight import androidx.compose.ui.text.style.TextOverflow import androidx.compose.ui.unit.Dp import androidx.compose.ui.unit.DpSize import androidx.compose.ui.unit.dp import androidx.compose.ui.unit.sp import com.betterhv.note.storage.NotebookSummary import kotlinx.coroutines.delay import java.util.UUID</ID>
     <ID>ImportOrdering:NotebookNameDialog.kt$import androidx.compose.foundation.layout.Arrangement import androidx.compose.foundation.layout.Column import androidx.compose.foundation.layout.Row import androidx.compose.foundation.layout.fillMaxWidth import androidx.compose.foundation.layout.padding import androidx.compose.material3.OutlinedTextField import androidx.compose.material3.Text import androidx.compose.runtime.Composable import androidx.compose.runtime.LaunchedEffect import androidx.compose.runtime.getValue import androidx.compose.runtime.mutableStateOf import androidx.compose.runtime.remember import androidx.compose.runtime.setValue import androidx.compose.ui.Alignment import androidx.compose.ui.Modifier import androidx.compose.ui.focus.FocusRequester import androidx.compose.ui.focus.focusRequester import androidx.compose.ui.graphics.RectangleShape import androidx.compose.ui.platform.LocalSoftwareKeyboardController import androidx.compose.ui.unit.dp import androidx.compose.ui.unit.sp import android.graphics.Bitmap import com.betterhv.note.doc.DEFAULT_TEMPLATE_ID import com.betterhv.note.template.TemplateCatalogSnapshot</ID>
     <ID>ImportOrdering:NotebookRepository.kt$import android.content.ContentValues import android.content.Context import android.database.sqlite.SQLiteDatabase import com.betterhv.note.doc.Notebook import com.betterhv.note.doc.NotebookKind import com.betterhv.note.doc.DEFAULT_TEMPLATE_ID import com.betterhv.note.doc.PageKind import com.betterhv.note.doc.PdfAnchor import com.betterhv.note.doc.PdfAnchorKind import com.betterhv.note.doc.PdfDocumentRecord import com.betterhv.note.doc.PdfPageSource import com.betterhv.note.doc.ImageObject import com.betterhv.note.doc.Page import com.betterhv.note.doc.PageObject import com.betterhv.note.doc.StrokeObject import com.betterhv.note.doc.TextFontFamily import com.betterhv.note.doc.TextObject import com.betterhv.note.doc.Transform2D import com.betterhv.note.ink.Bounds import com.betterhv.note.ink.PenStyle import com.betterhv.note.ink.PenType import com.betterhv.note.ink.PressureCurve import com.betterhv.note.ink.Stroke import java.io.File import java.util.UUID</ID>
@@ -246,9 +411,7 @@
     <ID>ImportOrdering:PdfImportCoordinator.kt$import android.content.Context import android.net.Uri import com.betterhv.note.storage.NotebookRepository import com.betterhv.note.storage.PdfImportCommit import kotlinx.coroutines.Dispatchers import kotlinx.coroutines.withContext import java.util.UUID import java.io.File</ID>
     <ID>ImportOrdering:PdfInkAppearanceTest.kt$import com.betterhv.note.doc.StrokeObject import com.betterhv.note.doc.Transform2D import com.betterhv.note.ink.InkPoint import com.betterhv.note.ink.PenStyle import com.betterhv.note.ink.PenType import com.betterhv.note.ink.PressureCurve import com.betterhv.note.ink.Stroke import java.util.UUID import org.junit.Assert.assertEquals import org.junit.Assert.assertTrue import org.junit.Test</ID>
     <ID>ImportOrdering:PenDrawView.kt$import android.content.Context import android.graphics.Bitmap import android.graphics.BitmapFactory import android.graphics.Canvas import android.graphics.DashPathEffect import android.graphics.Matrix import android.graphics.Paint import android.graphics.RectF import android.graphics.Typeface import android.net.Uri import android.os.Build import android.os.Handler import android.os.HvPenDrawListener import android.os.HvPenDrawManager import android.os.Looper import android.os.Message import android.util.AttributeSet import android.view.MotionEvent import android.view.View import com.betterhv.note.doc.CommandStack import com.betterhv.note.doc.ImageObject import com.betterhv.note.doc.Notebook import com.betterhv.note.doc.NotebookKind import com.betterhv.note.doc.Page import com.betterhv.note.doc.PageKind import com.betterhv.note.doc.DEFAULT_TEMPLATE_ID import com.betterhv.note.doc.inheritedTemplateId import com.betterhv.note.doc.PdfAnchor import com.betterhv.note.doc.PdfAnchorKind import com.betterhv.note.doc.PageObject import com.betterhv.note.doc.SelectionSet import com.betterhv.note.doc.StrokeObject import com.betterhv.note.doc.TextFontFamily import com.betterhv.note.doc.TextObject import com.betterhv.note.doc.Transform2D import com.betterhv.note.doc.commands.AddPageCommand import com.betterhv.note.doc.commands.AddObjectCommand import com.betterhv.note.doc.commands.DeletePageCommand import com.betterhv.note.doc.commands.DeleteObjectsCommand import com.betterhv.note.doc.commands.MovePageCommand import com.betterhv.note.doc.commands.SetPageBookmarkCommand import com.betterhv.note.doc.commands.SetPageTemplateCommand import com.betterhv.note.doc.commands.TransformObjectsCommand import com.betterhv.note.doc.commands.UpdateObjectCommand import com.betterhv.note.ink.Bounds import com.betterhv.note.ink.InkPoint import com.betterhv.note.ink.InkRenderer import com.betterhv.note.ink.PenStyle import com.betterhv.note.tool.EraserTool import com.betterhv.note.tool.PenTool import com.betterhv.note.tool.PointEraserTool import com.betterhv.note.tool.SelectionTool import com.betterhv.note.tool.StrokeEraserTool import com.betterhv.note.tool.Tool import com.betterhv.note.tool.ToolHost import com.betterhv.note.storage.AutosaveController import com.betterhv.note.storage.DocumentChange import com.betterhv.note.storage.ImageAssetStore import com.betterhv.note.storage.ImportedImage import com.betterhv.note.storage.NotebookRepository import com.betterhv.note.storage.NotebookSummary import com.betterhv.note.storage.StartupBehavior import com.betterhv.note.storage.PageCache import com.betterhv.note.storage.PageSnapshot import com.betterhv.note.storage.ThumbnailManager import com.betterhv.note.storage.ThumbnailKey import com.betterhv.note.storage.TransferReceipt import com.betterhv.note.pdf.PdfAssetStore import com.betterhv.note.pdf.PdfImportCoordinator import com.betterhv.note.pdf.MuPdfEngine import com.betterhv.note.template.TemplateCatalogSnapshot import com.betterhv.note.template.TemplateStore import java.io.File import java.util.ArrayDeque import java.util.UUID import java.util.concurrent.ConcurrentHashMap import java.util.concurrent.Executors import java.util.concurrent.TimeUnit import kotlinx.coroutines.Dispatchers import kotlinx.coroutines.withContext import kotlin.math.atan2 import kotlin.math.exp import kotlin.math.hypot</ID>
-    <ID>ImportOrdering:PhoneTransferClient.kt$import android.content.Context import android.os.Looper import android.os.SystemClock import android.util.Log import com.betterhv.transfer.android.AndroidPairingController import com.betterhv.transfer.android.AndroidNetworkInfoProvider import com.betterhv.transfer.android.BleGattSession import com.betterhv.transfer.android.BleIdentity import com.betterhv.transfer.android.BleReceiverScanner import com.betterhv.transfer.android.BleReplayCache import com.betterhv.transfer.android.BleSecureEnvelope import com.betterhv.transfer.android.EncryptedFileTransfer import com.betterhv.transfer.android.DiscoveredSender import com.betterhv.transfer.android.ReceivedLease import com.betterhv.transfer.android.WifiDirectController import com.betterhv.transfer.core.ContentKind import com.betterhv.transfer.core.BleCommand import com.betterhv.transfer.core.BleQueueProtocol import com.betterhv.transfer.core.BleResponse import com.betterhv.transfer.core.ExportTransferOffer import com.betterhv.transfer.core.RemotePayload import com.betterhv.transfer.core.TransferCrypto import com.betterhv.transfer.core.TransferOffer import com.betterhv.transfer.core.TransferState import com.betterhv.transfer.core.CapabilityNegotiation import com.betterhv.transfer.core.DeviceCapabilities import com.betterhv.transfer.core.NetworkEndpoint import com.betterhv.transfer.core.SsidMatch import com.betterhv.transfer.core.TransferChannelException import com.betterhv.transfer.core.TransferErrorCode import com.betterhv.transfer.core.TransferEvent import com.betterhv.transfer.core.TransferEventLog import com.betterhv.transfer.core.TransferFailure import com.betterhv.transfer.core.TransferLogEntry import com.betterhv.transfer.core.TransferMode import com.betterhv.transfer.core.TransferModes import com.betterhv.transfer.core.TransferNetworkSecurity import com.betterhv.transfer.core.TransferObservable import com.betterhv.transfer.core.TransferPhase import com.betterhv.transfer.core.TransferProgressMeter import com.betterhv.transfer.core.TransferSnapshot import com.betterhv.transfer.core.PairedDevice import com.betterhv.note.export.ExportArtifact import java.io.File import java.security.MessageDigest import java.util.Collections import java.util.UUID import java.util.concurrent.ConcurrentHashMap import java.util.concurrent.atomic.AtomicBoolean import java.net.ServerSocket import kotlinx.coroutines.Dispatchers import kotlinx.coroutines.async import kotlinx.coroutines.coroutineScope import kotlinx.coroutines.delay import kotlinx.coroutines.flow.MutableStateFlow import kotlinx.coroutines.flow.MutableSharedFlow import kotlinx.coroutines.flow.SharedFlow import kotlinx.coroutines.flow.StateFlow import kotlinx.coroutines.flow.asSharedFlow import kotlinx.coroutines.flow.asStateFlow import kotlinx.coroutines.currentCoroutineContext import kotlinx.coroutines.Job import kotlinx.coroutines.runBlocking import kotlinx.coroutines.TimeoutCancellationException import kotlinx.coroutines.sync.Mutex import kotlinx.coroutines.sync.withLock import kotlinx.coroutines.withContext import kotlinx.coroutines.CancellationException import kotlinx.coroutines.withTimeout</ID>
     <ID>ImportOrdering:SelectionToolTest.kt$import com.betterhv.note.doc.CommandStack import com.betterhv.note.doc.Page import com.betterhv.note.doc.ImageObject import com.betterhv.note.doc.SelectionSet import com.betterhv.note.doc.StrokeObject import com.betterhv.note.doc.TextObject import com.betterhv.note.doc.Transform2D import com.betterhv.note.ink.Bounds import com.betterhv.note.ink.InkPoint import com.betterhv.note.ink.PenStyle import com.betterhv.note.ink.Stroke import java.util.UUID import org.junit.Assert.assertEquals import org.junit.Assert.assertFalse import org.junit.Assert.assertTrue import org.junit.Test</ID>
-    <ID>ImportOrdering:SettingsScreen.kt$import androidx.compose.foundation.clickable import androidx.compose.foundation.border import androidx.compose.foundation.layout.Arrangement import androidx.compose.foundation.layout.Box import androidx.compose.foundation.layout.Column import androidx.compose.foundation.layout.Row import androidx.compose.foundation.layout.Spacer import androidx.compose.foundation.layout.fillMaxSize import androidx.compose.foundation.layout.fillMaxWidth import androidx.compose.foundation.layout.height import androidx.compose.foundation.layout.heightIn import androidx.compose.foundation.layout.padding import androidx.compose.foundation.rememberScrollState import androidx.compose.foundation.verticalScroll import androidx.compose.material.icons.Icons import androidx.compose.material.icons.automirrored.filled.ArrowBack import androidx.compose.material3.AlertDialog import androidx.compose.material3.Button import androidx.compose.material3.HorizontalDivider import androidx.compose.material3.Icon import androidx.compose.material3.IconButton import androidx.compose.material3.LinearProgressIndicator import androidx.compose.material3.OutlinedButton import androidx.compose.material3.OutlinedTextField import androidx.compose.material3.RadioButton import androidx.compose.material3.Surface import androidx.compose.material3.Switch import androidx.compose.material3.Tab import androidx.compose.material3.TabRow import androidx.compose.material3.Text import androidx.compose.material3.TextButton import androidx.compose.runtime.LaunchedEffect import androidx.compose.runtime.Composable import androidx.compose.runtime.getValue import androidx.compose.runtime.mutableStateOf import androidx.compose.runtime.remember import androidx.compose.runtime.setValue import androidx.compose.runtime.saveable.rememberSaveable import androidx.compose.ui.Alignment import androidx.compose.ui.Modifier import androidx.compose.ui.graphics.Color import androidx.compose.ui.platform.LocalUriHandler import androidx.compose.ui.unit.dp import androidx.compose.ui.unit.sp import com.betterhv.note.storage.StartupBehavior import com.betterhv.transfer.core.PairedDevice import com.betterhv.transfer.core.TransferPhase import com.betterhv.transfer.core.TransferLogEntry import com.betterhv.transfer.core.TransferLogLevel import com.betterhv.transfer.core.TransferModes import com.betterhv.transfer.core.TransferSnapshot import java.text.DateFormat import java.util.Date</ID>
     <ID>ImportOrdering:StylusClickResolver.kt$import android.view.MotionEvent import androidx.compose.runtime.getValue import androidx.compose.runtime.DisposableEffect import androidx.compose.runtime.mutableStateOf import androidx.compose.runtime.remember import androidx.compose.runtime.rememberUpdatedState import androidx.compose.runtime.setValue import androidx.compose.ui.ExperimentalComposeUiApi import androidx.compose.ui.Modifier import androidx.compose.ui.composed import androidx.compose.ui.input.pointer.pointerInteropFilter</ID>
     <ID>ImportOrdering:Toolbar.kt$import androidx.compose.foundation.Canvas import androidx.compose.foundation.ExperimentalFoundationApi import androidx.compose.foundation.background import androidx.compose.foundation.border import androidx.compose.foundation.clickable import androidx.compose.foundation.combinedClickable import androidx.compose.foundation.gestures.detectDragGestures import androidx.compose.foundation.horizontalScroll import androidx.compose.foundation.rememberScrollState import androidx.compose.foundation.verticalScroll import androidx.compose.foundation.layout.Arrangement import androidx.compose.foundation.layout.Box import androidx.compose.foundation.layout.Column import androidx.compose.foundation.layout.Row import androidx.compose.foundation.layout.Spacer import androidx.compose.foundation.layout.IntrinsicSize import androidx.compose.foundation.layout.height import androidx.compose.foundation.layout.fillMaxWidth import androidx.compose.foundation.layout.padding import androidx.compose.foundation.layout.offset import androidx.compose.foundation.layout.size import androidx.compose.foundation.layout.width import androidx.compose.material.icons.Icons import androidx.compose.material.icons.automirrored.filled.Redo import androidx.compose.material.icons.automirrored.filled.Undo import androidx.compose.material.icons.filled.Check import androidx.compose.material.icons.filled.Clear import androidx.compose.material.icons.filled.CropFree import androidx.compose.material.icons.filled.Delete import androidx.compose.material.icons.filled.Edit import androidx.compose.material.icons.filled.AddPhotoAlternate import androidx.compose.material.icons.filled.IosShare import androidx.compose.material.icons.filled.PostAdd import androidx.compose.material.icons.filled.TextFields import androidx.compose.material.icons.filled.Menu import androidx.compose.material.icons.filled.Navigation import androidx.compose.material.icons.filled.Layers import androidx.compose.material.icons.filled.OpenWith import androidx.compose.material.icons.filled.RemoveCircleOutline import androidx.compose.material.icons.filled.Settings import androidx.compose.material3.Icon import androidx.compose.material3.Surface import androidx.compose.material3.Text import androidx.compose.runtime.Composable import androidx.compose.runtime.DisposableEffect import androidx.compose.runtime.LaunchedEffect import androidx.compose.runtime.getValue import androidx.compose.runtime.mutableStateOf import androidx.compose.runtime.remember import androidx.compose.runtime.setValue import androidx.compose.ui.Alignment import androidx.compose.ui.ExperimentalComposeUiApi import androidx.compose.ui.Modifier import androidx.compose.ui.geometry.Offset import androidx.compose.ui.graphics.Color import androidx.compose.ui.graphics.RectangleShape import androidx.compose.ui.graphics.painter.Painter import androidx.compose.ui.graphics.vector.ImageVector import androidx.compose.ui.graphics.vector.rememberVectorPainter import androidx.compose.ui.platform.LocalDensity import androidx.compose.ui.res.painterResource import androidx.compose.ui.semantics.contentDescription import androidx.compose.ui.semantics.semantics import androidx.compose.ui.input.pointer.pointerInteropFilter import androidx.compose.ui.input.pointer.pointerInput import androidx.compose.ui.layout.onSizeChanged import androidx.compose.ui.unit.IntOffset import androidx.compose.ui.unit.IntRect import androidx.compose.ui.unit.IntSize import androidx.compose.ui.unit.LayoutDirection import androidx.compose.ui.unit.Dp import androidx.compose.ui.unit.dp import androidx.compose.ui.text.font.FontWeight import androidx.compose.ui.window.Popup import androidx.compose.ui.window.PopupPositionProvider import androidx.compose.ui.window.PopupProperties import android.view.MotionEvent import com.betterhv.note.ink.PenType</ID>
     <ID>Indentation:ExportPanel.kt$ </ID>
@@ -294,7 +457,6 @@
     <ID>LongParameterList:Page.kt$Page$( val id: UUID = UUID.randomUUID(), width: Float = 0f, height: Float = 0f, val kind: PageKind = PageKind.BLANK, val parentPdfPageId: UUID? = null, val pdfSource: PdfPageSource? = null, templateId: String? = if (kind == PageKind.PDF_SOURCE) null else DEFAULT_TEMPLATE_ID, bookmarked: Boolean = false, contentRevision: Long = 0L, val createdAt: Long = System.currentTimeMillis(), updatedAt: Long = createdAt )</ID>
     <ID>LongParameterList:PdfInkAppearance.kt$PdfInkAppearance$( val source: StrokeObject, val samples: List&lt;PdfInkSample&gt;, val inkList: List&lt;PdfInkPoint&gt;, val borderWidth: Float, val red: Float, val green: Float, val blue: Float, val opacity: Float, private val normalLeft: List&lt;PdfInkPoint&gt;, private val normalRight: List&lt;PdfInkPoint&gt; )</ID>
     <ID>LongParameterList:PenGeometry.kt$PenGeometry$( x: Float, y: Float, locationX: Int, locationY: Int, rotation: Int, orgPos: Int, screenWidth: Int, screenHeight: Int )</ID>
-    <ID>LongParameterList:PhoneTransferClient.kt$PhoneTransferClient$( session: BleGattSession, clientId: String, artifact: ExportArtifact, negotiation: CapabilityNegotiation, pairingKey: ByteArray, progressCallback: (Long, Long) -&gt; Unit )</ID>
     <ID>LongParameterList:PhoneTransferClient.kt$PhoneTransferClient$( session: BleGattSession, clientId: String, artifact: ExportArtifact, pairingKey: ByteArray, mode: TransferMode, receiverEndpoint: NetworkEndpoint, progressCallback: (Long, Long) -&gt; Unit )</ID>
     <ID>LongParameterList:PhoneTransferClient.kt$PhoneTransferClient$( session: BleGattSession, clientId: String, item: com.betterhv.transfer.core.QueueItem, incoming: File, pairingKey: ByteArray, mode: TransferMode, receiverEndpoint: NetworkEndpoint )</ID>
     <ID>LongParameterList:Toolbar.kt$( expanded: Boolean, onDismiss: () -&gt; Unit, dockEdge: DockEdge, debugMode: Boolean, hiddenItems: List&lt;ToolbarItem&gt;, onHiddenItem: (ToolbarItem) -&gt; Unit, onDocumentSettings: () -&gt; Unit, onSettings: () -&gt; Unit, onDebugToggle: () -&gt; Unit )</ID>
@@ -602,41 +764,126 @@
     <ID>MagicNumber:Transform2D.kt$Transform2D$1e-9f</ID>
     <ID>MagicNumber:ViewportTransform.kt$PdfViewportMath$4f</ID>
     <ID>MatchingDeclarationName:EinkModalOverlay.kt$EinkModalPosition</ID>
-    <ID>MaxLineLength:ExportPanel.kt$ScopeButton("全部页面", scope == ExportScope.ALL_PAGES) { scope = ExportScope.ALL_PAGES; format = ExportFormat.PDF }</ID>
+    <ID>MaxLineLength:ExportPanel.kt$Icon(Icons.Filled.Download, noteText("保存 ${summary.notebookTitle} 到 Downloads", "Save ${summary.notebookTitle} to Downloads"))</ID>
+    <ID>MaxLineLength:ExportPanel.kt$ScopeButton(noteText("全部页面", "All pages"), scope == ExportScope.ALL_PAGES) { scope = ExportScope.ALL_PAGES; format = ExportFormat.PDF }</ID>
+    <ID>MaxLineLength:ExportPanel.kt$ScopeButton(noteText("单页", "Single page"), scope == ExportScope.SINGLE_PAGE) { scope = ExportScope.SINGLE_PAGE }</ID>
+    <ID>MaxLineLength:ExportPanel.kt$ScopeButton(noteText("选择页面", "Selected pages"), scope == ExportScope.SELECTED_PAGES) { scope = ExportScope.SELECTED_PAGES }</ID>
+    <ID>MaxLineLength:ExportPanel.kt$Text(noteText("$taskCount 项", "$taskCount tasks"), color = ExportMuted, fontSize = 13.sp, modifier = Modifier.padding(start = 10.dp))</ID>
+    <ID>MaxLineLength:ExportPanel.kt$Text(noteText("内部生成文件和增量缓存将被删除，Downloads 与 NoteLink 中的副本不受影响。", "Generated files and incremental caches will be deleted. Copies in Downloads and NoteLink are unaffected."))</ID>
+    <ID>MaxLineLength:ExportPanel.kt$Text(noteText("将持续跟随 ${pages.size} 个页面，并增量更新变化内容", "Tracks ${pages.size} pages and incrementally updates changes"), color = ExportMuted)</ID>
+    <ID>MaxLineLength:ExportPanel.kt$if</ID>
     <ID>MaxLineLength:ExportPanel.kt$input.viewModel</ID>
     <ID>MaxLineLength:ExportPanel.kt$mutableStateOf(state.notebooks.firstOrNull { it.id == initialNotebookId }?.id ?: state.notebooks.firstOrNull()?.id)</ID>
+    <ID>MaxLineLength:ExportPanel.kt$noteText("${summary.notebookTitle} · ${summary.pageCount} 页 · ${summary.task.format.name}", "${summary.notebookTitle} · ${summary.pageCount} pages · ${summary.task.format.name}")</ID>
+    <ID>MaxLineLength:ExportPanel.kt$noteText("最新", "Current") + " · ${DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT).format(Date(it))}"</ID>
     <ID>MaxLineLength:ExportTaskRepository.kt$ExportTaskRepository$arrayOf("artifact_id", "artifact_path", "artifact_fingerprint", "artifact_sha256", "artifact_created_at", "last_error")</ID>
     <ID>MaxLineLength:ExportTaskRepository.kt$ExportTaskRepository.Companion$"${source.id}-r${source.contentRevision}-b${backgroundHash(source.backgroundRevision)}-v$RENDERER_VERSION.pdf"</ID>
-    <ID>MaxLineLength:ExportViewModel.kt$ExportViewModel$is ExportResult.Failure -&gt; mutableState.value = mutableState.value.copy(message = "导出失败：${result.error}")</ID>
+    <ID>MaxLineLength:ExportViewModel.kt$ExportViewModel$ExportResult.Cancelled -&gt; mutableState.value = mutableState.value.copy(message = noteText("已取消导出", "Export cancelled"))</ID>
+    <ID>MaxLineLength:ExportViewModel.kt$ExportViewModel$is ExportResult.Failure -&gt; mutableState.value = mutableState.value.copy(message = noteText("导出失败：${result.error}", "Export failed: ${result.error}"))</ID>
+    <ID>MaxLineLength:ExportViewModel.kt$ExportViewModel$mutableState.value = mutableState.value.copy(message = noteText("导出失败：${t.message ?: t.javaClass.simpleName}", "Export failed: ${t.message ?: t.javaClass.simpleName}"))</ID>
+    <ID>MaxLineLength:ExportViewModel.kt$ExportViewModel$mutableState.value = mutableState.value.copy(tasks = tasks, message = noteText("导出任务已创建", "Export task created"))</ID>
+    <ID>MaxLineLength:ExportViewModel.kt$ExportViewModel$mutableState.value = mutableState.value.copy(tasks = tasks, message = noteText("导出任务已删除", "Export task deleted"))</ID>
+    <ID>MaxLineLength:InsertionCoordinator.kt$InsertionCoordinator$if (generation == requestGeneration) mutableState.value = InsertionState.Error(it.message ?: noteText("图片导入失败", "Image import failed"))</ID>
+    <ID>MaxLineLength:InsertionCoordinator.kt$InsertionCoordinator$if (generation == requestGeneration) mutableState.value = InsertionState.Error(it.message ?: noteText("手机传输失败", "Phone transfer failed"))</ID>
     <ID>MaxLineLength:InsertionCoordinator.kt$InsertionCoordinator$is RemotePayload.Text -&gt; mutableState.value = InsertionState.TextReady(payload.text, lease, clientId)</ID>
+    <ID>MaxLineLength:InsertionCoordinator.kt$InsertionCoordinator$mutableState.value = InsertionState.Error(error.message ?: noteText("手机传输失败", "Phone transfer failed"))</ID>
+    <ID>MaxLineLength:InsertionCoordinator.kt$InsertionCoordinator$mutableState.value = InsertionState.Error(noteText("手机队列中没有${contentLabel(kind)}", "The phone queue has no ${contentLabel(kind)}"))</ID>
+    <ID>MaxLineLength:MainActivity.kt$"${endpointName ?: snapshot.deviceId ?: noteText("未知设备", "Unknown device")} · ${it.host}:${it.port}"</ID>
+    <ID>MaxLineLength:MainActivity.kt$)</ID>
+    <ID>MaxLineLength:MainActivity.kt$.</ID>
     <ID>MaxLineLength:MainActivity.kt$Column</ID>
     <ID>MaxLineLength:MainActivity.kt$EventLog.log("NoteLinkPairing", "failed device=${candidate.deviceId} error=${it.message}")</ID>
     <ID>MaxLineLength:MainActivity.kt$EventLog.log("NoteLinkPairing", "start device=${candidate.deviceId} address=${candidate.bluetoothAddress}")</ID>
     <ID>MaxLineLength:MainActivity.kt$Row</ID>
+    <ID>MaxLineLength:MainActivity.kt$Text(if (choosing.kind == ContentKind.TEXT) noteText("手动输入", "Enter manually") else noteText("从系统文件选择", "Choose system file"))</ID>
+    <ID>MaxLineLength:MainActivity.kt$Text(if (request is TextEditorRequest.New) noteText("插入文字", "Insert text") else noteText("编辑文字", "Edit text"), fontSize = 20.sp)</ID>
+    <ID>MaxLineLength:MainActivity.kt$Text(noteText("${available.client.name} · $count 项", "${available.client.name} · $count items"))</ID>
+    <ID>MaxLineLength:MainActivity.kt$Text(noteText("点击夹纸确定放置位置 · 返回键取消", "Tap the linked note to place · Back to cancel"), Modifier.padding(horizontal = 18.dp, vertical = 10.dp))</ID>
+    <ID>MaxLineLength:MainActivity.kt$Text(noteText("等待 NoteLink 发送${contentKindLabel(waiting.kind)}…", "Waiting for NoteLink to send ${contentKindLabel(waiting.kind)}..."))</ID>
+    <ID>MaxLineLength:MainActivity.kt$description = noteText("新建一张夹纸，或放入当前 PDF 页已有夹纸。", "Create a linked note or use one already attached to this PDF page.")</ID>
+    <ID>MaxLineLength:MainActivity.kt$if (!context.packageManager.hasSystemFeature(PackageManager.FEATURE_BLUETOOTH_LE)) return noteText("设备不支持 BLE", "This device does not support BLE")</ID>
+    <ID>MaxLineLength:MainActivity.kt$if (!context.packageManager.hasSystemFeature(PackageManager.FEATURE_WIFI_DIRECT)) return noteText("设备不支持 Wi-Fi Direct", "This device does not support Wi-Fi Direct")</ID>
+    <ID>MaxLineLength:MainActivity.kt$if (!pv.canDeletePage()) showNotice(noteText("最后一页不能删除", "The last page cannot be deleted")) else pv.deletePage(id)</ID>
+    <ID>MaxLineLength:MainActivity.kt$if (context.getSystemService(BluetoothManager::class.java)?.adapter?.isEnabled != true) return noteText("蓝牙已关闭", "Bluetooth is off")</ID>
+    <ID>MaxLineLength:MainActivity.kt$if (context.getSystemService(WifiManager::class.java)?.isWifiEnabled != true) return noteText("WLAN 已关闭", "Wi-Fi is off")</ID>
+    <ID>MaxLineLength:MainActivity.kt$if (insertion.state.value is InsertionState.ImageReady) showNotice(noteText("图片已导入，请点击页面确定位置", "Image imported. Tap the page to place it."))</ID>
+    <ID>MaxLineLength:MainActivity.kt$if (penView?.fitPdf() != true) showNotice(noteText("当前页不是 PDF 源页", "The current page is not a PDF source page"))</ID>
+    <ID>MaxLineLength:MainActivity.kt$insertion.manualText()</ID>
     <ID>MaxLineLength:MainActivity.kt$listOfNotNull(snapshot.phase.name.replace('_', ' '), snapshot.mode?.name, "SSID ${snapshot.ssidMatch.name}")</ID>
+    <ID>MaxLineLength:MainActivity.kt$return if (isPaired) noteText("已就绪，插入时按需连接手机", "Ready; connects to the phone when needed") else noteText("请先与手机配对", "Pair with a phone first")</ID>
+    <ID>MaxLineLength:MainActivity.kt$showNotice(if (debugMode) noteText("调试模式已开启", "Debug mode enabled") else noteText("调试模式已关闭", "Debug mode disabled"))</ID>
+    <ID>MaxLineLength:MainActivity.kt$showNotice(if (isBookmarked) noteText("已添加书签", "Bookmark added") else noteText("已取消书签", "Bookmark removed"))</ID>
+    <ID>MaxLineLength:MainActivity.kt$showNotice(if (study) noteText("学习模式：翻页包含夹纸", "Study mode: navigation includes linked notes") else noteText("阅读模式：翻页跳过夹纸", "Reading mode: navigation skips linked notes"))</ID>
+    <ID>MaxLineLength:MainActivity.kt$showNotice(if (value) noteText("已添加书签", "Bookmark added") else noteText("已取消书签", "Bookmark removed"))</ID>
+    <ID>MaxLineLength:MainActivity.kt$showNotice(noteText("Template 已更换为 ${templateCatalog.find(id)?.name ?: id}", "Template changed to ${templateCatalog.find(id)?.name ?: id}"))</ID>
+    <ID>MaxLineLength:MainActivity.kt$showNotice(noteText("已建立双向链接：点击截图或 PDF 框角落的 Link 图标即可跳转；Side1 仍用于编辑图片", "Two-way link created. Tap the Link icon on the image or PDF selection to jump; Side1 still edits the image."))</ID>
+    <ID>MaxLineLength:MainActivity.kt$showNotice(noteText("已新增第 ${penView!!.currentPageIndex() + 1} 页", "Added page ${penView!!.currentPageIndex() + 1}"))</ID>
+    <ID>MaxLineLength:MainActivity.kt$showNotice(noteText("已新增第 ${pv.currentPageIndex() + 1} 页", "Added page ${pv.currentPageIndex() + 1}"))</ID>
+    <ID>MaxLineLength:MainActivity.kt$targets.forEach { target -&gt; add(noteText("夹纸 ${target.ordinal}", "Linked note ${target.ordinal}") to { prepare(target.pageId) }) }</ID>
     <ID>MaxLineLength:MainActivity.kt$textEditorRequest != null || insertionState !is InsertionState.Idle || pendingNotebookCreation != null</ID>
     <ID>MaxLineLength:MainActivity.kt$val id = pv.pageIds().getOrNull(pv.currentPageIndex()) ?: return@PageManagerShortcutContext false</ID>
+    <ID>MaxLineLength:MainActivity.kt$}</ID>
+    <ID>MaxLineLength:NotebookManagerScreen.kt$actions.onNotice(noteText("再次点击删除图标以删除“${summary.title}”", "Tap Delete again to remove \"${summary.title}\""))</ID>
+    <ID>MaxLineLength:NotebookManagerScreen.kt$contentDescription = noteText("将选中的 ${state.selectedCount} 页创建为新笔记本", "Create a notebook from ${state.selectedCount} selected pages")</ID>
+    <ID>MaxLineLength:NotebookManagerScreen.kt$description = noteText("选择 PDF 来源。导入后会创建独立的 PDF 笔记本。", "Choose a PDF source. Importing creates a separate PDF notebook.")</ID>
+    <ID>MaxLineLength:NotebookManagerScreen.kt$if (state.selecting) noteText("${state.selectedCount} 已选择", "${state.selectedCount} selected") else noteText("${state.notebookCount} 本", "${state.notebookCount} notebooks")</ID>
     <ID>MaxLineLength:NotebookRepository.kt$NotebookRepository$ImageObject(id, transform, z, created, updated, c.getString(0), c.getString(1), c.getInt(2), c.getInt(3), c.getInt(4))</ID>
     <ID>MaxLineLength:NotebookRepository.kt$NotebookRepository$TextObject(id, transform, z, created, updated, c.getString(0), TextFontFamily.valueOf(c.getString(1)), c.getFloat(2), bounds)</ID>
     <ID>MaxLineLength:NotebookRepository.kt$NotebookRepository$arrayOf("id", "note_page_id", "note_object_id", "kind", "normalized_left", "normalized_top", "normalized_right", "normalized_bottom", "selected_text", "ordinal", "created_at")</ID>
     <ID>MaxLineLength:NotebookRepository.kt$NotebookRepository$db.delete("objects", "id=? AND page_id=?", arrayOf(mutation.objectId.toString(), mutation.pageId.toString()))</ID>
     <ID>MaxLineLength:NotebookRepository.kt$NotebookRepository$put("selected_text", anchor.selectedText)</ID>
     <ID>MaxLineLength:NotebookRepository.kt$NotebookRepository$val style = PenStyle(c.getFloat(0), c.getInt(1), PressureCurve(c.getFloat(2), c.getFloat(3)), PenType.valueOf(c.getString(4)))</ID>
+    <ID>MaxLineLength:PageManagerPanel.kt$if (!changed) onNotice(if (side1Delta &lt; 0) noteText("已经是第一组缩略图", "Already at the first thumbnail group") else noteText("已经是最后一组缩略图", "Already at the last thumbnail group"))</ID>
+    <ID>MaxLineLength:PageManagerPanel.kt$onNotice(noteText("再次按 Side3 删除第 ${info.pageNumber} 页", "Press Side3 again to delete page ${info.pageNumber}"))</ID>
+    <ID>MaxLineLength:PageManagerPanel.kt$title = noteText("页面 ${currentIndex + 1}/${displayedPages.size.coerceAtLeast(1)}", "Page ${currentIndex + 1}/${displayedPages.size.coerceAtLeast(1)}")</ID>
     <ID>MaxLineLength:PenGeometry.kt$PenGeometry$1 -&gt; { l = p3 - rect.right; t = p4 - rect.bottom; r = w + (p3 - rect.right); b = h + (p4 - rect.bottom) }</ID>
     <ID>MaxLineLength:PenGeometry.kt$PenGeometry$3 -&gt; { l = p3 - rect.right; t = p4 - rect.bottom; r = w + (p3 - rect.right); b = h + (p4 - rect.bottom) }</ID>
     <ID>MaxLineLength:PhoneTransferClient.kt$PhoneTransferClient$if (failedSession != null) runCatchingCancellable { exchange(failedSession, authenticatedId, BleCommand.Release(itemId)) }</ID>
     <ID>MaxLineLength:PhoneTransferClient.kt$PhoneTransferClient$require</ID>
     <ID>MaxLineLength:PhoneTransferClient.kt$PhoneTransferClient$when</ID>
-    <ID>MaxLineLength:SettingsScreen.kt$"最近使用 ${DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT).format(Date(client.lastUsedAt))}"</ID>
-    <ID>MaxLineLength:SettingsScreen.kt$Text(if (client.legacy) "旧配对，连接后自动识别" else client.id, fontSize = 12.sp, color = Color.DarkGray)</ID>
-    <ID>MaxLineLength:SettingsScreen.kt$if (!transferPermissionsGranted) OutlinedButton(onClick = onTransferPermissions) { Text("授予权限") }</ID>
-    <ID>MaxLineLength:SettingsScreen.kt$if (online == null) "离线" else "在线 · ${online.imageCount} 张图片 · ${online.textCount} 段文字 · ${online.pdfCount} 份 PDF"</ID>
+    <ID>MaxLineLength:SettingsScreen.kt$"${it.code}: ${it.message} · ${if (it.recoverable) noteText("可重试", "retryable") else noteText("不可重试", "not retryable")}"</ID>
+    <ID>MaxLineLength:SettingsScreen.kt$"${noteText("端点", "Endpoint")} ${endpointName ?: snapshot.deviceId ?: noteText("未知设备", "Unknown device")} · ${it.host}:${it.port}"</ID>
+    <ID>MaxLineLength:SettingsScreen.kt$"Hanvon ROM interfaces are provided by the device platform. Declarations are compile-only and are not distributed with the app."</ID>
+    <ID>MaxLineLength:SettingsScreen.kt$"Online · ${online.imageCount} images · ${online.textCount} texts · ${online.pdfCount} PDFs"</ID>
+    <ID>MaxLineLength:SettingsScreen.kt$"PDF Ink annotation 导出使用 MuPDF fitz 1.28.0，Copyright Artifex Software, Inc.，按 GNU AGPL v3 或更高版本授权。"</ID>
+    <ID>MaxLineLength:SettingsScreen.kt$"PDF ink annotation export uses MuPDF fitz 1.28.0, Copyright Artifex Software, Inc., licensed under GNU AGPL v3 or later."</ID>
+    <ID>MaxLineLength:SettingsScreen.kt$"Wi-Fi Direct ${noteText("组", "group")} ${if (snapshot.wifiDirectGroupReady) noteText("已就绪", "ready") else noteText("未就绪", "not ready")}"</ID>
+    <ID>MaxLineLength:SettingsScreen.kt$"在线 · ${online.imageCount} 张图片 · ${online.textCount} 段文字 · ${online.pdfCount} 份 PDF"</ID>
+    <ID>MaxLineLength:SettingsScreen.kt$Button(onClick = { onOpenRelease(available.info.releaseUrl) }) { Text(noteText("查看 Release", "View release")) }</ID>
+    <ID>MaxLineLength:SettingsScreen.kt$Button(onClick = { onStartShortcutCapture(shortcutScene) }) { Text(noteText("按实体键识别", "Identify hardware key")) }</ID>
+    <ID>MaxLineLength:SettingsScreen.kt$OutlinedButton(onClick = onRefreshTransferStatus) { Text(noteText("刷新状态", "Refresh status")) }</ID>
+    <ID>MaxLineLength:SettingsScreen.kt$OutlinedButton(onClick = { onShortcutSceneClear(shortcutScene) }) { Text(noteText("清空本场景", "Clear this context")) }</ID>
+    <ID>MaxLineLength:SettingsScreen.kt$OutlinedButton(onClick = { onUnpairClient(client.id) }) { Text(noteText("移除", "Remove")) }</ID>
+    <ID>MaxLineLength:SettingsScreen.kt$SettingRow</ID>
+    <ID>MaxLineLength:SettingsScreen.kt$Text(action?.localizedLabel() ?: noteText("未绑定", "Unassigned"), color = Color.DarkGray, maxLines = 2)</ID>
+    <ID>MaxLineLength:SettingsScreen.kt$Text(if (checkState is UpdateCheckState.Checking) noteText("检查中", "Checking") else noteText("检查更新", "Check for updates"))</ID>
+    <ID>MaxLineLength:SettingsScreen.kt$Text(if (client.legacy) noteText("旧配对，连接后自动识别", "Legacy pairing; identified on connection") else client.id, fontSize = 12.sp, color = Color.DarkGray)</ID>
+    <ID>MaxLineLength:SettingsScreen.kt$Text(if (pairingScanActive) noteText("正在扫描", "Scanning") else noteText("扫描新客户端", "Scan for clients"))</ID>
+    <ID>MaxLineLength:SettingsScreen.kt$Text(noteText("NoteLink 客户端", "NoteLink clients"), fontSize = 20.sp, modifier = Modifier.padding(bottom = 8.dp))</ID>
+    <ID>MaxLineLength:SettingsScreen.kt$Text(noteText("工具栏显示", "Toolbar items"), fontSize = 20.sp, modifier = Modifier.padding(bottom = 12.dp))</ID>
+    <ID>MaxLineLength:SettingsScreen.kt$Text(noteText("当前版本 $currentVersion", "Current version $currentVersion"), color = Color.DarkGray, modifier = Modifier.padding(top = 4.dp))</ID>
+    <ID>MaxLineLength:SettingsScreen.kt$Text(noteText("重新进入应用时", "When reopening the app"), modifier = Modifier.padding(top = 24.dp, bottom = 8.dp))</ID>
+    <ID>MaxLineLength:SettingsScreen.kt$if (!transferPermissionsGranted) OutlinedButton(onClick = onTransferPermissions) { Text(noteText("授予权限", "Grant permission")) }</ID>
+    <ID>MaxLineLength:SettingsScreen.kt$label = { Text(noteText("所选 NoteLink 显示的六位配对码", "Six-digit code shown by the selected NoteLink")) }</ID>
     <ID>MaxLineLength:SettingsScreen.kt$listOfNotNull("BLE", snapshot.phase.name.replace('_', ' '), snapshot.mode?.name, "SSID ${snapshot.ssidMatch.name}")</ID>
-    <ID>MaxLineLength:SettingsScreen.kt$listOfNotNull(snapshot.deviceId?.let { " · 设备 $it" }, snapshot.operationId?.let { " · 操作 ${it.toString().take(8)}" })</ID>
+    <ID>MaxLineLength:SettingsScreen.kt$listOfNotNull(snapshot.deviceId?.let { " · ${noteText("设备", "device")} $it" }, snapshot.operationId?.let { " · ${noteText("操作", "operation")} ${it.toString().take(8)}" })</ID>
+    <ID>MaxLineLength:SettingsScreen.kt$noteText("发现新版本 ${checkState.info.latestVersion.display}：${checkState.info.releaseTitle}", "New version ${checkState.info.latestVersion.display}: ${checkState.info.releaseTitle}")</ID>
+    <ID>MaxLineLength:SettingsScreen.kt$noteText("最近使用", "Last used") + " ${DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT).format(Date(client.lastUsedAt))}"</ID>
     <ID>MaxLineLength:TemplateManifestCodecTest.kt$TemplateManifestCodecTest$"""{"schemaVersion":1,"templates":[{"id":"bad","name":"Bad","description":"","file":"bad.jpg","width":3,"height":4}]}"""</ID>
     <ID>MaxLineLength:TemplateManifestCodecTest.kt$TemplateManifestCodecTest$"""{"schemaVersion":1,"templates":[{"id":"custom.grid","name":"Grid","description":"Fine grid","file":"grid.svg","width":1404,"height":1872}]}"""</ID>
+    <ID>MaxLineLength:TemplateUi.kt$!compatible -&gt; Text(noteText("宽高比与当前页面不一致", "Aspect ratio does not match this page"), color = Color(0xFF8B0000), fontSize = 11.sp)</ID>
+    <ID>MaxLineLength:TemplateUi.kt$)</ID>
+    <ID>MaxLineLength:TemplateUi.kt$Icon(Icons.Filled.FolderOpen, contentDescription = noteText("连接或更换模板目录", "Connect or change template folder"))</ID>
+    <ID>MaxLineLength:TemplateUi.kt$Text(noteText("外部来源不可用 · 使用缓存", "External source unavailable · using cache"), color = Color(0xFF8B5A00), fontSize = 11.sp)</ID>
     <ID>MaxLineLength:TemplateUi.kt$definition.error != null -&gt; Text(definition.error, color = Color(0xFF8B0000), fontSize = 11.sp)</ID>
+    <ID>MaxLineLength:TemplateUi.kt$else</ID>
+    <ID>MaxLineLength:TemplateUi.kt$if</ID>
     <ID>MaxLineLength:Toolbar.kt$.</ID>
+    <ID>MaxLineLength:Toolbar.kt$Icon(Icons.Filled.OpenWith, contentDescription = noteText("拖动工具栏；点击隐藏", "Drag toolbar; tap to hide"), tint = Color.Black)</ID>
+    <ID>MaxLineLength:Toolbar.kt$PopupTextButton</ID>
+    <ID>MaxLineLength:Toolbar.kt$PopupTextButton(if (debugMode) noteText("关闭 Debug", "Disable debug") else noteText("开启 Debug", "Enable debug"), onDebugToggle, debugMode)</ID>
+    <ID>MaxLineLength:Toolbar.kt$PopupTextButton(if (studyMode) noteText("学习模式", "Study mode") else noteText("阅读模式", "Reading mode"), onClick = onModeToggle, selected = true)</ID>
+    <ID>MaxLineLength:Toolbar.kt$if (kind == com.betterhv.transfer.core.ContentKind.IMAGE) noteText("系统文件", "System file") else noteText("手动输入", "Enter manually")</ID>
     <ID>MaxLineLength:ViewportTransform.kt$PdfViewportMath$(centerX + state.panX).coerceIn(centerX - viewWidth * FIT_PAN_FRACTION, centerX + viewWidth * FIT_PAN_FRACTION)</ID>
     <ID>MaxLineLength:ViewportTransform.kt$PdfViewportMath$(centerY + state.panY).coerceIn(centerY - viewHeight * FIT_PAN_FRACTION, centerY + viewHeight * FIT_PAN_FRACTION)</ID>
     <ID>MaximumLineLength:ExportPanel.kt$ </ID>
@@ -645,7 +892,9 @@
     <ID>MaximumLineLength:ExportViewModel.kt$ExportViewModel$ </ID>
     <ID>MaximumLineLength:InsertionCoordinator.kt$InsertionCoordinator$ </ID>
     <ID>MaximumLineLength:MainActivity.kt$ </ID>
+    <ID>MaximumLineLength:NotebookManagerScreen.kt$ </ID>
     <ID>MaximumLineLength:NotebookRepository.kt$NotebookRepository$ </ID>
+    <ID>MaximumLineLength:PageManagerPanel.kt$ </ID>
     <ID>MaximumLineLength:PenGeometry.kt$PenGeometry$ </ID>
     <ID>MaximumLineLength:PhoneTransferClient.kt$PhoneTransferClient$ </ID>
     <ID>MaximumLineLength:SettingsScreen.kt$ </ID>
@@ -653,16 +902,16 @@
     <ID>MaximumLineLength:TemplateUi.kt$ </ID>
     <ID>MaximumLineLength:Toolbar.kt$ </ID>
     <ID>MaximumLineLength:ViewportTransform.kt$PdfViewportMath$ </ID>
-    <ID>MultiLineIfElse:AppSettingsStore.kt$AppSettingsStore$editor.remove(shortcutKey(scene, key))</ID>
+    <ID>MultiLineIfElse:AppSettingsStore.kt$AppSettingsStore$remove(shortcutKey(scene, key))</ID>
     <ID>MultiLineIfElse:EventLog.kt$EventLog$append(line)</ID>
     <ID>MultiLineIfElse:EventLog.kt$EventLog$mainHandler.post { append(line) }</ID>
     <ID>MultiLineIfElse:ExportDownloads.kt$ExportDownloads$resolver.delete(uri, null, null)</ID>
     <ID>MultiLineIfElse:ExportDownloads.kt$ExportDownloads$resolver.update(uri, ContentValues().apply { put(MediaStore.MediaColumns.IS_PENDING, 0) }, null, null)</ID>
     <ID>MultiLineIfElse:ExportEngine.kt$ExportEngine$renderer.renderToBitmap( snapshot, (snapshot.metadata.width * 2f).toInt(), (snapshot.metadata.height * 2f).toInt() )</ID>
-    <ID>MultiLineIfElse:ExportPanel.kt$"${summary.stalePageCount} 页待更新"</ID>
-    <ID>MultiLineIfElse:ExportPanel.kt$"NoteLink 未配对或不可用"</ID>
-    <ID>MultiLineIfElse:ExportPanel.kt$"发送 ${summary.notebookTitle} 到 NoteLink"</ID>
-    <ID>MultiLineIfElse:ExportPanel.kt$"页面集合或顺序待更新"</ID>
+    <ID>MultiLineIfElse:ExportPanel.kt$noteText("${summary.stalePageCount} 页待更新", "${summary.stalePageCount} pages need updating")</ID>
+    <ID>MultiLineIfElse:ExportPanel.kt$noteText("NoteLink 未配对或不可用", "NoteLink is not paired or unavailable")</ID>
+    <ID>MultiLineIfElse:ExportPanel.kt$noteText("发送 ${summary.notebookTitle} 到 NoteLink", "Send ${summary.notebookTitle} to NoteLink")</ID>
+    <ID>MultiLineIfElse:ExportPanel.kt$noteText("页面集合或顺序待更新", "Page set or order changed")</ID>
     <ID>MultiLineIfElse:ExportPanel.kt$setOf(id)</ID>
     <ID>MultiLineIfElse:ExportTaskRepository.kt$ExportTaskRepository$"pdf"</ID>
     <ID>MultiLineIfElse:ExportTaskRepository.kt$ExportTaskRepository$0</ID>
@@ -676,10 +925,10 @@
     <ID>MultiLineIfElse:LassoOverlayView.kt$LassoOverlayView$return false</ID>
     <ID>MultiLineIfElse:MainActivity.kt$emptyList()</ID>
     <ID>MultiLineIfElse:MainActivity.kt$null</ID>
-    <ID>MultiLineIfElse:MainActivity.kt$showNotice("该 Template 与当前页面不兼容")</ID>
+    <ID>MultiLineIfElse:MainActivity.kt$showNotice(noteText("该 Template 与当前页面不兼容", "This template is not compatible with the current page"))</ID>
     <ID>MultiLineIfElse:MainActivity.kt$true</ID>
-    <ID>MultiLineIfElse:MainActivity.kt$when (val request = insertion.state.value) { is InsertionState.ImageReady -&gt; insertion.placeImage(x, y) .onSuccess { showNotice("图片已插入；使用 Side1 点击可编辑") } .onFailure { showNotice("图片插入失败：${it.message}") } is InsertionState.TextReady -&gt; textEditorRequest = TextEditorRequest.New(x, y, request.initialText) else -&gt; Unit }</ID>
-    <ID>MultiLineIfElse:MainActivity.kt${ x, y -&gt; if (pv.hasPendingLinkedNotePlacement()) { notebookBusy = true pv.placePendingLinkedNote(x, y) { result -&gt; notebookBusy = false result.onSuccess { showNotice("已建立双向链接：点击截图或 PDF 框角落的 Link 图标即可跳转；Side1 仍用于编辑图片") } } } else when (val request = insertion.state.value) { is InsertionState.ImageReady -&gt; insertion.placeImage(x, y) .onSuccess { showNotice("图片已插入；使用 Side1 点击可编辑") } .onFailure { showNotice("图片插入失败：${it.message}") } is InsertionState.TextReady -&gt; textEditorRequest = TextEditorRequest.New(x, y, request.initialText) else -&gt; Unit } }</ID>
+    <ID>MultiLineIfElse:MainActivity.kt$when (val request = insertion.state.value) { is InsertionState.ImageReady -&gt; insertion.placeImage(x, y) .onSuccess { showNotice(noteText("图片已插入；使用 Side1 点击可编辑", "Image inserted. Use Side1 and tap it to edit.")) } .onFailure { showNotice(noteText("图片插入失败：${it.message}", "Image insertion failed: ${it.message}")) } is InsertionState.TextReady -&gt; textEditorRequest = TextEditorRequest.New(x, y, request.initialText) else -&gt; Unit }</ID>
+    <ID>MultiLineIfElse:MainActivity.kt${ x, y -&gt; if (pv.hasPendingLinkedNotePlacement()) { notebookBusy = true pv.placePendingLinkedNote(x, y) { result -&gt; notebookBusy = false result.onSuccess { showNotice(noteText("已建立双向链接：点击截图或 PDF 框角落的 Link 图标即可跳转；Side1 仍用于编辑图片", "Two-way link created. Tap the Link icon on the image or PDF selection to jump; Side1 still edits the image.")) } } } else when (val request = insertion.state.value) { is InsertionState.ImageReady -&gt; insertion.placeImage(x, y) .onSuccess { showNotice(noteText("图片已插入；使用 Side1 点击可编辑", "Image inserted. Use Side1 and tap it to edit.")) } .onFailure { showNotice(noteText("图片插入失败：${it.message}", "Image insertion failed: ${it.message}")) } is InsertionState.TextReady -&gt; textEditorRequest = TextEditorRequest.New(x, y, request.initialText) else -&gt; Unit } }</ID>
     <ID>MultiLineIfElse:NotebookRepository.kt$NotebookRepository$(if (cursor.isNull(19)) DEFAULT_TEMPLATE_ID else cursor.getString(19))</ID>
     <ID>MultiLineIfElse:NotebookRepository.kt$NotebookRepository$(if (cursor.isNull(20)) DEFAULT_TEMPLATE_ID else cursor.getString(20))</ID>
     <ID>MultiLineIfElse:NotebookRepository.kt$NotebookRepository$PdfPageSource( cursor.getInt(9), Bounds(cursor.getFloat(10), cursor.getFloat(11), cursor.getFloat(12), cursor.getFloat(13)), Transform2D( cursor.getFloat(14), cursor.getFloat(15), cursor.getFloat(16), cursor.getFloat(17), cursor.getFloat(18), cursor.getFloat(19) ) )</ID>
@@ -699,10 +948,9 @@
     <ID>MultiLineIfElse:PhoneTransferClient.kt$PhoneTransferClient$candidate.identityHash.equals(client.identityHash, ignoreCase = true)</ID>
     <ID>MultiLineIfElse:PhoneTransferClient.kt$PhoneTransferClient$error("NoteLink 版本过旧，请升级后重试")</ID>
     <ID>MultiLineIfElse:PhoneTransferClient.kt$PhoneTransferClient$error("手机返回了无效队列响应")</ID>
-    <ID>MultiLineIfElse:PhoneTransferClient.kt$PhoneTransferClient$null</ID>
-    <ID>MultiLineIfElse:PhoneTransferClient.kt$PhoneTransferClient$runCatchingCancellable { receiveImageAttempt(session, pairedPhoneId, item, incoming, key, TransferMode.LAN, lanEndpoint) }.fold({ return@coroutineScope it }, { it })</ID>
-    <ID>MultiLineIfElse:PhoneTransferClient.kt$PhoneTransferClient$runCatchingCancellable { sendExportAttempt(session, clientId, artifact, pairingKey, TransferMode.LAN, remoteLan, progressCallback) }.exceptionOrNull()</ID>
     <ID>MultiLineIfElse:PhoneTransferClient.kt$PhoneTransferClient$throw TransferChannelException(response.failure)</ID>
+    <ID>MultiLineIfElse:SettingsScreen.kt$noteText( "在线 · ${online.imageCount} 张图片 · ${online.textCount} 段文字 · ${online.pdfCount} 份 PDF", "Online · ${online.imageCount} images · ${online.textCount} texts · ${online.pdfCount} PDFs", )</ID>
+    <ID>MultiLineIfElse:SettingsScreen.kt$noteText("离线", "Offline")</ID>
     <ID>MultiLineIfElse:TemplateManifestCodec.kt$TemplateManifestCodec$entries += TemplateManifestEntry(id!!, name!!, description!!, file!!, width!!, height!!)</ID>
     <ID>MultiLineIfElse:TemplateManifestCodec.kt$TemplateManifestCodec$errors += problem</ID>
     <ID>MultiLineIfElse:TemplateStore.kt$TemplateStore$"missing:$requested:${catalog.find(DEFAULT_TEMPLATE_ID)?.fingerprint.orEmpty()}"</ID>
@@ -710,12 +958,12 @@
     <ID>MultiLineIfElse:TemplateStore.kt$TemplateStore$builtinJson</ID>
     <ID>MultiLineIfElse:TemplateStore.kt$TemplateStore$emptyList()</ID>
     <ID>MultiLineIfElse:TemplateStore.kt$TemplateStore$resolved.fingerprint</ID>
-    <ID>MultiLineIfElse:TemplateUi.kt$"公共目录已连接 · 返回应用或点击刷新可同步外部修改"</ID>
-    <ID>MultiLineIfElse:TemplateUi.kt$"正在使用内置模板 · 尚未连接公共目录"</ID>
+    <ID>MultiLineIfElse:TemplateUi.kt$noteText("公共目录已连接 · 返回应用或点击刷新可同步外部修改", "Shared folder connected · return or refresh to sync changes")</ID>
+    <ID>MultiLineIfElse:TemplateUi.kt$noteText("正在使用内置模板 · 尚未连接公共目录", "Using built-in templates · no shared folder connected")</ID>
     <ID>MultiLineIfElse:ThumbnailManager.kt$ThumbnailManager$Bitmap.Config.ARGB_8888</ID>
     <ID>MultiLineIfElse:ThumbnailManager.kt$ThumbnailManager$Bitmap.Config.RGB_565</ID>
-    <ID>MultiLineIfElse:Toolbar.kt$Box { SquareIconButton( Icons.Filled.Navigation, "PDF 导航：Side1 平移；Side2 缩放", enabled = true, selected = toolKind == ToolKind.NAVIGATION || navigationExpanded, onClick = { closeFlyouts() onToolSelected(ToolKind.NAVIGATION) navigationExpanded = true } ) PdfNavigationMenu( expanded = navigationExpanded, onDismiss = { navigationExpanded = false }, dockEdge = dockEdge, onFit = onPdfFit, onModeToggle = onPdfNavigationModeToggle, studyMode = pdfStudyMode ) }</ID>
-    <ID>MultiLineIfElse:Toolbar.kt$Box { SquareIconButton( Icons.Filled.PostAdd, "插入图片或文字", enabled = true, selected = insertionActive, onClick = { closeFlyouts() insertExpanded = true } ) InsertTypeMenu( expanded = insertExpanded, onDismiss = { insertExpanded = false }, dockEdge = dockEdge, onLocal = { kind -&gt; insertExpanded = false; onInsertLocal(kind) }, onNoteLink = { kind -&gt; insertExpanded = false; onInsertNoteLink(kind) } ) }</ID>
+    <ID>MultiLineIfElse:Toolbar.kt$Box { SquareIconButton( Icons.Filled.Navigation, noteText("PDF 导航：Side1 平移；Side2 缩放", "PDF navigation: Side1 pans; Side2 zooms"), enabled = true, selected = toolKind == ToolKind.NAVIGATION || navigationExpanded, onClick = { closeFlyouts() onToolSelected(ToolKind.NAVIGATION) navigationExpanded = true } ) PdfNavigationMenu( expanded = navigationExpanded, onDismiss = { navigationExpanded = false }, dockEdge = dockEdge, onFit = onPdfFit, onModeToggle = onPdfNavigationModeToggle, studyMode = pdfStudyMode ) }</ID>
+    <ID>MultiLineIfElse:Toolbar.kt$Box { SquareIconButton( Icons.Filled.PostAdd, noteText("插入图片或文字", "Insert image or text"), enabled = true, selected = insertionActive, onClick = { closeFlyouts() insertExpanded = true } ) InsertTypeMenu( expanded = insertExpanded, onDismiss = { insertExpanded = false }, dockEdge = dockEdge, onLocal = { kind -&gt; insertExpanded = false; onInsertLocal(kind) }, onNoteLink = { kind -&gt; insertExpanded = false; onInsertNoteLink(kind) } ) }</ID>
     <ID>MultiLineIfElse:Toolbar.kt$Box { SquareIconButton( eraserIcon, eraserDesc, enabled = true, selected = eraserExpanded, onClick = { closeFlyouts(); eraserExpanded = true } ) TailEraserMenu( expanded = eraserExpanded, onDismiss = { eraserExpanded = false }, dockEdge = dockEdge, eraserMode = eraserMode, onToggle = onEraserModeToggle ) }</ID>
     <ID>MultiLineIfElse:Toolbar.kt$Color.Black</ID>
     <ID>MultiLineIfElse:Toolbar.kt$Color.White</ID>
@@ -838,6 +1086,8 @@
     <ID>Wrapping:ExportDownloads.kt$ExportDownloads$;</ID>
     <ID>Wrapping:ExportPanel.kt$(</ID>
     <ID>Wrapping:ExportPanel.kt$;</ID>
+    <ID>Wrapping:ExportPanel.kt$scope = ExportScope.ALL_PAGES; format = ExportFormat.PDF</ID>
+    <ID>Wrapping:ExportPanel.kt$scope = ExportScope.SELECTED_PAGES</ID>
     <ID>Wrapping:ExportRevisionTest.kt$ExportRevisionTest$(</ID>
     <ID>Wrapping:ExportRevisionTest.kt$ExportRevisionTest$(ExportFormat.PDF, original.mapIndexed { index, page -&gt; if (index == 1) page.copy(contentRevision = 3) else page }, 2)</ID>
     <ID>Wrapping:ExportTaskRepository.kt$ExportTaskRepository$(</ID>
@@ -846,6 +1096,8 @@
     <ID>Wrapping:ImageAssetStore.kt$ImageAssetStore$;</ID>
     <ID>Wrapping:InsertionCoordinator.kt$InsertionCoordinator$;</ID>
     <ID>Wrapping:MainActivity.kt$;</ID>
+    <ID>Wrapping:MainActivity.kt$Text(noteText("从手机取下一项${contentKindLabel(choosing.kind)}", "Get next ${contentKindLabel(choosing.kind)} from phone"))</ID>
+    <ID>Wrapping:MainActivity.kt$prepare(target.pageId)</ID>
     <ID>Wrapping:MainActivity.kt${ message -&gt; snackbarScope.launch { snackbarHostState.showSnackbar( message = message, withDismissAction = true, duration = SnackbarDuration.Short ) } }</ID>
     <ID>Wrapping:MigrationManager.kt$MigrationManager$"""</ID>
     <ID>Wrapping:MuPdfEngine.kt$MuPdfEngine$(</ID>
@@ -869,9 +1121,13 @@
     <ID>Wrapping:PhoneTransferClient.kt$PhoneTransferClient.NoteReceivedLease$;</ID>
     <ID>Wrapping:SelectionTool.kt$SelectionTool$(</ID>
     <ID>Wrapping:SelectionToolTest.kt$SelectionToolTest$;</ID>
+    <ID>Wrapping:SettingsScreen.kt$" · ${noteText("操作", "operation")} ${it.toString().take(8)}"</ID>
+    <ID>Wrapping:SettingsScreen.kt$" · ${noteText("设备", "device")} $it"</ID>
+    <ID>Wrapping:SettingsScreen.kt$Text(noteText("授予权限", "Grant permission"))</ID>
     <ID>Wrapping:StrokeSimplifier.kt$RamerDouglasPeuckerSimplifier$(</ID>
     <ID>Wrapping:TemplateRenderer.kt$TemplateRenderer$(</ID>
     <ID>Wrapping:TemplateRenderer.kt$TemplateRenderer$(path, BitmapFactory.Options().apply { inSampleSize = sample inPreferredConfig = Bitmap.Config.ARGB_8888 })</ID>
+    <ID>Wrapping:TemplateUi.kt$Text(noteText("Template\nPDF 页面使用原始文档背景", "Template\nPDF pages use the original document background"), Modifier.padding(16.dp), color = Color(0xFF666666))</ID>
     <ID>Wrapping:ThumbnailManager.kt$ThumbnailManager$(</ID>
     <ID>Wrapping:ThumbnailManager.kt$ThumbnailManager$;</ID>
     <ID>Wrapping:Toolbar.kt$(</ID>

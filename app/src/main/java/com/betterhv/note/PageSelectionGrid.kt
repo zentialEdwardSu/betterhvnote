@@ -83,7 +83,7 @@ private fun SelectablePageCard(
         bitmap?.let {
             Image(
                 it.asImageBitmap(),
-                contentDescription = "第 ${page.pageNumber} 页",
+                contentDescription = noteText("第 ${page.pageNumber} 页", "Page ${page.pageNumber}"),
                 modifier = Modifier.fillMaxSize(),
                 contentScale = ContentScale.Fit
             )
@@ -100,7 +100,7 @@ private fun SelectablePageCard(
                     .background(Color.Black, RectangleShape),
                 contentAlignment = Alignment.Center
             ) {
-                Icon(Icons.Filled.Check, contentDescription = "已选择", tint = Color.White)
+                Icon(Icons.Filled.Check, contentDescription = noteText("已选择", "Selected"), tint = Color.White)
             }
         }
     }

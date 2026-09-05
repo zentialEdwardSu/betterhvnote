@@ -1,7 +1,7 @@
 package com.betterhv.note
 
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -31,13 +31,13 @@ import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -46,19 +46,28 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.betterhv.note.storage.StartupBehavior
 import com.betterhv.transfer.core.PairedDevice
-import com.betterhv.transfer.core.TransferPhase
 import com.betterhv.transfer.core.TransferLogEntry
 import com.betterhv.transfer.core.TransferLogLevel
 import com.betterhv.transfer.core.TransferModes
+import com.betterhv.transfer.core.TransferPhase
 import com.betterhv.transfer.core.TransferSnapshot
+import com.betterhv.update.UpdateCheckState
+import com.betterhv.update.UpdateUiState
 import java.text.DateFormat
 import java.util.Date
 
-private enum class SettingsTab(val label: String) {
-    GENERAL("常规"),
-    TOOLBAR("工具栏"),
-    SHORTCUTS("物理按键"),
-    NOTELINK("NoteLink")
+private enum class SettingsTab {
+    GENERAL,
+    TOOLBAR,
+    SHORTCUTS,
+    NOTELINK;
+
+    fun label(): String = when (this) {
+        GENERAL -> noteText("常规", "General")
+        TOOLBAR -> noteText("工具栏", "Toolbar")
+        SHORTCUTS -> noteText("物理按键", "Hardware keys")
+        NOTELINK -> "NoteLink"
+    }
 }
 
 data class SettingsState(
@@ -77,9 +86,11 @@ data class SettingsState(
     val skipSourceSelectionWhenQueueAvailable: Boolean,
     val autoCreatePageOnNextAtEnd: Boolean,
     val showRecentTransferEvents: Boolean,
+    val language: NoteLanguage,
     val visibleToolbarItems: Set<ToolbarItem>,
     val shortcutBindings: HardwareShortcutBindings,
     val shortcutBindingRequest: Pair<ShortcutScene, HardwareKeyId>?,
+    val updateUiState: UpdateUiState,
 )
 
 data class SettingsActions(
@@ -88,6 +99,7 @@ data class SettingsActions(
     val onSkipSourceSelectionChange: (Boolean) -> Unit,
     val onAutoCreatePageOnNextAtEndChange: (Boolean) -> Unit,
     val onShowRecentTransferEventsChange: (Boolean) -> Unit,
+    val onLanguageChange: (NoteLanguage) -> Unit,
     val onToolbarItemVisibilityChange: (ToolbarItem, Boolean) -> Unit,
     val onResetToolbarItems: () -> Unit,
     val onStartShortcutCapture: (ShortcutScene) -> Unit,
@@ -101,6 +113,8 @@ data class SettingsActions(
     val onTransferPermissions: () -> Unit,
     val onRefreshTransferStatus: () -> Unit,
     val onCancelTransfer: () -> Unit,
+    val onCheckUpdate: () -> Unit,
+    val onOpenRelease: (String) -> Unit,
     val onClose: () -> Unit,
 )
 
@@ -124,14 +138,17 @@ fun SettingsScreen(
     val skipSourceSelectionWhenQueueAvailable = state.skipSourceSelectionWhenQueueAvailable
     val autoCreatePageOnNextAtEnd = state.autoCreatePageOnNextAtEnd
     val showRecentTransferEvents = state.showRecentTransferEvents
+    val language = state.language
     val visibleToolbarItems = state.visibleToolbarItems
     val shortcutBindings = state.shortcutBindings
     val shortcutBindingRequest = state.shortcutBindingRequest
+    val updateUiState = state.updateUiState
     val onDebugModeChange = actions.onDebugModeChange
     val onStartupBehaviorChange = actions.onStartupBehaviorChange
     val onSkipSourceSelectionChange = actions.onSkipSourceSelectionChange
     val onAutoCreatePageOnNextAtEndChange = actions.onAutoCreatePageOnNextAtEndChange
     val onShowRecentTransferEventsChange = actions.onShowRecentTransferEventsChange
+    val onLanguageChange = actions.onLanguageChange
     val onToolbarItemVisibilityChange = actions.onToolbarItemVisibilityChange
     val onResetToolbarItems = actions.onResetToolbarItems
     val onStartShortcutCapture = actions.onStartShortcutCapture
@@ -145,6 +162,8 @@ fun SettingsScreen(
     val onTransferPermissions = actions.onTransferPermissions
     val onRefreshTransferStatus = actions.onRefreshTransferStatus
     val onCancelTransfer = actions.onCancelTransfer
+    val onCheckUpdate = actions.onCheckUpdate
+    val onOpenRelease = actions.onOpenRelease
     val onClose = actions.onClose
     var pairingCode by remember { mutableStateOf("") }
     var selectedCandidateId by remember { mutableStateOf<String?>(null) }
@@ -171,16 +190,16 @@ fun SettingsScreen(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 IconButton(onClick = onClose) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = noteText("返回", "Back"))
                 }
-                Text("设置", fontSize = 26.sp)
+                Text(noteText("设置", "Settings"), fontSize = 26.sp)
             }
             TabRow(selectedTabIndex = selectedTab.ordinal, containerColor = Color.White) {
                 SettingsTab.entries.forEach { tab ->
                     Tab(
                         selected = selectedTab == tab,
                         onClick = { selectedTab = tab },
-                        text = { Text(tab.label, fontSize = 16.sp) }
+                        text = { Text(tab.label(), fontSize = 16.sp) }
                     )
                 }
             }
@@ -190,24 +209,32 @@ fun SettingsScreen(
                     SettingsTab.GENERAL -> Column(
                         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp)
                     ) {
-                        SettingRow("调试模式", onClick = { onDebugModeChange(!debugMode) }) {
+                        Text(noteText("语言", "Language"), modifier = Modifier.padding(bottom = 8.dp))
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            NoteLanguage.entries.forEach { option ->
+                                OutlinedButton(onClick = { onLanguageChange(option) }) {
+                                    Text((if (option == language) "✓ " else "") + option.displayName())
+                                }
+                            }
+                        }
+                        SettingRow(noteText("调试模式", "Debug mode"), onClick = { onDebugModeChange(!debugMode) }) {
                             Switch(checked = debugMode, onCheckedChange = onDebugModeChange)
                         }
-                        SettingRow("队列有内容时直接从 NoteLink 获取", onClick = {
+                        SettingRow(noteText("队列有内容时直接从 NoteLink 获取", "Get directly from NoteLink when its queue is not empty"), onClick = {
                             onSkipSourceSelectionChange(!skipSourceSelectionWhenQueueAvailable)
                         }) {
                             Switch(skipSourceSelectionWhenQueueAvailable, onSkipSourceSelectionChange)
                         }
-                        SettingRow("末页按下一页时自动新增页面", onClick = {
+                        SettingRow(noteText("末页按下一页时自动新增页面", "Create a page when navigating past the last page"), onClick = {
                             onAutoCreatePageOnNextAtEndChange(!autoCreatePageOnNextAtEnd)
                         }) {
                             Switch(autoCreatePageOnNextAtEnd, onAutoCreatePageOnNextAtEndChange)
                         }
-                        Text("重新进入应用时", modifier = Modifier.padding(top = 24.dp, bottom = 8.dp))
+                        Text(noteText("重新进入应用时", "When reopening the app"), modifier = Modifier.padding(top = 24.dp, bottom = 8.dp))
                         StartupBehavior.entries.forEach { behavior ->
                             val label = when (behavior) {
-                                StartupBehavior.WORKING_COPY -> "打开 Working Copy"
-                                StartupBehavior.LAST_OPENED -> "打开上次使用的笔记本"
+                                StartupBehavior.WORKING_COPY -> noteText("打开 Working Copy", "Open Working Copy")
+                                StartupBehavior.LAST_OPENED -> noteText("打开上次使用的笔记本", "Open the last notebook")
                             }
                             SettingRow(label, onClick = { onStartupBehaviorChange(behavior) }) {
                                 RadioButton(
@@ -222,7 +249,13 @@ fun SettingsScreen(
                             DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.MEDIUM)
                                 .format(Date(BuildConfig.BUILD_TIME_EPOCH_MILLIS))
                         )
-                        SettingRow("开源许可", onClick = { showOpenSourceLicenses = true }) {
+                        UpdateSettingsSection(
+                            currentVersion = BuildConfig.VERSION_NAME,
+                            state = updateUiState,
+                            onCheck = onCheckUpdate,
+                            onOpenRelease = onOpenRelease,
+                        )
+                        SettingRow(noteText("开源许可", "Open-source licenses"), onClick = { showOpenSourceLicenses = true }) {
                             Text("AGPL-3.0-or-later", color = Color.DarkGray)
                         }
                     }
@@ -230,7 +263,7 @@ fun SettingsScreen(
                     SettingsTab.TOOLBAR -> Column(
                         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp)
                     ) {
-                        Text("工具栏显示", fontSize = 20.sp, modifier = Modifier.padding(bottom = 12.dp))
+                        Text(noteText("工具栏显示", "Toolbar items"), fontSize = 20.sp, modifier = Modifier.padding(bottom = 12.dp))
                         ToolbarItem.entries.filterNot { it == ToolbarItem.MENU }.chunked(2).forEach { items ->
                             Row(
                                 Modifier.fillMaxWidth().padding(bottom = 8.dp),
@@ -238,7 +271,7 @@ fun SettingsScreen(
                             ) {
                                 items.forEach { item ->
                                     val visible = item in visibleToolbarItems
-                                    GridSettingCell(item.label, Modifier.weight(1f), {
+                                    GridSettingCell(item.localizedLabel(), Modifier.weight(1f), {
                                         onToolbarItemVisibilityChange(item, !visible)
                                     }) {
                                         Switch(visible, { onToolbarItemVisibilityChange(item, it) })
@@ -248,12 +281,15 @@ fun SettingsScreen(
                             }
                         }
                         Text(
-                            "拖动把手和 Menu 始终显示；关闭的工具会自动进入 Menu。",
+                            noteText(
+                                "拖动把手和 Menu 始终显示；关闭的工具会自动进入 Menu。",
+                                "The drag handle and Menu are always visible. Hidden tools move into Menu.",
+                            ),
                             color = Color.DarkGray,
                             modifier = Modifier.padding(top = 4.dp)
                         )
                         OutlinedButton(onClick = onResetToolbarItems, modifier = Modifier.padding(top = 12.dp)) {
-                            Text("恢复默认显示")
+                            Text(noteText("恢复默认显示", "Restore defaults"))
                         }
                     }
 
@@ -263,7 +299,7 @@ fun SettingsScreen(
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             ShortcutScene.entries.forEach { scene ->
                                 OutlinedButton(onClick = { shortcutScene = scene }) {
-                                    Text(if (scene == shortcutScene) "● ${scene.label}" else scene.label)
+                                    Text((if (scene == shortcutScene) "● " else "") + scene.localizedLabel())
                                 }
                             }
                         }
@@ -271,8 +307,8 @@ fun SettingsScreen(
                             Modifier.fillMaxWidth().padding(vertical = 12.dp),
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            Button(onClick = { onStartShortcutCapture(shortcutScene) }) { Text("按实体键识别") }
-                            OutlinedButton(onClick = { onShortcutSceneClear(shortcutScene) }) { Text("清空本场景") }
+                            Button(onClick = { onStartShortcutCapture(shortcutScene) }) { Text(noteText("按实体键识别", "Identify hardware key")) }
+                            OutlinedButton(onClick = { onShortcutSceneClear(shortcutScene) }) { Text(noteText("清空本场景", "Clear this context")) }
                         }
                         HardwareKeyId.entries.chunked(2).forEach { keys ->
                             Row(
@@ -282,7 +318,7 @@ fun SettingsScreen(
                                 keys.forEach { key ->
                                     val action = shortcutBindings.action(shortcutScene, key)
                                     GridSettingCell("K${key.number}", Modifier.weight(1f), { shortcutKey = key }) {
-                                        Text(action?.label ?: "未绑定", color = Color.DarkGray, maxLines = 2)
+                                        Text(action?.localizedLabel() ?: noteText("未绑定", "Unassigned"), color = Color.DarkGray, maxLines = 2)
                                     }
                                 }
                             }
@@ -292,9 +328,9 @@ fun SettingsScreen(
                     SettingsTab.NOTELINK -> Column(
                         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp)
                     ) {
-                        Text("NoteLink 客户端", fontSize = 20.sp, modifier = Modifier.padding(bottom = 8.dp))
+                        Text(noteText("NoteLink 客户端", "NoteLink clients"), fontSize = 20.sp, modifier = Modifier.padding(bottom = 8.dp))
                         Text(transferStatus, modifier = Modifier.padding(bottom = 8.dp))
-                        SettingRow("显示最近传输事件", onClick = {
+                        SettingRow(noteText("显示最近传输事件", "Show recent transfer events"), onClick = {
                             onShowRecentTransferEventsChange(!showRecentTransferEvents)
                         }) {
                             Switch(showRecentTransferEvents, onShowRecentTransferEventsChange)
@@ -303,7 +339,7 @@ fun SettingsScreen(
                             transferSnapshot, transferEvents, transferEndpointName,
                             showRecentTransferEvents, onCancelTransfer
                         )
-                        if (pairedClients.isEmpty()) Text("尚未配对")
+                        if (pairedClients.isEmpty()) Text(noteText("尚未配对", "Not paired"))
                         pairedClients.forEach { client ->
                             val online = onlineClients.firstOrNull { it.client.id == client.id }
                             Row(
@@ -313,19 +349,22 @@ fun SettingsScreen(
                             ) {
                                 Column(Modifier.weight(1f)) {
                                     Text(client.name, fontSize = 18.sp)
-                                    Text(if (client.legacy) "旧配对，连接后自动识别" else client.id, fontSize = 12.sp, color = Color.DarkGray)
+                                    Text(if (client.legacy) noteText("旧配对，连接后自动识别", "Legacy pairing; identified on connection") else client.id, fontSize = 12.sp, color = Color.DarkGray)
                                     Text(
-                                        if (online == null) "离线" else "在线 · ${online.imageCount} 张图片 · ${online.textCount} 段文字 · ${online.pdfCount} 份 PDF",
+                                        if (online == null) noteText("离线", "Offline") else noteText(
+                                            "在线 · ${online.imageCount} 张图片 · ${online.textCount} 段文字 · ${online.pdfCount} 份 PDF",
+                                            "Online · ${online.imageCount} images · ${online.textCount} texts · ${online.pdfCount} PDFs",
+                                        ),
                                         fontSize = 12.sp,
                                         color = if (online == null) Color.DarkGray else Color(0xFF246B3A)
                                     )
                                     Text(
-                                        "最近使用 ${DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT).format(Date(client.lastUsedAt))}",
+                                        noteText("最近使用", "Last used") + " ${DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT).format(Date(client.lastUsedAt))}",
                                         fontSize = 12.sp, color = Color.DarkGray
                                     )
                                 }
-                                OutlinedButton(onClick = { renameTarget = client }) { Text("重命名") }
-                                OutlinedButton(onClick = { onUnpairClient(client.id) }) { Text("移除") }
+                                OutlinedButton(onClick = { renameTarget = client }) { Text(noteText("重命名", "Rename")) }
+                                OutlinedButton(onClick = { onUnpairClient(client.id) }) { Text(noteText("移除", "Remove")) }
                             }
                             HorizontalDivider()
                         }
@@ -335,10 +374,10 @@ fun SettingsScreen(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Button(onClick = onScanClients, enabled = !pairingScanActive && !pairingInProgress) {
-                                Text(if (pairingScanActive) "正在扫描" else "扫描新客户端")
+                                Text(if (pairingScanActive) noteText("正在扫描", "Scanning") else noteText("扫描新客户端", "Scan for clients"))
                             }
-                            if (!transferPermissionsGranted) OutlinedButton(onClick = onTransferPermissions) { Text("授予权限") }
-                            OutlinedButton(onClick = onRefreshTransferStatus) { Text("刷新状态") }
+                            if (!transferPermissionsGranted) OutlinedButton(onClick = onTransferPermissions) { Text(noteText("授予权限", "Grant permission")) }
+                            OutlinedButton(onClick = onRefreshTransferStatus) { Text(noteText("刷新状态", "Refresh status")) }
                         }
                         pairingCandidates.forEach { candidate ->
                             SettingRow(candidate.name, onClick = { selectedCandidateId = candidate.deviceId }) {
@@ -352,7 +391,7 @@ fun SettingsScreen(
                             OutlinedTextField(
                                 pairingCode,
                                 { pairingCode = it.filter(Char::isDigit).take(6) },
-                                label = { Text("所选 NoteLink 显示的六位配对码") },
+                                label = { Text(noteText("所选 NoteLink 显示的六位配对码", "Six-digit code shown by the selected NoteLink")) },
                                 singleLine = true,
                                 modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
                             )
@@ -360,7 +399,7 @@ fun SettingsScreen(
                                 onClick = { selectedCandidate?.let { onPairClient(it, pairingCode) } },
                                 enabled = selectedCandidate != null && pairingCode.length == 6 && !pairingInProgress,
                                 modifier = Modifier.padding(top = 8.dp)
-                            ) { Text(if (pairingInProgress) "正在配对" else "完成配对") }
+                            ) { Text(if (pairingInProgress) noteText("正在配对", "Pairing") else noteText("完成配对", "Pair")) }
                         }
                     }
                 }
@@ -372,23 +411,23 @@ fun SettingsScreen(
         var name by remember(target.id) { mutableStateOf(target.name) }
         AlertDialog(
             onDismissRequest = { renameTarget = null },
-            title = { Text("重命名 NoteLink") },
+            title = { Text(noteText("重命名 NoteLink", "Rename NoteLink")) },
             text = {
                 OutlinedTextField(
                     value = name,
                     onValueChange = { name = it },
                     singleLine = true,
-                    label = { Text("名称") }
+                    label = { Text(noteText("名称", "Name")) }
                 )
             },
             confirmButton = {
                 Button(onClick = {
                     onRenameClient(target.id, name)
                     renameTarget = null
-                }, enabled = name.isNotBlank()) { Text("保存") }
+                }, enabled = name.isNotBlank()) { Text(noteText("保存", "Save")) }
             },
             dismissButton = {
-                OutlinedButton(onClick = { renameTarget = null }) { Text("取消") }
+                OutlinedButton(onClick = { renameTarget = null }) { Text(noteText("取消", "Cancel")) }
             }
         )
     }
@@ -396,15 +435,15 @@ fun SettingsScreen(
     shortcutKey?.let { key ->
         AlertDialog(
             onDismissRequest = { shortcutKey = null },
-            title = { Text("${shortcutScene.label} · K${key.number}") },
+            title = { Text("${shortcutScene.localizedLabel()} · K${key.number}") },
             text = {
                 Column(Modifier.heightIn(max = 460.dp).verticalScroll(rememberScrollState())) {
-                    SettingRow("未绑定", onClick = {
+                    SettingRow(noteText("未绑定", "Unassigned"), onClick = {
                         onShortcutBind(shortcutScene, key, null)
                         shortcutKey = null
                     }) { RadioButton(selected = shortcutBindings.action(shortcutScene, key) == null, onClick = null) }
                     ShortcutAction.forScene(shortcutScene).forEach { action ->
-                        SettingRow(action.label, onClick = {
+                        SettingRow(action.localizedLabel(), onClick = {
                             onShortcutBind(shortcutScene, key, action)
                             shortcutKey = null
                         }) {
@@ -417,7 +456,7 @@ fun SettingsScreen(
                 }
             },
             confirmButton = {
-                TextButton(onClick = { shortcutKey = null }) { Text("取消") }
+                TextButton(onClick = { shortcutKey = null }) { Text(noteText("取消", "Cancel")) }
             }
         )
     }
@@ -425,36 +464,87 @@ fun SettingsScreen(
     if (showOpenSourceLicenses) {
         AlertDialog(
             onDismissRequest = { showOpenSourceLicenses = false },
-            title = { Text("开源许可") },
+            title = { Text(noteText("开源许可", "Open-source licenses")) },
             text = {
                 Column(Modifier.heightIn(max = 460.dp).verticalScroll(rememberScrollState())) {
                     Text("BetterHvNote · AGPL-3.0-or-later", fontSize = 18.sp)
                     Text(
-                        "PDF Ink annotation 导出使用 MuPDF fitz 1.28.0，" +
-                            "Copyright Artifex Software, Inc.，按 GNU AGPL v3 或更高版本授权。",
+                        noteText(
+                            "PDF Ink annotation 导出使用 MuPDF fitz 1.28.0，Copyright Artifex Software, Inc.，按 GNU AGPL v3 或更高版本授权。",
+                            "PDF ink annotation export uses MuPDF fitz 1.28.0, Copyright Artifex Software, Inc., licensed under GNU AGPL v3 or later.",
+                        ),
                         modifier = Modifier.padding(top = 12.dp)
                     )
                     Text(
-                        "对应源代码：\nhttps://github.com/zentialEdwardSu/betterhvnote\n\n" +
-                            "完整许可：\nhttps://www.gnu.org/licenses/agpl-3.0.txt",
+                        noteText("对应源代码：", "Source code:") +
+                            "\nhttps://github.com/zentialEdwardSu/betterhvnote\n\n" +
+                            noteText("完整许可：", "Full license:") +
+                            "\nhttps://www.gnu.org/licenses/agpl-3.0.txt",
                         color = Color.DarkGray,
                         modifier = Modifier.padding(top = 12.dp)
                     )
                     Text(
-                        "汉王 ROM 接口由设备平台提供，声明仅用于编译，不随应用分发。",
+                        noteText(
+                            "汉王 ROM 接口由设备平台提供，声明仅用于编译，不随应用分发。",
+                            "Hanvon ROM interfaces are provided by the device platform. Declarations are compile-only and are not distributed with the app.",
+                        ),
                         modifier = Modifier.padding(top = 12.dp)
                     )
                 }
             },
             confirmButton = {
-                TextButton(onClick = { showOpenSourceLicenses = false }) { Text("关闭") }
+                TextButton(onClick = { showOpenSourceLicenses = false }) { Text(noteText("关闭", "Close")) }
             },
             dismissButton = {
                 TextButton(onClick = {
                     uriHandler.openUri("https://github.com/zentialEdwardSu/betterhvnote")
-                }) { Text("查看源代码") }
+                }) { Text(noteText("查看源代码", "View source")) }
             }
         )
+    }
+}
+
+@Composable
+private fun UpdateSettingsSection(
+    currentVersion: String,
+    state: UpdateUiState,
+    onCheck: () -> Unit,
+    onOpenRelease: (String) -> Unit,
+) {
+    val checkState = state.checkState
+    Column(Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
+        Text(noteText("应用更新", "App updates"), fontSize = 18.sp)
+        Text(noteText("当前版本 $currentVersion", "Current version $currentVersion"), color = Color.DarkGray, modifier = Modifier.padding(top = 4.dp))
+        Text(
+            when (checkState) {
+                UpdateCheckState.Idle -> noteText("尚未检查", "Not checked yet")
+                UpdateCheckState.Checking -> noteText("正在检查 GitHub Releases…", "Checking GitHub Releases...")
+                is UpdateCheckState.UpToDate -> checkState.latestVersion?.let {
+                    noteText("已是最新版本（${it.display}）", "Up to date (${it.display})")
+                } ?: noteText("暂无可用正式版本", "No stable release available")
+                is UpdateCheckState.UpdateAvailable ->
+                    noteText("发现新版本 ${checkState.info.latestVersion.display}：${checkState.info.releaseTitle}", "New version ${checkState.info.latestVersion.display}: ${checkState.info.releaseTitle}")
+                is UpdateCheckState.Failed -> if (state.manualErrorVisible) {
+                    noteText("检查失败：${checkState.message}", "Check failed: ${checkState.message}")
+                } else {
+                    noteText("自动检查暂时不可用", "Automatic check is temporarily unavailable")
+                }
+            },
+            color = if (checkState is UpdateCheckState.Failed && state.manualErrorVisible) {
+                Color.Red
+            } else {
+                Color.DarkGray
+            },
+            modifier = Modifier.padding(top = 4.dp),
+        )
+        Row(Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedButton(onClick = onCheck, enabled = checkState !is UpdateCheckState.Checking) {
+                Text(if (checkState is UpdateCheckState.Checking) noteText("检查中", "Checking") else noteText("检查更新", "Check for updates"))
+            }
+            (checkState as? UpdateCheckState.UpdateAvailable)?.let { available ->
+                Button(onClick = { onOpenRelease(available.info.releaseUrl) }) { Text(noteText("查看 Release", "View release")) }
+            }
+        }
     }
 }
 
@@ -476,21 +566,22 @@ private fun TransferDiagnostics(
                 .joinToString(" · ")
         )
         Text(
-            "本端 ${TransferModes.describe(snapshot.localModes)} · 对端 ${TransferModes.describe(snapshot.remoteModes)}" +
-                " · 尝试 ${snapshot.attempt} · fallback ${snapshot.fallbackCount}",
+            "${noteText("本端", "Local")} ${TransferModes.describe(snapshot.localModes)} · " +
+                "${noteText("对端", "Remote")} ${TransferModes.describe(snapshot.remoteModes)}" +
+                " · ${noteText("尝试", "attempt")} ${snapshot.attempt} · fallback ${snapshot.fallbackCount}",
             fontSize = 12.sp,
             color = Color.DarkGray
         )
         snapshot.endpoint?.let {
             Text(
-                "端点 ${endpointName ?: snapshot.deviceId ?: "未知设备"} · ${it.host}:${it.port}",
+                "${noteText("端点", "Endpoint")} ${endpointName ?: snapshot.deviceId ?: noteText("未知设备", "Unknown device")} · ${it.host}:${it.port}",
                 fontSize = 12.sp,
                 color = Color.DarkGray
             )
         }
         Text(
-            "Wi-Fi Direct 组 ${if (snapshot.wifiDirectGroupReady) "已就绪" else "未就绪"}" +
-                listOfNotNull(snapshot.deviceId?.let { " · 设备 $it" }, snapshot.operationId?.let { " · 操作 ${it.toString().take(8)}" })
+            "Wi-Fi Direct ${noteText("组", "group")} ${if (snapshot.wifiDirectGroupReady) noteText("已就绪", "ready") else noteText("未就绪", "not ready")}" +
+                listOfNotNull(snapshot.deviceId?.let { " · ${noteText("设备", "device")} $it" }, snapshot.operationId?.let { " · ${noteText("操作", "operation")} ${it.toString().take(8)}" })
                     .joinToString(""),
             fontSize = 12.sp,
             color = Color.DarkGray
@@ -502,8 +593,8 @@ private fun TransferDiagnostics(
             )
             Text(
                 "${noteFormatBytes(snapshot.bytesTransferred)} / ${noteFormatBytes(snapshot.totalBytes)}" +
-                    " · 当前 ${noteFormatBytes(snapshot.bytesPerSecond)}/s" +
-                    " · 平均 ${noteFormatBytes(snapshot.averageBytesPerSecond)}/s" +
+                    " · ${noteText("当前", "current")} ${noteFormatBytes(snapshot.bytesPerSecond)}/s" +
+                    " · ${noteText("平均", "average")} ${noteFormatBytes(snapshot.averageBytesPerSecond)}/s" +
                     (snapshot.etaMillis?.let { " · ETA ${noteFormatDuration(it)}" } ?: ""),
                 fontSize = 12.sp,
                 color = Color.DarkGray
@@ -514,14 +605,14 @@ private fun TransferDiagnostics(
         }
         snapshot.lastFailure?.let {
             Text(
-                "${it.code}: ${it.message} · ${if (it.recoverable) "可重试" else "不可重试"}",
+                "${it.code}: ${it.message} · ${if (it.recoverable) noteText("可重试", "retryable") else noteText("不可重试", "not retryable")}",
                 fontSize = 12.sp,
                 color = Color(0xFF8A1C1C)
             )
         }
-        if (snapshot.canCancel) OutlinedButton(onClick = onCancel) { Text("取消传输") }
+        if (snapshot.canCancel) OutlinedButton(onClick = onCancel) { Text(noteText("取消传输", "Cancel transfer")) }
         if (showRecentEvents && events.isNotEmpty()) {
-            Text("最近传输事件", modifier = Modifier.padding(top = 4.dp))
+            Text(noteText("最近传输事件", "Recent transfer events"), modifier = Modifier.padding(top = 4.dp))
             Column(
                 Modifier.fillMaxWidth().heightIn(max = 100.dp).verticalScroll(rememberScrollState())
             ) {

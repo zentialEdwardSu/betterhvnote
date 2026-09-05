@@ -54,13 +54,13 @@ fun NotebookNameDialog(state: NotebookNameDialogState, actions: NotebookNameDial
     }
     EinkModalOverlay(onDismissRequest = actions.onDismiss, position = EinkModalPosition.TOP) {
         Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-            Text("命名笔记本", fontSize = 22.sp)
+            Text(noteText("命名笔记本", "Name notebook"), fontSize = 22.sp)
             OutlinedTextField(
                 value = title,
                 onValueChange = { title = it },
                 modifier = Modifier.fillMaxWidth().focusRequester(focusRequester),
                 singleLine = true,
-                label = { Text("笔记本名称") },
+                label = { Text(noteText("笔记本名称", "Notebook name")) },
                 shape = RectangleShape
             )
             if (state.templateEnabled) {
@@ -77,9 +77,9 @@ fun NotebookNameDialog(state: NotebookNameDialogState, actions: NotebookNameDial
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.End)
             ) {
-                EinkDialogAction("取消", onClick = actions.onDismiss)
+                EinkDialogAction(noteText("取消", "Cancel"), onClick = actions.onDismiss)
                 EinkDialogAction(
-                    "创建",
+                    noteText("创建", "Create"),
                     enabled = normalized.isNotEmpty(),
                     onClick = { actions.onConfirm(normalized, selectedTemplateId) }
                 )

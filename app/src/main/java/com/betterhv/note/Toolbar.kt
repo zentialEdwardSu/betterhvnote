@@ -457,7 +457,7 @@ private fun ToolbarContent(
         if (ToolbarItem.NAVIGATION in visibleItems) Box {
             SquareIconButton(
                 Icons.Filled.Navigation,
-                "PDF 导航：Side1 平移；Side2 缩放",
+                noteText("PDF 导航：Side1 平移；Side2 缩放", "PDF navigation: Side1 pans; Side2 zooms"),
                 enabled = true,
                 selected = toolKind == ToolKind.NAVIGATION || navigationExpanded,
                 onClick = {
@@ -478,7 +478,7 @@ private fun ToolbarContent(
         if (ToolbarItem.INSERT in visibleItems) Box {
             SquareIconButton(
                 Icons.Filled.PostAdd,
-                "插入图片或文字",
+                noteText("插入图片或文字", "Insert image or text"),
                 enabled = true,
                 selected = insertionActive,
                 onClick = {
@@ -632,7 +632,7 @@ private fun InsertTypeMenu(
 ) {
     if (!expanded) return
     var kind by remember { mutableStateOf<com.betterhv.transfer.core.ContentKind?>(null) }
-    AttachedToolbarFlyout(title = "插入内容", dockEdge = dockEdge, onDismiss = onDismiss) {
+    AttachedToolbarFlyout(title = noteText("插入内容", "Insert"), dockEdge = dockEdge, onDismiss = onDismiss) {
         Row(
             modifier = Modifier.padding(4.dp),
             horizontalArrangement = Arrangement.spacedBy(4.dp)
@@ -640,17 +640,17 @@ private fun InsertTypeMenu(
             if (kind == null) {
                 PopupIconButton(
                     icon = Icons.Filled.AddPhotoAlternate,
-                    contentDescription = "插入图片",
+                    contentDescription = noteText("插入图片", "Insert image"),
                     onClick = { kind = com.betterhv.transfer.core.ContentKind.IMAGE }
                 )
                 PopupIconButton(
                     icon = Icons.Filled.TextFields,
-                    contentDescription = "插入文字",
+                    contentDescription = noteText("插入文字", "Insert text"),
                     onClick = { kind = com.betterhv.transfer.core.ContentKind.TEXT }
                 )
             } else {
                 PopupTextButton(
-                    if (kind == com.betterhv.transfer.core.ContentKind.IMAGE) "系统文件" else "手动输入",
+                    if (kind == com.betterhv.transfer.core.ContentKind.IMAGE) noteText("系统文件", "System file") else noteText("手动输入", "Enter manually"),
                     onClick = { onLocal(requireNotNull(kind)) }
                 )
                 PopupTextButton("NoteLink", onClick = { onNoteLink(requireNotNull(kind)) })
@@ -676,11 +676,11 @@ private fun QuickMenuPanel(
         val vertical = dockEdge == DockEdge.START || dockEdge == DockEdge.END
         val entries: @Composable () -> Unit = {
             hiddenItems.forEach { item ->
-                PopupTextButton(item.label, onClick = { onHiddenItem(item) })
+                PopupTextButton(item.localizedLabel(), onClick = { onHiddenItem(item) })
             }
-            PopupTextButton("文档设置", onDocumentSettings)
-            PopupTextButton("应用设置", onSettings)
-            PopupTextButton(if (debugMode) "关闭 Debug" else "开启 Debug", onDebugToggle, debugMode)
+            PopupTextButton(noteText("文档设置", "Document settings"), onDocumentSettings)
+            PopupTextButton(noteText("应用设置", "App settings"), onSettings)
+            PopupTextButton(if (debugMode) noteText("关闭 Debug", "Disable debug") else noteText("开启 Debug", "Enable debug"), onDebugToggle, debugMode)
         }
         if (vertical) {
             Column(Modifier.verticalScroll(rememberScrollState())) { entries() }
@@ -699,11 +699,11 @@ private fun TailEraserMenu(
     onToggle: () -> Unit
 ) {
     if (!expanded) return
-    AttachedToolbarFlyout(title = "笔尾橡皮模式", dockEdge = dockEdge, onDismiss = onDismiss) {
+    AttachedToolbarFlyout(title = noteText("笔尾橡皮模式", "Tail eraser mode"), dockEdge = dockEdge, onDismiss = onDismiss) {
         Row(Modifier.padding(4.dp)) {
-            PopupTextButton("整笔擦除", onClick = { if (eraserMode != EraserMode.WHOLE_STROKE) onToggle() },
+            PopupTextButton(noteText("整笔擦除", "Whole stroke"), onClick = { if (eraserMode != EraserMode.WHOLE_STROKE) onToggle() },
                 selected = eraserMode == EraserMode.WHOLE_STROKE)
-            PopupTextButton("局部擦除", onClick = { if (eraserMode != EraserMode.POINT) onToggle() },
+            PopupTextButton(noteText("局部擦除", "Partial erase"), onClick = { if (eraserMode != EraserMode.POINT) onToggle() },
                 selected = eraserMode == EraserMode.POINT)
         }
     }
@@ -719,10 +719,10 @@ private fun PdfNavigationMenu(
     studyMode: Boolean
 ) {
     if (!expanded) return
-    AttachedToolbarFlyout(title = "PDF 导航", dockEdge = dockEdge, onDismiss = onDismiss) {
+    AttachedToolbarFlyout(title = noteText("PDF 导航", "PDF navigation"), dockEdge = dockEdge, onDismiss = onDismiss) {
         Row(Modifier.padding(4.dp)) {
-            PopupTextButton("适合页面", onClick = onFit)
-            PopupTextButton(if (studyMode) "学习模式" else "阅读模式", onClick = onModeToggle, selected = true)
+            PopupTextButton(noteText("适合页面", "Fit page"), onClick = onFit)
+            PopupTextButton(if (studyMode) noteText("学习模式", "Study mode") else noteText("阅读模式", "Reading mode"), onClick = onModeToggle, selected = true)
         }
     }
 }
@@ -858,7 +858,7 @@ private fun PenSettingsMenu(
     if (!expanded) return
 
     AttachedToolbarFlyout(
-        title = "笔设置",
+        title = noteText("笔设置", "Pen settings"),
         dockEdge = dockEdge,
         onDismiss = onDismiss,
         modifier = Modifier.width(292.dp)
@@ -978,7 +978,7 @@ private fun WidthChoice(
             .size(46.dp)
             .background(if (selected) Color(0xFFB0C4DE) else Color(0xFFF5F5F5))
             .border(1.dp, if (selected) Color(0xFF516780) else Color(0xFFB0B0B0))
-            .semantics { contentDescription = "粗细 ${level + 1}" }
+            .semantics { contentDescription = noteText("粗细 ${level + 1}", "Width ${level + 1}") }
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center
     ) {
@@ -1009,7 +1009,7 @@ private fun ColorChoice(
             .size(58.dp, 42.dp)
             .background(Color(choice.argb))
             .border(if (selected) 3.dp else 1.dp, borderColor)
-            .semantics { contentDescription = choice.label }
+            .semantics { contentDescription = choice.localizedLabel() }
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center
     ) {
@@ -1134,7 +1134,7 @@ private fun ToolbarDragHandle(
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center
     ) {
-        Icon(Icons.Filled.OpenWith, contentDescription = "拖动工具栏；点击隐藏", tint = Color.Black)
+        Icon(Icons.Filled.OpenWith, contentDescription = noteText("拖动工具栏；点击隐藏", "Drag toolbar; tap to hide"), tint = Color.Black)
     }
 }
 

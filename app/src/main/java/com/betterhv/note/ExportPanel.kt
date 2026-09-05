@@ -259,7 +259,7 @@ private fun ExportTaskList(input: ExportTaskListInput, actions: ExportTaskListAc
     val exportState = input.exportState
     if (exportState.tasks.isEmpty()) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            Text("暂无导出任务", color = ExportMuted)
+            Text(noteText("暂无导出任务", "No export tasks"), color = ExportMuted)
         }
         return
     }
@@ -299,14 +299,14 @@ private fun ExportTaskList(input: ExportTaskListInput, actions: ExportTaskListAc
 private fun ExportDeleteTaskDialog(onDismiss: () -> Unit, onDelete: () -> Unit) {
     EinkModalOverlay(onDismissRequest = onDismiss) {
         Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-            Text("删除导出任务？", fontSize = 20.sp, fontWeight = FontWeight.Medium)
-            Text("内部生成文件和增量缓存将被删除，Downloads 与 NoteLink 中的副本不受影响。")
+            Text(noteText("删除导出任务？", "Delete export task?"), fontSize = 20.sp, fontWeight = FontWeight.Medium)
+            Text(noteText("内部生成文件和增量缓存将被删除，Downloads 与 NoteLink 中的副本不受影响。", "Generated files and incremental caches will be deleted. Copies in Downloads and NoteLink are unaffected."))
             Row(
                 Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.End),
             ) {
-                EinkDialogAction("取消", onClick = onDismiss)
-                EinkDialogAction("删除", onClick = onDelete)
+                EinkDialogAction(noteText("取消", "Cancel"), onClick = onDismiss)
+                EinkDialogAction(noteText("删除", "Delete"), onClick = onDelete)
             }
         }
     }
@@ -320,11 +320,11 @@ private fun ExportSendTaskDialog(
 ) {
     EinkModalOverlay(onDismissRequest = onDismiss) {
         Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text("发送到 NoteLink", fontSize = 20.sp, fontWeight = FontWeight.Medium)
+            Text(noteText("发送到 NoteLink", "Send to NoteLink"), fontSize = 20.sp, fontWeight = FontWeight.Medium)
             clients.sortedByDescending(PairedDevice::lastUsedAt).forEach { client ->
                 EinkDialogAction(client.name) { onSend(client) }
             }
-            EinkDialogAction("取消", onClick = onDismiss)
+            EinkDialogAction(noteText("取消", "Cancel"), onClick = onDismiss)
         }
     }
 }
@@ -336,12 +336,12 @@ private fun ExportTopBar(taskCount: Int, busy: Boolean, onBack: () -> Unit, onAd
         verticalAlignment = Alignment.CenterVertically
     ) {
         IconButton(onClick = onBack, enabled = !busy) {
-            Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回")
+            Icon(Icons.AutoMirrored.Filled.ArrowBack, noteText("返回", "Back"))
         }
-        Text("导出", fontSize = 18.sp, fontWeight = FontWeight.Medium)
-        Text("$taskCount 项", color = ExportMuted, fontSize = 13.sp, modifier = Modifier.padding(start = 10.dp))
+        Text(noteText("导出", "Export"), fontSize = 18.sp, fontWeight = FontWeight.Medium)
+        Text(noteText("$taskCount 项", "$taskCount tasks"), color = ExportMuted, fontSize = 13.sp, modifier = Modifier.padding(start = 10.dp))
         Spacer(Modifier.weight(1f))
-        IconButton(onClick = onAdd, enabled = !busy) { Icon(Icons.Filled.Add, "新建导出任务") }
+        IconButton(onClick = onAdd, enabled = !busy) { Icon(Icons.Filled.Add, noteText("新建导出任务", "New export task")) }
     }
 }
 
@@ -363,7 +363,7 @@ private fun ExportTaskRow(
                 Text(taskTitle(summary), fontSize = 16.sp, fontWeight = FontWeight.Medium,
                     maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text(
-                    "${summary.notebookTitle} · ${summary.pageCount} 页 · ${summary.task.format.name}",
+                    noteText("${summary.notebookTitle} · ${summary.pageCount} 页 · ${summary.task.format.name}", "${summary.notebookTitle} · ${summary.pageCount} pages · ${summary.task.format.name}"),
                     color = ExportMuted, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis
                 )
                 Text(taskStatus(summary), color = stateColor(summary.state), fontSize = 13.sp)
@@ -373,17 +373,17 @@ private fun ExportTaskRow(
                 Spacer(Modifier.width(4.dp))
             }
             IconButton(onClick = actions.onSave, enabled = availability.saveEnabled) {
-                Icon(Icons.Filled.Download, "保存 ${summary.notebookTitle} 到 Downloads")
+                Icon(Icons.Filled.Download, noteText("保存 ${summary.notebookTitle} 到 Downloads", "Save ${summary.notebookTitle} to Downloads"))
             }
             IconButton(onClick = actions.onSend, enabled = availability.sendEnabled) {
                 Icon(
                     Icons.AutoMirrored.Filled.Send,
-                    if (state.phoneTransferAvailable) "发送 ${summary.notebookTitle} 到 NoteLink"
-                    else "NoteLink 未配对或不可用"
+                    if (state.phoneTransferAvailable) noteText("发送 ${summary.notebookTitle} 到 NoteLink", "Send ${summary.notebookTitle} to NoteLink")
+                    else noteText("NoteLink 未配对或不可用", "NoteLink is not paired or unavailable")
                 )
             }
             IconButton(onClick = actions.onDelete, enabled = availability.deleteEnabled) {
-                Icon(Icons.Filled.Delete, "删除导出任务")
+                Icon(Icons.Filled.Delete, noteText("删除导出任务", "Delete export task"))
             }
         }
         if (active && state.progress != null) {
@@ -429,14 +429,14 @@ private fun ExportTaskCreator(
             Modifier.fillMaxWidth().height(64.dp).padding(horizontal = 18.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            IconButton(onClick = callbacks.onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回") }
-            Text("新建导出任务", fontSize = 18.sp, fontWeight = FontWeight.Medium)
+            IconButton(onClick = callbacks.onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, noteText("返回", "Back")) }
+            Text(noteText("新建导出任务", "New export task"), fontSize = 18.sp, fontWeight = FontWeight.Medium)
             Spacer(Modifier.weight(1f))
             val valid = notebookId != null && (scope == ExportScope.ALL_PAGES || selected.isNotEmpty())
             IconButton(
                 enabled = valid,
                 onClick = { notebookId?.let { callbacks.onCreate(it, scope, format, selected.toList()) } }
-            ) { Icon(Icons.Filled.Check, "创建") }
+            ) { Icon(Icons.Filled.Check, noteText("创建", "Create")) }
         }
         HorizontalDivider(color = ExportBorder)
         Column(Modifier.fillMaxWidth().padding(24.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
@@ -446,7 +446,7 @@ private fun ExportTaskCreator(
                         .border(1.dp, ExportBorder).clickable { notebookMenu = true }.padding(14.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(notebook?.title ?: "选择笔记本", modifier = Modifier.weight(1f))
+                    Text(notebook?.title ?: noteText("选择笔记本", "Select notebook"), modifier = Modifier.weight(1f))
                     Icon(Icons.Filled.ExpandMore, null)
                 }
                 NotebookPickerPopup(
@@ -458,9 +458,9 @@ private fun ExportTaskCreator(
                 )
             }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                ScopeButton("单页", scope == ExportScope.SINGLE_PAGE) { scope = ExportScope.SINGLE_PAGE }
-                ScopeButton("选择页面", scope == ExportScope.SELECTED_PAGES) { scope = ExportScope.SELECTED_PAGES }
-                ScopeButton("全部页面", scope == ExportScope.ALL_PAGES) { scope = ExportScope.ALL_PAGES; format = ExportFormat.PDF }
+                ScopeButton(noteText("单页", "Single page"), scope == ExportScope.SINGLE_PAGE) { scope = ExportScope.SINGLE_PAGE }
+                ScopeButton(noteText("选择页面", "Selected pages"), scope == ExportScope.SELECTED_PAGES) { scope = ExportScope.SELECTED_PAGES }
+                ScopeButton(noteText("全部页面", "All pages"), scope == ExportScope.ALL_PAGES) { scope = ExportScope.ALL_PAGES; format = ExportFormat.PDF }
             }
             if (scope == ExportScope.SINGLE_PAGE) {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -471,7 +471,7 @@ private fun ExportTaskCreator(
         }
         if (scope == ExportScope.ALL_PAGES) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text("将持续跟随 ${pages.size} 个页面，并增量更新变化内容", color = ExportMuted)
+                Text(noteText("将持续跟随 ${pages.size} 个页面，并增量更新变化内容", "Tracks ${pages.size} pages and incrementally updates changes"), color = ExportMuted)
             }
         } else {
             PageSelectionGrid(
@@ -537,20 +537,21 @@ private fun ScopeButton(text: String, selected: Boolean, onClick: () -> Unit) {
 }
 
 private fun taskTitle(summary: ExportTaskSummary): String = when (summary.task.scope) {
-    ExportScope.SINGLE_PAGE -> "单页导出"
-    ExportScope.SELECTED_PAGES -> "选定页面"
-    ExportScope.ALL_PAGES -> "全部页面"
+    ExportScope.SINGLE_PAGE -> noteText("单页导出", "Single-page export")
+    ExportScope.SELECTED_PAGES -> noteText("选定页面", "Selected pages")
+    ExportScope.ALL_PAGES -> noteText("全部页面", "All pages")
 }
 
 private fun taskStatus(summary: ExportTaskSummary): String = when (summary.state) {
-    ExportTaskState.NEVER_GENERATED -> "从未生成"
+    ExportTaskState.NEVER_GENERATED -> noteText("从未生成", "Never generated")
     ExportTaskState.CURRENT -> summary.lastGeneratedAt?.let {
-        "最新 · ${DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT).format(Date(it))}"
-    } ?: "最新"
-    ExportTaskState.OUTDATED -> if (summary.stalePageCount == 0) "页面集合或顺序待更新"
-        else "${summary.stalePageCount} 页待更新"
-    ExportTaskState.SOURCE_MISSING -> "源页面已删除"
-    ExportTaskState.FAILED -> summary.lastError?.let { "失败 · $it" } ?: "生成失败"
+        noteText("最新", "Current") + " · ${DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT).format(Date(it))}"
+    } ?: noteText("最新", "Current")
+    ExportTaskState.OUTDATED -> if (summary.stalePageCount == 0) noteText("页面集合或顺序待更新", "Page set or order changed")
+        else noteText("${summary.stalePageCount} 页待更新", "${summary.stalePageCount} pages need updating")
+    ExportTaskState.SOURCE_MISSING -> noteText("源页面已删除", "Source page deleted")
+    ExportTaskState.FAILED -> summary.lastError?.let { noteText("失败 · $it", "Failed · $it") }
+        ?: noteText("生成失败", "Generation failed")
 }
 
 private fun stateColor(state: ExportTaskState): Color = when (state) {

@@ -57,10 +57,10 @@ class PageControlOverlayView(
         when (modifier) {
             PenSideButton.SIDE_1 -> Unit
             PenSideButton.SIDE_2 -> {
-                if (!pen.navigatePage(-1)) onNotice("已经是第一页")
+                if (!pen.navigatePage(-1)) onNotice(noteText("已经是第一页", "Already at the first page"))
             }
             PenSideButton.SIDE_3 -> {
-                if (!pen.navigatePage(1)) onNotice("已经是最后一页")
+                if (!pen.navigatePage(1)) onNotice(noteText("已经是最后一页", "Already at the last page"))
             }
             PenSideButton.NONE -> Unit
         }

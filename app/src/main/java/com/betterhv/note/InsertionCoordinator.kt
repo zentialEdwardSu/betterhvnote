@@ -83,7 +83,7 @@ class InsertionCoordinator(private val phone: PhoneTransferClient) : AutoCloseab
                 else view.discardImportedImage(it)
             }
             .onFailure {
-                if (generation == requestGeneration) mutableState.value = InsertionState.Error(it.message ?: "图片导入失败")
+                if (generation == requestGeneration) mutableState.value = InsertionState.Error(it.message ?: noteText("图片导入失败", "Image import failed"))
             }
     }
 
@@ -95,7 +95,7 @@ class InsertionCoordinator(private val phone: PhoneTransferClient) : AutoCloseab
         if (generation != requestGeneration) return
         when (available.size) {
             0 -> mutableState.value = InsertionState.Error(
-                "没有发现包含${contentLabel(kind)}的 NoteLink"
+                noteText("没有发现包含${contentLabel(kind)}的 NoteLink", "No NoteLink with ${contentLabel(kind)} was found")
             )
             1 -> remote(available.single().client.id, kind)
             else -> mutableState.value = InsertionState.ChoosingClient(kind, available)
@@ -115,7 +115,7 @@ class InsertionCoordinator(private val phone: PhoneTransferClient) : AutoCloseab
                         return@onSuccess
                     }
                     if (lease == null) {
-                        mutableState.value = InsertionState.Error("手机队列中没有${contentLabel(kind)}")
+                        mutableState.value = InsertionState.Error(noteText("手机队列中没有${contentLabel(kind)}", "The phone queue has no ${contentLabel(kind)}"))
                         return@onSuccess
                     }
                     when (val payload = lease.payload) {
@@ -151,18 +151,18 @@ class InsertionCoordinator(private val phone: PhoneTransferClient) : AutoCloseab
                     lease?.let { finishLease(it, commit = false) }
                     if (error is CancellationException) throw error
                     if (generation == requestGeneration) {
-                        mutableState.value = InsertionState.Error(error.message ?: "手机传输失败")
+                        mutableState.value = InsertionState.Error(error.message ?: noteText("手机传输失败", "Phone transfer failed"))
                     }
                 }
             }
             .onFailure {
-                if (generation == requestGeneration) mutableState.value = InsertionState.Error(it.message ?: "手机传输失败")
+                if (generation == requestGeneration) mutableState.value = InsertionState.Error(it.message ?: noteText("手机传输失败", "Phone transfer failed"))
             }
     }
 
     fun placeImage(x: Float, y: Float): Result<Unit> {
         val ready = mutableState.value as? InsertionState.ImageReady
-            ?: return Result.failure(IllegalStateException("没有待插入图片"))
+            ?: return Result.failure(IllegalStateException(noteText("没有待插入图片", "No image is ready to insert")))
         val view = requireNotNull(penView)
         val result = if (ready.lease == null) {
             runCatching { view.placeImage(ready.image, x, y) }
@@ -177,7 +177,7 @@ class InsertionCoordinator(private val phone: PhoneTransferClient) : AutoCloseab
 
     fun placeText(text: String, x: Float, y: Float): Result<Unit> {
         val ready = mutableState.value as? InsertionState.TextReady
-            ?: return Result.failure(IllegalStateException("没有待插入文字"))
+            ?: return Result.failure(IllegalStateException(noteText("没有待插入文字", "No text is ready to insert")))
         val view = requireNotNull(penView)
         val result = if (ready.lease == null) {
             runCatching { view.placeText(text, x, y) }
@@ -238,8 +238,8 @@ class InsertionCoordinator(private val phone: PhoneTransferClient) : AutoCloseab
     }
 
     private fun contentLabel(kind: ContentKind) = when (kind) {
-        ContentKind.IMAGE -> "图片"
-        ContentKind.TEXT -> "文字"
+        ContentKind.IMAGE -> noteText("图片", "image")
+        ContentKind.TEXT -> noteText("文字", "text")
         ContentKind.PDF -> "PDF"
     }
 

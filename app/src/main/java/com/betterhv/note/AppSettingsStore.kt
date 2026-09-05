@@ -1,6 +1,7 @@
 package com.betterhv.note
 
 import android.content.Context
+import androidx.core.content.edit
 
 internal fun decodeVisibleToolbarItems(stored: Set<String>): Set<ToolbarItem> {
     val migrated = stored.mapNotNull(ToolbarItem::fromStorageId)
@@ -14,6 +15,10 @@ internal fun decodeVisibleToolbarItems(stored: Set<String>): Set<ToolbarItem> {
 class AppSettingsStore(context: Context) {
     private val preferences = context.applicationContext.getSharedPreferences(NAME, Context.MODE_PRIVATE)
 
+    init {
+        NoteI18n.language = language
+    }
+
     var skipSourceSelectionWhenQueueAvailable: Boolean
         get() = preferences.getBoolean(KEY_SKIP_SOURCE_SELECTION, false)
         set(value) = preferences.edit().putBoolean(KEY_SKIP_SOURCE_SELECTION, value).apply()
@@ -25,6 +30,13 @@ class AppSettingsStore(context: Context) {
     var showRecentTransferEvents: Boolean
         get() = preferences.getBoolean(KEY_SHOW_RECENT_TRANSFER_EVENTS, true)
         set(value) = preferences.edit().putBoolean(KEY_SHOW_RECENT_TRANSFER_EVENTS, value).apply()
+
+    var language: NoteLanguage
+        get() = NoteLanguage.fromStorageId(preferences.getString(KEY_LANGUAGE, null))
+        set(value) {
+            preferences.edit().putString(KEY_LANGUAGE, value.storageId).apply()
+            NoteI18n.language = value
+        }
 
     var visibleToolbarItems: Set<ToolbarItem>
         get() {
@@ -75,13 +87,13 @@ class AppSettingsStore(context: Context) {
     }
 
     fun saveHardwareShortcut(scene: ShortcutScene, key: HardwareKeyId, action: ShortcutAction?) {
-        val editor = preferences.edit()
-        if (action == null) editor.remove(shortcutKey(scene, key))
-        else {
-            require(action.scene == scene)
-            editor.putString(shortcutKey(scene, key), action.storageId)
+        preferences.edit {
+            if (action == null) remove(shortcutKey(scene, key))
+            else {
+                require(action.scene == scene)
+                putString(shortcutKey(scene, key), action.storageId)
+            }
         }
-        editor.apply()
     }
 
     fun clearHardwareShortcuts(scene: ShortcutScene) {
@@ -98,6 +110,7 @@ class AppSettingsStore(context: Context) {
         private const val KEY_SKIP_SOURCE_SELECTION = "skip_source_selection_when_queue_available"
         private const val KEY_AUTO_CREATE_PAGE = "auto_create_page_on_next_at_end"
         private const val KEY_SHOW_RECENT_TRANSFER_EVENTS = "show_recent_transfer_events"
+        private const val KEY_LANGUAGE = "language"
         private const val KEY_TOOLBAR_ITEMS = "toolbar_visible_items_v1"
         private const val KEY_TOOLBAR_HIDDEN = "toolbar_hidden"
         private const val KEY_TOOLBAR_DOCK_EDGE = "toolbar_dock_edge"

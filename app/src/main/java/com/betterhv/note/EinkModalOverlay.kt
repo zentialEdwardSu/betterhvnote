@@ -112,7 +112,7 @@ internal fun EinkChoiceOverlay(
             choices.forEach { (label, action) ->
                 EinkDialogAction(label, modifier = Modifier.fillMaxWidth(), onClick = action)
             }
-            EinkDialogAction("取消", modifier = Modifier.fillMaxWidth(), onClick = onDismissRequest)
+            EinkDialogAction(noteText("取消", "Cancel"), modifier = Modifier.fillMaxWidth(), onClick = onDismissRequest)
         }
     }
 }

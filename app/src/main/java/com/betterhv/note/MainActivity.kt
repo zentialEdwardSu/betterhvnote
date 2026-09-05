@@ -1,58 +1,59 @@
 package com.betterhv.note
 
-import android.os.Bundle
-import android.os.Build
 import android.bluetooth.BluetoothManager
 import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.wifi.WifiManager
+import android.os.Build
+import android.os.Bundle
 import android.view.KeyEvent
 import android.view.MotionEvent
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
-import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.material.icons.filled.Bookmark
+import androidx.compose.material.icons.filled.Cancel
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.MoveToInbox
+import androidx.compose.material.icons.Icons
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Bookmark
-import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.Cancel
-import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Edit
-import androidx.compose.material.icons.filled.MoveToInbox
-import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
-import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -61,41 +62,46 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.RectangleShape
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.DpSize
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalConfiguration
-import androidx.compose.ui.platform.LocalDensity
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.viewmodel.compose.viewModel
-import androidx.compose.ui.unit.DpSize
-import androidx.compose.ui.unit.IntOffset
+import androidx.core.net.toUri
 import com.betterhv.note.doc.ImageObject
+import com.betterhv.note.doc.PageKind
 import com.betterhv.note.doc.TextFontFamily
 import com.betterhv.note.doc.TextObject
+import com.betterhv.note.export.ExportViewModel
 import com.betterhv.note.ink.Bounds
+import com.betterhv.note.storage.StartupBehavior
+import com.betterhv.note.template.TemplateStore
 import com.betterhv.transfer.android.TransferPermissions
 import com.betterhv.transfer.core.ContentKind
+import com.betterhv.transfer.core.isActiveTransferPhase
 import com.betterhv.transfer.core.TransferPhase
 import com.betterhv.transfer.core.TransferSnapshot
-import com.betterhv.transfer.core.isActiveTransferPhase
+import com.betterhv.update.UpdateChecker
+import com.betterhv.update.UpdateCheckState
+import com.betterhv.update.UpdateProduct
+import com.betterhv.update.UpdateUiState
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import com.betterhv.note.storage.StartupBehavior
-import com.betterhv.note.export.ExportViewModel
-import com.betterhv.note.template.TemplateStore
-import com.betterhv.note.doc.PageKind
 import java.util.UUID
 
 class MainActivity : ComponentActivity() {
@@ -181,8 +187,8 @@ private data class PendingLinkedNoteRequest(
 )
 
 private fun contentKindLabel(kind: ContentKind): String = when (kind) {
-    ContentKind.IMAGE -> "图片"
-    ContentKind.TEXT -> "文字"
+    ContentKind.IMAGE -> noteText("图片", "image")
+    ContentKind.TEXT -> noteText("文字", "text")
     ContentKind.PDF -> "PDF"
 }
 
@@ -218,10 +224,10 @@ private fun PdfRegionActionPopup(
                 enabled = selection.selectedObjectIds.isNotEmpty(),
                 modifier = Modifier.size(48.dp)
             ) {
-                Icon(Icons.Filled.Edit, contentDescription = "编辑选区批注")
+                Icon(Icons.Filled.Edit, contentDescription = noteText("编辑选区批注", "Edit selection annotations"))
             }
             IconButton(onClick = onMoveToInbox, modifier = Modifier.size(48.dp)) {
-                Icon(Icons.Filled.MoveToInbox, contentDescription = "发送至夹纸")
+                Icon(Icons.Filled.MoveToInbox, contentDescription = noteText("发送至夹纸", "Send to linked note"))
             }
         }
     }
@@ -249,6 +255,7 @@ private fun AppRoot(
     )
     val penSettingsStore = remember(context) { PenSettingsStore(context) }
     val appSettingsStore = remember(context) { AppSettingsStore(context) }
+    var language by remember { mutableStateOf(appSettingsStore.language) }
     val snackbarHostState = remember { SnackbarHostState() }
     val snackbarScope = rememberCoroutineScope()
     val phoneTransfer = remember(context) { PhoneTransferClient(context) }
@@ -267,6 +274,34 @@ private fun AppRoot(
                 )
             }
         }
+    }
+    val updateChecker = remember { UpdateChecker() }
+    var updateUiState by remember { mutableStateOf(UpdateUiState()) }
+    val openRelease: (String) -> Unit = { url ->
+        if (!UpdateChecker.isTrustedReleaseUrl(url)) {
+            showNotice(noteText("Release 地址无效", "Invalid release URL"))
+        } else {
+            runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, url.toUri())) }
+                .onFailure { showNotice(noteText("无法打开 Release 页面：${it.message}", "Cannot open release page: ${it.message}")) }
+        }
+    }
+    val checkForUpdates: (Boolean) -> Unit = { manual ->
+        if (updateUiState.checkState !is UpdateCheckState.Checking) {
+            updateUiState = updateUiState.checking(manual)
+            snackbarScope.launch {
+                val result = withContext(Dispatchers.IO) {
+                    updateChecker.check(UpdateProduct.NOTE, BuildConfig.VERSION_NAME)
+                }
+                updateUiState = updateUiState.completed(result, manual)
+            }
+        }
+    }
+    LaunchedEffect(updateChecker) {
+        updateUiState = updateUiState.checking(manual = false)
+        val result = withContext(Dispatchers.IO) {
+            updateChecker.check(UpdateProduct.NOTE, BuildConfig.VERSION_NAME)
+        }
+        updateUiState = updateUiState.completed(result, manual = false)
     }
     var penToolbarSettings by remember { mutableStateOf(penSettingsStore.load()) }
     val activePenStyle = remember(penToolbarSettings) {
@@ -382,7 +417,7 @@ private fun AppRoot(
         val missingTransferPermissions = remember(transferStatusRevision) {
             TransferPermissions.missingNotePermissions(context)
         }
-        val transferStatus = remember(transferStatusRevision, pairedClients) {
+        val transferStatus = remember(transferStatusRevision, pairedClients, language) {
             noteTransferStatus(context, pairedClients.isNotEmpty(), missingTransferPermissions.isEmpty())
         }
         LaunchedEffect(transferStatusRevision, pairedClients) {
@@ -402,7 +437,7 @@ private fun AppRoot(
             if (uri == null) return@rememberLauncherForActivityResult
             snackbarScope.launch {
                 insertion.localImage(uri)
-                if (insertion.state.value is InsertionState.ImageReady) showNotice("图片已导入，请点击页面确定位置")
+                if (insertion.state.value is InsertionState.ImageReady) showNotice(noteText("图片已导入，请点击页面确定位置", "Image imported. Tap the page to place it."))
             }
         }
         var permissionRemoteKind by remember { mutableStateOf<ContentKind?>(null) }
@@ -417,7 +452,7 @@ private fun AppRoot(
                 snackbarScope.launch {
                     if (auto) insertion.remoteIfAvailableOrChoose(kind) else insertion.remote(kind)
                 }
-            } else if (kind != null) showNotice("需要附近设备权限才能从手机获取")
+            } else if (kind != null) showNotice(noteText("需要附近设备权限才能从手机获取", "Nearby devices permission is required to receive from a phone"))
         }
 
         val beginInsertion: (ContentKind) -> Unit = { kind ->
@@ -477,13 +512,13 @@ private fun AppRoot(
                                 pv.placePendingLinkedNote(x, y) { result ->
                                     notebookBusy = false
                                     result.onSuccess {
-                                        showNotice("已建立双向链接：点击截图或 PDF 框角落的 Link 图标即可跳转；Side1 仍用于编辑图片")
+                                        showNotice(noteText("已建立双向链接：点击截图或 PDF 框角落的 Link 图标即可跳转；Side1 仍用于编辑图片", "Two-way link created. Tap the Link icon on the image or PDF selection to jump; Side1 still edits the image."))
                                     }
                                 }
                             } else when (val request = insertion.state.value) {
                                 is InsertionState.ImageReady -> insertion.placeImage(x, y)
-                                    .onSuccess { showNotice("图片已插入；使用 Side1 点击可编辑") }
-                                    .onFailure { showNotice("图片插入失败：${it.message}") }
+                                    .onSuccess { showNotice(noteText("图片已插入；使用 Side1 点击可编辑", "Image inserted. Use Side1 and tap it to edit.")) }
+                                    .onFailure { showNotice(noteText("图片插入失败：${it.message}", "Image insertion failed: ${it.message}")) }
                                 is InsertionState.TextReady ->
                                     textEditorRequest = TextEditorRequest.New(x, y, request.initialText)
                                 else -> Unit
@@ -501,13 +536,13 @@ private fun AppRoot(
                             pv.placePendingLinkedNote(x, y) { result ->
                                 notebookBusy = false
                                 result.onSuccess {
-                                    showNotice("已建立双向链接：点击截图或 PDF 框角落的 Link 图标即可跳转；Side1 仍用于编辑图片")
+                                    showNotice(noteText("已建立双向链接：点击截图或 PDF 框角落的 Link 图标即可跳转；Side1 仍用于编辑图片", "Two-way link created. Tap the Link icon on the image or PDF selection to jump; Side1 still edits the image."))
                                 }
                             }
                         } else when (val request = insertion.state.value) {
                             is InsertionState.ImageReady -> insertion.placeImage(x, y)
-                                .onSuccess { showNotice("图片已插入；使用 Side1 点击可编辑") }
-                                .onFailure { showNotice("图片插入失败：${it.message}") }
+                                .onSuccess { showNotice(noteText("图片已插入；使用 Side1 点击可编辑", "Image inserted. Use Side1 and tap it to edit.")) }
+                                .onFailure { showNotice(noteText("图片插入失败：${it.message}", "Image insertion failed: ${it.message}")) }
                             is InsertionState.TextReady ->
                                 textEditorRequest = TextEditorRequest.New(x, y, request.initialText)
                             else -> Unit
@@ -538,8 +573,8 @@ private fun AppRoot(
                 }.onSuccess {
                     templateCatalog = penView?.refreshTemplates(force = true) ?: it
                     exportViewModel.refresh()
-                    showNotice("模板目录已连接")
-                }.onFailure { showNotice("模板目录连接失败：${it.message}") }
+                    showNotice(noteText("模板目录已连接", "Template folder connected"))
+                }.onFailure { showNotice(noteText("模板目录连接失败：${it.message}", "Could not connect template folder: ${it.message}")) }
             }
         }
         LaunchedEffect(Unit) {
@@ -587,7 +622,7 @@ private fun AppRoot(
                 documentSettingsOpen -> documentSettingsOpen = false
                 penView?.hasPendingLinkedNotePlacement() == true -> {
                     penView?.cancelPendingLinkedNotePlacement()
-                    showNotice("已取消夹纸内容放置")
+                    showNotice(noteText("已取消夹纸内容放置", "Linked-note placement cancelled"))
                 }
                 pendingLinkedNoteRequest != null -> pendingLinkedNoteRequest = null
                 pendingPdfRegion != null -> pendingPdfRegion = null
@@ -738,30 +773,30 @@ private fun AppRoot(
                     val pv = penView ?: return@PageManagerShortcutContext false
                     when (pageAction) {
                         ShortcutAction.PAGE_PREVIOUS -> {
-                            if (!pv.navigatePage(-1)) showNotice("已经是第一页")
+                            if (!pv.navigatePage(-1)) showNotice(noteText("已经是第一页", "Already at the first page"))
                         }
                         ShortcutAction.PAGE_NEXT -> {
-                            if (!pv.navigatePage(1)) showNotice("已经是最后一页")
+                            if (!pv.navigatePage(1)) showNotice(noteText("已经是最后一页", "Already at the last page"))
                         }
                         ShortcutAction.PAGE_ADD -> {
                             pv.addPageAfter(pv.pageIds()[pv.currentPageIndex()], activate = true)
-                            showNotice("已新增第 ${pv.currentPageIndex() + 1} 页")
+                            showNotice(noteText("已新增第 ${pv.currentPageIndex() + 1} 页", "Added page ${pv.currentPageIndex() + 1}"))
                         }
                         ShortcutAction.PAGE_DELETE -> {
                             val id = pv.pageIds().getOrNull(pv.currentPageIndex()) ?: return@PageManagerShortcutContext false
                             val now = android.os.SystemClock.uptimeMillis()
                             if (shortcutDeletePageId == id && now - shortcutDeleteAt <= 3_000L) {
-                                if (!pv.canDeletePage()) showNotice("最后一页不能删除") else pv.deletePage(id)
+                                if (!pv.canDeletePage()) showNotice(noteText("最后一页不能删除", "The last page cannot be deleted")) else pv.deletePage(id)
                                 shortcutDeletePageId = null
                             } else {
                                 shortcutDeletePageId = id
                                 shortcutDeleteAt = now
-                                showNotice("再次按删除键确认删除当前页")
+                                showNotice(noteText("再次按删除键确认删除当前页", "Press Delete again to confirm"))
                             }
                         }
                         ShortcutAction.PAGE_BOOKMARK -> {
                             val value = pv.toggleCurrentPageBookmark()
-                            showNotice(if (value) "已添加书签" else "已取消书签")
+                            showNotice(if (value) noteText("已添加书签", "Bookmark added") else noteText("已取消书签", "Bookmark removed"))
                         }
                         ShortcutAction.PAGE_CLOSE -> pageManagerOpen = false
                         else -> return@PageManagerShortcutContext false
@@ -781,7 +816,7 @@ private fun AppRoot(
                                 imagePicker.launch(arrayOf("image/*"))
                             } else {
                                 insertion.manualText()
-                                showNotice("请点击页面确定文字位置")
+                                showNotice(noteText("请点击页面确定文字位置", "Tap the page to place the text"))
                             }
                         }
                         ShortcutAction.INSERT_NOTELINK -> {
@@ -850,11 +885,11 @@ private fun AppRoot(
                 penView?.setTool(kind)
             },
             onPdfFit = {
-                if (penView?.fitPdf() != true) showNotice("当前页不是 PDF 源页")
+                if (penView?.fitPdf() != true) showNotice(noteText("当前页不是 PDF 源页", "The current page is not a PDF source page"))
             },
             onPdfNavigationModeToggle = {
                 val study = penView?.toggleStudyNavigation() ?: true
-                showNotice(if (study) "学习模式：翻页包含夹纸" else "阅读模式：翻页跳过夹纸")
+                showNotice(if (study) noteText("学习模式：翻页包含夹纸", "Study mode: navigation includes linked notes") else noteText("阅读模式：翻页跳过夹纸", "Reading mode: navigation skips linked notes"))
             },
             onEraserModeToggle = {
                 eraserMode = if (eraserMode == EraserMode.WHOLE_STROKE) EraserMode.POINT else EraserMode.WHOLE_STROKE
@@ -875,7 +910,7 @@ private fun AppRoot(
                     imagePicker.launch(arrayOf("image/*"))
                 } else {
                     insertion.manualText()
-                    showNotice("请点击页面确定文字位置")
+                    showNotice(noteText("请点击页面确定文字位置", "Tap the page to place the text"))
                 }
             },
             onInsertNoteLink = { kind ->
@@ -896,14 +931,14 @@ private fun AppRoot(
             onPageAdd = {
                 penView?.let { pv ->
                     pv.addPage()
-                    showNotice("已新增第 ${pv.currentPageIndex() + 1} 页")
+                    showNotice(noteText("已新增第 ${pv.currentPageIndex() + 1} 页", "Added page ${pv.currentPageIndex() + 1}"))
                 }
             },
             onPreviousPage = {
-                if (penView?.navigatePage(-1) != true) showNotice("已经是第一页")
+                if (penView?.navigatePage(-1) != true) showNotice(noteText("已经是第一页", "Already at the first page"))
             },
             onNextPage = {
-                if (penView?.navigatePage(1) != true) showNotice("已经是最后一页")
+                if (penView?.navigatePage(1) != true) showNotice(noteText("已经是最后一页", "Already at the last page"))
             },
             onNotebookManagerToggle = {
                 notebookManagerOpen = !notebookManagerOpen
@@ -950,7 +985,7 @@ private fun AppRoot(
             },
             onDebugToggle = {
                 debugMode = !debugMode
-                showNotice(if (debugMode) "调试模式已开启" else "调试模式已关闭")
+                showNotice(if (debugMode) noteText("调试模式已开启", "Debug mode enabled") else noteText("调试模式已关闭", "Debug mode disabled"))
             },
             onPenSlotSelected = { slot ->
                 penToolbarSettings = penToolbarSettings.selectSlot(slot)
@@ -979,7 +1014,7 @@ private fun AppRoot(
                     Modifier.fillMaxWidth().padding(20.dp)
                 ) {
                     Text(
-                        "插入${contentKindLabel(choosing.kind)}",
+                        noteText("插入${contentKindLabel(choosing.kind)}", "Insert ${contentKindLabel(choosing.kind)}"),
                         fontSize = 24.sp
                     )
                     Button(
@@ -996,19 +1031,19 @@ private fun AppRoot(
                         },
                         modifier = Modifier.fillMaxWidth().padding(top = 16.dp),
                         shape = RectangleShape
-                    ) { Text("从手机取下一项${contentKindLabel(choosing.kind)}") }
+                    ) { Text(noteText("从手机取下一项${contentKindLabel(choosing.kind)}", "Get next ${contentKindLabel(choosing.kind)} from phone")) }
                     Button(
                         onClick = {
                             if (choosing.kind == ContentKind.IMAGE) {
                                 insertion.cancel(); imagePicker.launch(arrayOf("image/*"))
                             } else {
-                                insertion.manualText(); showNotice("请点击页面确定文字位置")
+                                insertion.manualText(); showNotice(noteText("请点击页面确定文字位置", "Tap the page to place the text"))
                             }
                         },
                         modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
                         shape = RectangleShape
                     ) {
-                        Text(if (choosing.kind == ContentKind.TEXT) "手动输入" else "从系统文件选择")
+                        Text(if (choosing.kind == ContentKind.TEXT) noteText("手动输入", "Enter manually") else noteText("从系统文件选择", "Choose system file"))
                     }
                 }
             }
@@ -1020,7 +1055,7 @@ private fun AppRoot(
                     Modifier.fillMaxWidth().padding(20.dp),
                     verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(10.dp)
                 ) {
-                    Text("选择 NoteLink", fontSize = 24.sp)
+                    Text(noteText("选择 NoteLink", "Select NoteLink"), fontSize = 24.sp)
                     choosing.clients.forEach { available ->
                         val count = when (choosing.kind) {
                             ContentKind.IMAGE -> available.imageCount
@@ -1036,10 +1071,10 @@ private fun AppRoot(
                             modifier = Modifier.fillMaxWidth(),
                             shape = RectangleShape
                         ) {
-                            Text("${available.client.name} · $count 项")
+                            Text(noteText("${available.client.name} · $count 项", "${available.client.name} · $count items"))
                         }
                     }
-                    EinkDialogAction("取消", onClick = insertion::cancel)
+                    EinkDialogAction(noteText("取消", "Cancel"), onClick = insertion::cancel)
                 }
             }
         }
@@ -1047,10 +1082,10 @@ private fun AppRoot(
         (insertionState as? InsertionState.WaitingForPhone)?.let { waiting ->
             EinkModalOverlay(onDismissRequest = insertion::cancel) {
                 Column(Modifier.padding(20.dp), verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(16.dp)) {
-                    Text("正在查找 NoteLink", fontSize = 20.sp)
-                    Text("等待 NoteLink 发送${contentKindLabel(waiting.kind)}…")
+                    Text(noteText("正在查找 NoteLink", "Looking for NoteLink"), fontSize = 20.sp)
+                    Text(noteText("等待 NoteLink 发送${contentKindLabel(waiting.kind)}…", "Waiting for NoteLink to send ${contentKindLabel(waiting.kind)}..."))
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = androidx.compose.foundation.layout.Arrangement.End) {
-                        EinkDialogAction("取消", onClick = insertion::cancel)
+                        EinkDialogAction(noteText("取消", "Cancel"), onClick = insertion::cancel)
                     }
                 }
             }
@@ -1059,10 +1094,10 @@ private fun AppRoot(
         (insertionState as? InsertionState.Error)?.let { error ->
             EinkModalOverlay(onDismissRequest = insertion::dismissError) {
                 Column(Modifier.padding(20.dp), verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(16.dp)) {
-                    Text("NoteLink 传输", fontSize = 20.sp)
+                    Text(noteText("NoteLink 传输", "NoteLink transfer"), fontSize = 20.sp)
                     Text(error.message)
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = androidx.compose.foundation.layout.Arrangement.End) {
-                        EinkDialogAction("知道了", onClick = insertion::dismissError)
+                        EinkDialogAction(noteText("知道了", "OK"), onClick = insertion::dismissError)
                     }
                 }
             }
@@ -1112,7 +1147,7 @@ private fun AppRoot(
                 onConfirm = { content ->
                     when (request) {
                         is TextEditorRequest.New -> insertion.placeText(content, request.x, request.y)
-                            .onFailure { showNotice("文字插入失败：${it.message}") }
+                            .onFailure { showNotice(noteText("文字插入失败：${it.message}", "Text insertion failed: ${it.message}")) }
                         is TextEditorRequest.Existing ->
                             penView?.updateTextObject(request.objectId, text = content)
                     }
@@ -1151,17 +1186,17 @@ private fun AppRoot(
                     result.onSuccess {
                         toolKind = ToolKind.PEN
                         penView?.setTool(ToolKind.PEN)
-                        showNotice("请在夹纸上点击放置位置")
+                        showNotice(noteText("请在夹纸上点击放置位置", "Tap a location on the linked note"))
                     }
                 }
             }
             EinkChoiceOverlay(
                 onDismissRequest = { pendingLinkedNoteRequest = null },
-                title = "选择夹纸",
-                description = "新建一张夹纸，或放入当前 PDF 页已有夹纸。",
+                title = noteText("选择夹纸", "Choose linked note"),
+                description = noteText("新建一张夹纸，或放入当前 PDF 页已有夹纸。", "Create a linked note or use one already attached to this PDF page."),
                 choices = buildList {
-                    add("新建夹纸" to { prepare(null) })
-                    targets.forEach { target -> add("夹纸 ${target.ordinal}" to { prepare(target.pageId) }) }
+                    add(noteText("新建夹纸", "New linked note") to { prepare(null) })
+                    targets.forEach { target -> add(noteText("夹纸 ${target.ordinal}", "Linked note ${target.ordinal}") to { prepare(target.pageId) }) }
                 }
             )
         }
@@ -1175,7 +1210,7 @@ private fun AppRoot(
                 tonalElevation = 0.dp,
                 shadowElevation = 0.dp
             ) {
-                Text("点击夹纸确定放置位置 · 返回键取消", Modifier.padding(horizontal = 18.dp, vertical = 10.dp))
+                Text(noteText("点击夹纸确定放置位置 · 返回键取消", "Tap the linked note to place · Back to cancel"), Modifier.padding(horizontal = 18.dp, vertical = 10.dp))
             }
         }
 
@@ -1192,7 +1227,7 @@ private fun AppRoot(
                     onSide1Click = {
                         penView?.let { pv ->
                             val isBookmarked = pv.toggleCurrentPageBookmark()
-                            showNotice(if (isBookmarked) "已添加书签" else "已取消书签")
+                            showNotice(if (isBookmarked) noteText("已添加书签", "Bookmark added") else noteText("已取消书签", "Bookmark removed"))
                         }
                     }
                 ),
@@ -1249,13 +1284,13 @@ private fun AppRoot(
                     },
                     onAddAfter = { id ->
                         val newId = penView!!.addPageAfter(id, activate = true)
-                        showNotice("已新增第 ${penView!!.currentPageIndex() + 1} 页")
+                        showNotice(noteText("已新增第 ${penView!!.currentPageIndex() + 1} 页", "Added page ${penView!!.currentPageIndex() + 1}"))
                         newId
                     },
                     onDelete = { id ->
                         val pv = penView!!
                         if (!pv.canDeletePage()) {
-                            showNotice("最后一页不能删除")
+                            showNotice(noteText("最后一页不能删除", "The last page cannot be deleted"))
                             false
                         } else {
                             pv.deletePage(id)
@@ -1295,7 +1330,7 @@ private fun AppRoot(
                             notebookBusy = false
                             if (result.isSuccess) {
                                 notebookManagerOpen = false
-                                showNotice("已切换笔记本")
+                                showNotice(noteText("已切换笔记本", "Notebook switched"))
                             }
                         }
                     }
@@ -1315,7 +1350,7 @@ private fun AppRoot(
                         notebookBusy = false
                         result.onSuccess {
                             notebookManagerOpen = false
-                            showNotice("PDF 已导入")
+                            showNotice(noteText("PDF 已导入", "PDF imported"))
                         }
                     }
                     },
@@ -1334,7 +1369,7 @@ private fun AppRoot(
                     notebookBusy = true
                     penView!!.deleteNotebook(id) { result ->
                         notebookBusy = false
-                        if (result.isSuccess) showNotice("已删除笔记本")
+                        if (result.isSuccess) showNotice(noteText("已删除笔记本", "Notebook deleted"))
                     }
                     },
                     onExportNotebook = { id ->
@@ -1368,9 +1403,11 @@ private fun AppRoot(
                     skipSourceSelectionWhenQueueAvailable = skipSourceSelectionWhenQueueAvailable,
                     autoCreatePageOnNextAtEnd = autoCreatePageOnNextAtEnd,
                     showRecentTransferEvents = showRecentTransferEvents,
+                    language = language,
                     visibleToolbarItems = visibleToolbarItems,
                     shortcutBindings = shortcutBindings,
                     shortcutBindingRequest = shortcutBindingRequest,
+                    updateUiState = updateUiState,
                 ),
                 actions = SettingsActions(
                     onDebugModeChange = { debugMode = it },
@@ -1378,9 +1415,9 @@ private fun AppRoot(
                     runCatching { penView?.setStartupBehavior(behavior) }
                         .onSuccess {
                             startupBehavior = behavior
-                            showNotice("启动行为已保存")
+                            showNotice(noteText("启动行为已保存", "Startup behavior saved"))
                         }
-                        .onFailure { showNotice("保存设置失败：${it.message}") }
+                        .onFailure { showNotice(noteText("保存设置失败：${it.message}", "Could not save setting: ${it.message}")) }
                 },
                 onSkipSourceSelectionChange = {
                     skipSourceSelectionWhenQueueAvailable = it
@@ -1394,6 +1431,10 @@ private fun AppRoot(
                 onShowRecentTransferEventsChange = {
                     showRecentTransferEvents = it
                     appSettingsStore.showRecentTransferEvents = it
+                },
+                onLanguageChange = {
+                    appSettingsStore.language = it
+                    language = it
                 },
                 onToolbarItemVisibilityChange = { item, visible ->
                     visibleToolbarItems = if (visible) visibleToolbarItems + item else visibleToolbarItems - item
@@ -1415,13 +1456,13 @@ private fun AppRoot(
                 },
                 onScanClients = {
                     if (missingTransferPermissions.isNotEmpty()) {
-                        showNotice("请先授予附近设备权限")
+                        showNotice(noteText("请先授予附近设备权限", "Grant Nearby devices permission first"))
                     } else if (!pairingScanActive) {
                         pairingScanActive = true
                         snackbarScope.launch {
                             runCatching { phoneTransfer.discoverPairingCandidates() }
                                 .onSuccess { pairingCandidates = it }
-                                .onFailure { showNotice("扫描失败：${it.message}") }
+                                .onFailure { showNotice(noteText("扫描失败：${it.message}", "Scan failed: ${it.message}")) }
                             onlineNoteLinks = runCatching {
                                 phoneTransfer.discoverAvailable(timeoutMillis = 2_000L) { onlineNoteLinks = it }
                             }.getOrDefault(emptyList())
@@ -1441,11 +1482,11 @@ private fun AppRoot(
                                 onlineNoteLinks = emptyList()
                                 transferStatusRevision++
                                 EventLog.log("NoteLinkPairing", "complete device=${it.id}")
-                                showNotice("${it.name} 配对完成")
+                                showNotice(noteText("${it.name} 配对完成", "Paired with ${it.name}"))
                             }
                             .onFailure {
                                 EventLog.log("NoteLinkPairing", "failed device=${candidate.deviceId} error=${it.message}")
-                                showNotice("配对失败：${it.message}")
+                                showNotice(noteText("配对失败：${it.message}", "Pairing failed: ${it.message}"))
                             }
                         pairingInProgress = false
                     }
@@ -1454,15 +1495,15 @@ private fun AppRoot(
                     runCatching { phoneTransfer.pairing.rename(id, name) }
                         .onSuccess {
                             pairedClients = phoneTransfer.pairing.pairedClients
-                            showNotice("名称已保存")
+                            showNotice(noteText("名称已保存", "Name saved"))
                         }
-                        .onFailure { showNotice("重命名失败：${it.message}") }
+                        .onFailure { showNotice(noteText("重命名失败：${it.message}", "Rename failed: ${it.message}")) }
                 },
                 onUnpairClient = { id ->
                     phoneTransfer.pairing.unpair(id)
                     pairedClients = phoneTransfer.pairing.pairedClients
                     transferStatusRevision++
-                    showNotice("已移除 NoteLink 配对")
+                    showNotice(noteText("已移除 NoteLink 配对", "NoteLink pairing removed"))
                 },
                 onTransferPermissions = {
                     permissionRemoteKind = null
@@ -1471,10 +1512,12 @@ private fun AppRoot(
                 },
                 onRefreshTransferStatus = {
                     transferStatusRevision++
-                    showNotice("连接状态已刷新")
+                    showNotice(noteText("连接状态已刷新", "Connection status refreshed"))
                 },
                 onCancelTransfer = phoneTransfer::cancel,
-                    onClose = { settingsOpen = false },
+                onCheckUpdate = { checkForUpdates(true) },
+                onOpenRelease = openRelease,
+                onClose = { settingsOpen = false },
                 )
             )
         }
@@ -1539,9 +1582,9 @@ private fun AppRoot(
                     onSelect = { id ->
                         if (pv.setCurrentPageTemplate(id)) {
                             templateChooserOpen = false
-                            showNotice("Template 已更换为 ${templateCatalog.find(id)?.name ?: id}")
+                            showNotice(noteText("Template 已更换为 ${templateCatalog.find(id)?.name ?: id}", "Template changed to ${templateCatalog.find(id)?.name ?: id}"))
                             exportViewModel.refresh()
-                        } else showNotice("该 Template 与当前页面不兼容")
+                        } else showNotice(noteText("该 Template 与当前页面不兼容", "This template is not compatible with the current page"))
                     },
                     onConnectDirectory = { templateDirectoryPicker.launch(null) },
                     onRefresh = { templateCatalog = pv.refreshTemplates(force = true) },
@@ -1577,7 +1620,7 @@ private fun AppRoot(
                                 notebookBusy = false
                                 if (result.isSuccess) {
                                     notebookManagerOpen = false
-                                    showNotice("已创建笔记本“$title”")
+                                    showNotice(noteText("已创建笔记本“$title”", "Created notebook \"$title\""))
                                 }
                             }
                             when (request) {
@@ -1602,6 +1645,17 @@ private fun AppRoot(
                 endpointName = pairedClients.firstOrNull { it.id == transferSnapshot.deviceId }?.name,
                 onCancel = phoneTransfer::cancel,
                 modifier = Modifier.align(Alignment.TopCenter).padding(top = 72.dp).width(460.dp)
+            )
+        }
+
+        updateUiState.visibleUpdate?.takeIf {
+            !settingsOpen && !transferSnapshot.phase.isActiveTransferPhase
+        }?.let { info ->
+            UpdateBanner(
+                info = info,
+                onOpenRelease = { openRelease(info.releaseUrl) },
+                onDismiss = { updateUiState = updateUiState.dismissBanner() },
+                modifier = Modifier.align(Alignment.TopCenter).padding(top = 72.dp).width(620.dp),
             )
         }
 
@@ -1638,15 +1692,15 @@ private fun ActiveTransferOverlay(
                     Text(
                         snapshot.lastFailure?.let { "${it.code}: ${it.message}" }
                             ?: snapshot.endpoint?.let {
-                                "${endpointName ?: snapshot.deviceId ?: "未知设备"} · ${it.host}:${it.port}"
+                                "${endpointName ?: snapshot.deviceId ?: noteText("未知设备", "Unknown device")} · ${it.host}:${it.port}"
                             }
-                            ?: "正在通过 BLE 协商数据通道",
+                            ?: noteText("正在通过 BLE 协商数据通道", "Negotiating the data channel over BLE"),
                         fontSize = 11.sp,
                         color = Color.DarkGray
                     )
                 }
                 if (snapshot.canCancel) {
-                    IconButton(onClick = onCancel) { Icon(Icons.Default.Cancel, "取消传输") }
+                    IconButton(onClick = onCancel) { Icon(Icons.Default.Cancel, noteText("取消传输", "Cancel transfer")) }
                 }
             }
             if (snapshot.totalBytes > 0) {
@@ -1665,12 +1719,12 @@ private fun ActiveTransferOverlay(
 }
 
 private fun noteTransferStatus(context: Context, isPaired: Boolean, permissionsGranted: Boolean): String {
-    if (!context.packageManager.hasSystemFeature(PackageManager.FEATURE_BLUETOOTH_LE)) return "设备不支持 BLE"
-    if (!context.packageManager.hasSystemFeature(PackageManager.FEATURE_WIFI_DIRECT)) return "设备不支持 Wi-Fi Direct"
-    if (!permissionsGranted) return "需要附近设备权限"
-    if (context.getSystemService(BluetoothManager::class.java)?.adapter?.isEnabled != true) return "蓝牙已关闭"
-    if (context.getSystemService(WifiManager::class.java)?.isWifiEnabled != true) return "WLAN 已关闭"
-    return if (isPaired) "已就绪，插入时按需连接手机" else "请先与手机配对"
+    if (!context.packageManager.hasSystemFeature(PackageManager.FEATURE_BLUETOOTH_LE)) return noteText("设备不支持 BLE", "This device does not support BLE")
+    if (!context.packageManager.hasSystemFeature(PackageManager.FEATURE_WIFI_DIRECT)) return noteText("设备不支持 Wi-Fi Direct", "This device does not support Wi-Fi Direct")
+    if (!permissionsGranted) return noteText("需要附近设备权限", "Nearby devices permission required")
+    if (context.getSystemService(BluetoothManager::class.java)?.adapter?.isEnabled != true) return noteText("蓝牙已关闭", "Bluetooth is off")
+    if (context.getSystemService(WifiManager::class.java)?.isWifiEnabled != true) return noteText("WLAN 已关闭", "Wi-Fi is off")
+    return if (isPaired) noteText("已就绪，插入时按需连接手机", "Ready; connects to the phone when needed") else noteText("请先与手机配对", "Pair with a phone first")
 }
 
 private const val THUMBNAIL_SCREEN_SCALE = 10f
@@ -1695,27 +1749,27 @@ private fun TextPropertiesToolbar(
     ) {
         Column(Modifier.padding(horizontal = 8.dp, vertical = 4.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("字体", modifier = Modifier.padding(horizontal = 6.dp))
+                Text(noteText("字体", "Font"), modifier = Modifier.padding(horizontal = 6.dp))
                 TextFontFamily.entries.forEach { family ->
                     TextButton(onClick = { onFont(family) }) {
                         Text(
                             when (family) {
-                                TextFontFamily.SANS_SERIF -> "无衬线"
-                                TextFontFamily.SERIF -> "衬线"
-                                TextFontFamily.MONOSPACE -> "等宽"
+                                TextFontFamily.SANS_SERIF -> noteText("无衬线", "Sans serif")
+                                TextFontFamily.SERIF -> noteText("衬线", "Serif")
+                                TextFontFamily.MONOSPACE -> noteText("等宽", "Monospace")
                             },
                             color = if (family == text.fontFamily) Color.Black else Color.Gray
                         )
                     }
                 }
-                TextButton(onClick = onEdit) { Text("编辑文字") }
+                TextButton(onClick = onEdit) { Text(noteText("编辑文字", "Edit text")) }
                 IconButton(onClick = onDelete) {
-                    Icon(Icons.Filled.Delete, contentDescription = "删除文字")
+                    Icon(Icons.Filled.Delete, contentDescription = noteText("删除文字", "Delete text"))
                 }
-                TextButton(onClick = onClose) { Text("完成") }
+                TextButton(onClick = onClose) { Text(noteText("完成", "Done")) }
             }
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("字号", modifier = Modifier.padding(horizontal = 6.dp))
+                Text(noteText("字号", "Size"), modifier = Modifier.padding(horizontal = 6.dp))
                 listOf(16f, 24f, 32f, 48f, 56f, 64f).forEach { size ->
                     TextButton(onClick = { onSize(size) }) {
                         Text(
@@ -1747,10 +1801,10 @@ private fun ImagePropertiesToolbar(
             verticalAlignment = Alignment.CenterVertically
         ) {
             IconButton(onClick = onDelete) {
-                Icon(Icons.Filled.Delete, contentDescription = "删除图片")
+                Icon(Icons.Filled.Delete, contentDescription = noteText("删除图片", "Delete image"))
             }
             IconButton(onClick = onClose) {
-                Icon(Icons.Filled.Check, contentDescription = "完成编辑图片")
+                Icon(Icons.Filled.Check, contentDescription = noteText("完成编辑图片", "Finish editing image"))
             }
         }
     }
@@ -1771,12 +1825,12 @@ private fun TextEditorDialog(
     }
     EinkModalOverlay(onDismissRequest = onDismiss, position = EinkModalPosition.TOP) {
         Column(Modifier.padding(20.dp), verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(16.dp)) {
-            Text(if (request is TextEditorRequest.New) "插入文字" else "编辑文字", fontSize = 20.sp)
+            Text(if (request is TextEditorRequest.New) noteText("插入文字", "Insert text") else noteText("编辑文字", "Edit text"), fontSize = 20.sp)
             OutlinedTextField(
                 value = value,
                 onValueChange = { value = it },
                 modifier = Modifier.fillMaxWidth().focusRequester(focusRequester),
-                label = { Text("文字内容") },
+                label = { Text(noteText("文字内容", "Text")) },
                 minLines = 3,
                 maxLines = 8,
                 shape = RectangleShape
@@ -1785,8 +1839,8 @@ private fun TextEditorDialog(
                 Modifier.fillMaxWidth(),
                 horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(10.dp, Alignment.End)
             ) {
-                EinkDialogAction("取消", onClick = onDismiss)
-                EinkDialogAction("确定", enabled = value.isNotBlank()) {
+                EinkDialogAction(noteText("取消", "Cancel"), onClick = onDismiss)
+                EinkDialogAction(noteText("确定", "OK"), enabled = value.isNotBlank()) {
                     if (value.isNotBlank()) onConfirm(value)
                 }
             }

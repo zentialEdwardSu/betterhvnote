@@ -77,7 +77,7 @@ fun TemplateSelectionRow(
         TemplatePreview(definition, preview, Modifier.width(48.dp).height(64.dp))
         Column(Modifier.weight(1f).padding(start = 12.dp)) {
             Text("Template", color = Color(0xFF666666), fontSize = 12.sp)
-            Text(definition?.name ?: "不可用", fontWeight = FontWeight.Medium, fontSize = 17.sp)
+            Text(definition?.name ?: noteText("不可用", "Unavailable"), fontWeight = FontWeight.Medium, fontSize = 17.sp)
             Text(
                 definition?.description.orEmpty(), color = Color(0xFF666666), fontSize = 13.sp,
                 maxLines = 1, overflow = TextOverflow.Ellipsis
@@ -94,18 +94,18 @@ fun TemplateChooserOverlay(state: TemplateChooserState, actions: TemplateChooser
                 Column(Modifier.weight(1f)) {
                     Text("Template", fontSize = 24.sp)
                     Text(
-                        if (state.catalog.directoryUri == null) "正在使用内置模板 · 尚未连接公共目录"
-                        else "公共目录已连接 · 返回应用或点击刷新可同步外部修改",
+                        if (state.catalog.directoryUri == null) noteText("正在使用内置模板 · 尚未连接公共目录", "Using built-in templates · no shared folder connected")
+                        else noteText("公共目录已连接 · 返回应用或点击刷新可同步外部修改", "Shared folder connected · return or refresh to sync changes"),
                         color = Color(0xFF666666), fontSize = 12.sp
                     )
                 }
                 IconButton(onClick = actions.onConnectDirectory) {
-                    Icon(Icons.Filled.FolderOpen, contentDescription = "连接或更换模板目录")
+                    Icon(Icons.Filled.FolderOpen, contentDescription = noteText("连接或更换模板目录", "Connect or change template folder"))
                 }
                 IconButton(onClick = actions.onRefresh) {
-                    Icon(Icons.Filled.Refresh, contentDescription = "刷新模板目录")
+                    Icon(Icons.Filled.Refresh, contentDescription = noteText("刷新模板目录", "Refresh template folder"))
                 }
-                EinkDialogAction("完成", onClick = actions.onDismiss)
+                EinkDialogAction(noteText("完成", "Done"), onClick = actions.onDismiss)
             }
             state.catalog.errors.firstOrNull()?.let {
                 Text(it, color = Color(0xFF8B0000), fontSize = 12.sp, modifier = Modifier.padding(vertical = 6.dp))
@@ -130,9 +130,9 @@ fun TemplateChooserOverlay(state: TemplateChooserState, actions: TemplateChooser
                         Text(definition.name, fontWeight = FontWeight.Medium, maxLines = 1)
                         Text(definition.description, color = Color(0xFF666666), fontSize = 12.sp, maxLines = 2)
                         when {
-                            !compatible -> Text("宽高比与当前页面不一致", color = Color(0xFF8B0000), fontSize = 11.sp)
+                            !compatible -> Text(noteText("宽高比与当前页面不一致", "Aspect ratio does not match this page"), color = Color(0xFF8B0000), fontSize = 11.sp)
                             definition.availability == TemplateAvailability.CACHED ->
-                                Text("外部来源不可用 · 使用缓存", color = Color(0xFF8B5A00), fontSize = 11.sp)
+                                Text(noteText("外部来源不可用 · 使用缓存", "External source unavailable · using cache"), color = Color(0xFF8B5A00), fontSize = 11.sp)
                             definition.error != null -> Text(definition.error, color = Color(0xFF8B0000), fontSize = 11.sp)
                         }
                     }
@@ -179,15 +179,15 @@ fun DocumentSettingsOverlay(
     EinkModalOverlay(onDismissRequest = onDismiss) {
         Column(Modifier.fillMaxWidth().padding(20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Text("文档设置", fontSize = 24.sp, modifier = Modifier.weight(1f))
-                EinkDialogAction("关闭", onClick = onDismiss)
+                Text(noteText("文档设置", "Document settings"), fontSize = 24.sp, modifier = Modifier.weight(1f))
+                EinkDialogAction(noteText("关闭", "Close"), onClick = onDismiss)
             }
             if (templateEnabled) {
                 TemplateSelectionRow(template, preview, onTemplate)
             } else {
                 Surface(
                     Modifier.fillMaxWidth(), shape = RectangleShape, color = Color(0xFFF2F2F2)
-                ) { Text("Template\nPDF 页面使用原始文档背景", Modifier.padding(16.dp), color = Color(0xFF666666)) }
+                ) { Text(noteText("Template\nPDF 页面使用原始文档背景", "Template\nPDF pages use the original document background"), Modifier.padding(16.dp), color = Color(0xFF666666)) }
             }
         }
     }

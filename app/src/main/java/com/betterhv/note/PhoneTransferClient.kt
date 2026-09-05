@@ -4,31 +4,32 @@ import android.content.Context
 import android.os.Looper
 import android.os.SystemClock
 import android.util.Log
-import com.betterhv.transfer.android.AndroidPairingController
+import androidx.core.content.edit
+import com.betterhv.note.export.ExportArtifact
 import com.betterhv.transfer.android.AndroidNetworkInfoProvider
+import com.betterhv.transfer.android.AndroidPairingController
 import com.betterhv.transfer.android.BleGattSession
 import com.betterhv.transfer.android.BleIdentity
 import com.betterhv.transfer.android.BleReceiverScanner
 import com.betterhv.transfer.android.BleReplayCache
 import com.betterhv.transfer.android.BleSecureEnvelope
-import com.betterhv.transfer.android.EncryptedFileTransfer
 import com.betterhv.transfer.android.DiscoveredSender
+import com.betterhv.transfer.android.EncryptedFileTransfer
 import com.betterhv.transfer.android.ReceivedLease
 import com.betterhv.transfer.android.WifiDirectController
-import com.betterhv.transfer.core.ContentKind
 import com.betterhv.transfer.core.BleCommand
 import com.betterhv.transfer.core.BleQueueProtocol
 import com.betterhv.transfer.core.BleResponse
-import com.betterhv.transfer.core.ExportTransferOffer
-import com.betterhv.transfer.core.RemotePayload
-import com.betterhv.transfer.core.TransferCrypto
-import com.betterhv.transfer.core.TransferOffer
-import com.betterhv.transfer.core.TransferState
 import com.betterhv.transfer.core.CapabilityNegotiation
+import com.betterhv.transfer.core.ContentKind
 import com.betterhv.transfer.core.DeviceCapabilities
+import com.betterhv.transfer.core.ExportTransferOffer
 import com.betterhv.transfer.core.NetworkEndpoint
+import com.betterhv.transfer.core.PairedDevice
+import com.betterhv.transfer.core.RemotePayload
 import com.betterhv.transfer.core.SsidMatch
 import com.betterhv.transfer.core.TransferChannelException
+import com.betterhv.transfer.core.TransferCrypto
 import com.betterhv.transfer.core.TransferErrorCode
 import com.betterhv.transfer.core.TransferEvent
 import com.betterhv.transfer.core.TransferEventLog
@@ -38,38 +39,38 @@ import com.betterhv.transfer.core.TransferMode
 import com.betterhv.transfer.core.TransferModes
 import com.betterhv.transfer.core.TransferNetworkSecurity
 import com.betterhv.transfer.core.TransferObservable
+import com.betterhv.transfer.core.TransferOffer
 import com.betterhv.transfer.core.TransferPhase
 import com.betterhv.transfer.core.TransferProgressMeter
 import com.betterhv.transfer.core.TransferSnapshot
-import com.betterhv.transfer.core.PairedDevice
-import com.betterhv.note.export.ExportArtifact
-import java.io.File
-import java.security.MessageDigest
-import java.util.Collections
-import java.util.UUID
-
-import java.util.concurrent.ConcurrentHashMap
-import java.util.concurrent.atomic.AtomicBoolean
-import java.net.ServerSocket
+import com.betterhv.transfer.core.TransferState
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.async
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.currentCoroutineContext
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.runBlocking
-import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.withTimeout
+import java.io.File
+import java.net.ServerSocket
+import java.security.MessageDigest
+import java.util.Collections
+import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicBoolean
 
 private inline fun <T> runCatchingCancellable(block: () -> T): Result<T> = try {
     Result.success(block())
@@ -82,6 +83,7 @@ private inline fun <T> runCatchingCancellable(block: () -> T): Result<T> = try {
 class PhoneTransferClient(context: Context) : AutoCloseable, TransferObservable {
     private val appContext = context.applicationContext
     val pairing = AndroidPairingController(appContext)
+    private val transportPreferences = appContext.getSharedPreferences(FAST_PATH_PREFERENCES, Context.MODE_PRIVATE)
     private val mutableState = MutableStateFlow<TransferState>(TransferState.Idle)
     private val mutableSnapshot = MutableStateFlow(TransferSnapshot())
     private val mutableEvents = MutableSharedFlow<TransferEvent>(extraBufferCapacity = 64)
@@ -257,11 +259,16 @@ class PhoneTransferClient(context: Context) : AutoCloseable, TransferObservable 
             Log.i(TAG, "sender ready after ${elapsed(startedAt)} ms; connecting GATT")
             val activeSession = openBleSession(sender.bluetoothAddress).also { session = it }
             Log.i(TAG, "GATT ready after ${elapsed(startedAt)} ms")
+            phase(TransferPhase.AUTHENTICATING)
             val identity = verifyIdentity(activeSession, sender, paired)
-            val key = requireNotNull(pairing.sharedKey(authenticatedId)) { "配对密钥不可用" }
-            val negotiation = negotiate(activeSession, authenticatedId, key)
             if (paired.legacy) {
                 authenticatedId = pairing.resolveLegacyIdentity(paired.id, identity).id
+            }
+            val key = requireNotNull(pairing.sharedKey(authenticatedId)) { "配对密钥不可用" }
+            val negotiation = if (kind == ContentKind.TEXT || prefersLan(authenticatedId)) {
+                null
+            } else {
+                negotiate(activeSession, authenticatedId, key)
             }
             pairing.markLastUsed(authenticatedId)
             val response = exchange(activeSession, authenticatedId, BleCommand.Lease(kind, "betterhv-note"))
@@ -340,11 +347,14 @@ class PhoneTransferClient(context: Context) : AutoCloseable, TransferObservable 
                 var authenticatedId = paired.id
                 if (paired.legacy) authenticatedId = pairing.resolveLegacyIdentity(paired.id, identity).id
                 val key = requireNotNull(pairing.sharedKey(authenticatedId)) { "配对密钥不可用" }
-                val negotiation = negotiate(session, authenticatedId, key)
+                val fastLanEndpoint = rememberedRemoteLanEndpoint(authenticatedId)
+                val negotiation = fastLanEndpoint?.let { null } ?: negotiate(session, authenticatedId, key)
                 pairing.markLastUsed(authenticatedId)
                 rememberAuthenticatedSenderName(authenticatedId, identity.deviceName)
-                require(negotiation.remote.extensions and BleQueueProtocol.CAPABILITY_EXPORT_PUSH != 0) {
-                    "NoteLink 版本不支持接收导出"
+                negotiation?.let {
+                    require(it.remote.extensions and BleQueueProtocol.CAPABILITY_EXPORT_PUSH != 0) {
+                        "NoteLink 版本不支持接收导出"
+                    }
                 }
                 val offer = ExportTransferOffer(
                     artifact.id, artifact.displayName, artifact.mimeType, artifact.byteLength, artifact.sha256
@@ -357,7 +367,10 @@ class PhoneTransferClient(context: Context) : AutoCloseable, TransferObservable 
                     else -> error("NoteLink 未接受导出文件")
                 }
                 try {
-                    sendExportWithSelection(session, authenticatedId, artifact, negotiation, key, progress)
+                    sendExportWithSelection(
+                        ExportTransferContext(session, authenticatedId, artifact, key, progress),
+                        TransportSelection(negotiation, fastLanEndpoint),
+                    )
                     withTimeout(30_000L) {
                         while (true) {
                             when (val response = exchange(session, authenticatedId, BleCommand.PushStatus(artifact.id))) {
@@ -408,20 +421,48 @@ class PhoneTransferClient(context: Context) : AutoCloseable, TransferObservable 
         session: BleGattSession,
         item: com.betterhv.transfer.core.QueueItem,
         pairedPhoneId: String,
-        negotiation: CapabilityNegotiation,
+        negotiation: CapabilityNegotiation?,
         key: ByteArray
     ): RemotePayload.Image = coroutineScope {
         val incoming = File(appContext.filesDir, "documents/incoming/remote-${item.id}.part")
         val local = localCapabilities(key)
         val lanEndpoint = local.lanEndpoint
-        val canLan = negotiation.ssidMatch == SsidMatch.MATCH && lanEndpoint != null &&
+        var firstFailure: Throwable? = null
+        var fastLanAttempted = false
+        if (negotiation == null && prefersLan(pairedPhoneId) && lanEndpoint != null) {
+            fastLanAttempted = true
+            runCatchingCancellable {
+                receiveImageAttempt(session, pairedPhoneId, item, incoming, key, TransferMode.LAN, lanEndpoint)
+            }.fold(
+                onSuccess = {
+                    rememberLanSuccess(pairedPhoneId)
+                    return@coroutineScope it
+                },
+                onFailure = {
+                    firstFailure = it
+                    forgetLanSuccess(pairedPhoneId)
+                },
+            )
+        }
+        val resolvedNegotiation = negotiation ?: negotiate(session, pairedPhoneId, key)
+        val canLan = !fastLanAttempted && resolvedNegotiation.ssidMatch == SsidMatch.MATCH && lanEndpoint != null &&
             TransferModes.contains(local.modes, TransferMode.LAN) &&
-            TransferModes.contains(negotiation.remote.modes, TransferMode.LAN)
-        val firstFailure = if (canLan) runCatchingCancellable {
-            receiveImageAttempt(session, pairedPhoneId, item, incoming, key, TransferMode.LAN, lanEndpoint)
-        }.fold({ return@coroutineScope it }, { it }) else null
-        val wifiEndpoint = negotiation.remote.wifiDirectEndpoint
-        if (wifiEndpoint != null && TransferModes.contains(negotiation.remote.modes, TransferMode.WIFI_DIRECT)) {
+            TransferModes.contains(resolvedNegotiation.remote.modes, TransferMode.LAN)
+        if (canLan) {
+            runCatchingCancellable {
+                receiveImageAttempt(session, pairedPhoneId, item, incoming, key, TransferMode.LAN, lanEndpoint)
+            }.fold(
+                onSuccess = {
+                    rememberLanSuccess(pairedPhoneId, resolvedNegotiation.remote.lanEndpoint)
+                    return@coroutineScope it
+                },
+                onFailure = { firstFailure = it },
+            )
+        }
+        val wifiEndpoint = resolvedNegotiation.remote.wifiDirectEndpoint
+        if (wifiEndpoint != null &&
+            TransferModes.contains(resolvedNegotiation.remote.modes, TransferMode.WIFI_DIRECT)
+        ) {
             firstFailure?.let { fallback(item.id, it) }
             phase(TransferPhase.JOINING_WIFI_DIRECT)
             val joined = wifiDirect.joinHostedGroup(
@@ -430,6 +471,7 @@ class PhoneTransferClient(context: Context) : AutoCloseable, TransferObservable 
             val receiverEndpoint = NetworkEndpoint(requireNotNull(joined.localIpAddress) {
                 "无法读取 Note 的 Wi-Fi Direct 地址"
             })
+            forgetLanSuccess(pairedPhoneId)
             return@coroutineScope receiveImageAttempt(
                 session, pairedPhoneId, item, incoming, key, TransferMode.WIFI_DIRECT, receiverEndpoint
             )
@@ -472,12 +514,12 @@ class PhoneTransferClient(context: Context) : AutoCloseable, TransferObservable 
             )
         } catch (error: Throwable) {
             activeListeningSocket?.close()
-            receiver.cancel()
+            receiver.cancelAndJoin()
             throw error
         }
         if (response !is BleResponse.Prepared) {
             activeListeningSocket?.close()
-            receiver.cancel()
+            receiver.cancelAndJoin()
             if (response is BleResponse.Failure) throw TransferChannelException(response.failure)
             error((response as? BleResponse.Error)?.message ?: "NoteLink 未准备文件传输")
         }
@@ -491,36 +533,59 @@ class PhoneTransferClient(context: Context) : AutoCloseable, TransferObservable 
     }
 
     private suspend fun sendExportWithSelection(
-        session: BleGattSession,
-        clientId: String,
-        artifact: ExportArtifact,
-        negotiation: CapabilityNegotiation,
-        pairingKey: ByteArray,
-        progressCallback: (Long, Long) -> Unit
+        context: ExportTransferContext,
+        selection: TransportSelection,
     ) {
-        val local = localCapabilities(pairingKey)
-        val remoteLan = negotiation.remote.lanEndpoint
-        val canLan = negotiation.ssidMatch == SsidMatch.MATCH && remoteLan != null &&
+        val local = localCapabilities(context.pairingKey)
+        var firstFailure: Throwable? = null
+        val fastLanEndpoint = selection.fastLanEndpoint
+        if (fastLanEndpoint != null) {
+            val fastResult = tryExportLan(context, fastLanEndpoint)
+            if (fastResult.isSuccess) {
+                rememberLanSuccess(context.clientId, fastLanEndpoint)
+                return
+            }
+            forgetLanSuccess(context.clientId)
+            firstFailure = fastResult.exceptionOrNull()
+        }
+        val resolvedNegotiation = selection.negotiation ?: negotiate(
+            context.session,
+            context.clientId,
+            context.pairingKey,
+        )
+        val remoteLan = resolvedNegotiation.remote.lanEndpoint
+        val canLan = resolvedNegotiation.ssidMatch == SsidMatch.MATCH && remoteLan != null &&
+            remoteLan != fastLanEndpoint &&
             TransferModes.contains(local.modes, TransferMode.LAN) &&
-            TransferModes.contains(negotiation.remote.modes, TransferMode.LAN)
-        val firstFailure = if (canLan) runCatchingCancellable {
-            sendExportAttempt(session, clientId, artifact, pairingKey, TransferMode.LAN, remoteLan, progressCallback)
-        }.exceptionOrNull() else null
-        if (canLan && firstFailure == null) return
-        val wifi = negotiation.remote.wifiDirectEndpoint
-        if (wifi != null && TransferModes.contains(negotiation.remote.modes, TransferMode.WIFI_DIRECT)) {
-            firstFailure?.let { fallback(artifact.id, it) }
+            TransferModes.contains(resolvedNegotiation.remote.modes, TransferMode.LAN)
+        if (canLan) {
+            val lanResult = tryExportLan(context, remoteLan)
+            if (lanResult.isSuccess) {
+                rememberLanSuccess(context.clientId, remoteLan)
+                return
+            }
+            firstFailure = lanResult.exceptionOrNull()
+        }
+        val wifi = resolvedNegotiation.remote.wifiDirectEndpoint
+        if (wifi != null && TransferModes.contains(resolvedNegotiation.remote.modes, TransferMode.WIFI_DIRECT)) {
+            firstFailure?.let { fallback(context.artifact.id, it) }
             phase(TransferPhase.JOINING_WIFI_DIRECT)
             val joined = wifiDirect.joinHostedGroup(wifi.deviceAddress, "NoteLink", wifi.networkName, wifi.passphrase)
             sendExportAttempt(
-                session, clientId, artifact, pairingKey, TransferMode.WIFI_DIRECT,
-                NetworkEndpoint(joined.groupOwnerAddress, wifi.port), progressCallback
+                context.session,
+                context.clientId,
+                context.artifact,
+                context.pairingKey,
+                TransferMode.WIFI_DIRECT,
+                NetworkEndpoint(joined.groupOwnerAddress, wifi.port),
+                context.progressCallback,
             )
-            return
+            forgetLanSuccess(context.clientId)
+        } else {
+            throw firstFailure ?: TransferChannelException(TransferFailure(
+                TransferErrorCode.UNSUPPORTED_MODE, "没有可用的大文件通道", false
+            ))
         }
-        throw firstFailure ?: TransferChannelException(TransferFailure(
-            TransferErrorCode.UNSUPPORTED_MODE, "没有可用的大文件通道", false
-        ))
     }
 
     private suspend fun sendExportAttempt(
@@ -558,7 +623,7 @@ class PhoneTransferClient(context: Context) : AutoCloseable, TransferObservable 
 
     private suspend fun exchange(session: BleGattSession, clientId: String, command: BleCommand): BleResponse {
         val key = requireNotNull(pairing.sharedKey(clientId)) { "配对密钥不可用" }
-        val sealed = BleSecureEnvelope.seal(key, BleQueueProtocol.encode(command))
+        val sealed = BleSecureEnvelope.seal(key, pairing.localDeviceId, BleQueueProtocol.encode(command))
         val response = session.exchange(sealed)
         return BleQueueProtocol.decodeResponse(BleSecureEnvelope.open(key, response, inboundReplay))
     }
@@ -680,14 +745,11 @@ class PhoneTransferClient(context: Context) : AutoCloseable, TransferObservable 
             SystemClock.elapsedRealtime() - recent.observedAt <= RECENT_SENDER_MILLIS &&
                 senderMatches(recent.sender, paired, kind)
         }?.let { return it.sender }
-        newScanner().discover(timeoutMillis).forEach { advertised ->
-            val sender = resolveAdvertisementIdentity(advertised) ?: return@forEach
-            if (senderMatches(sender, paired, kind)) {
-                recentSenders[paired.id] = RecentSender(sender, SystemClock.elapsedRealtime())
-                return sender
-            }
-        }
-        return null
+        val sender = newScanner().discoverFirst(timeoutMillis) { senderMatches(it, paired, kind) }
+            ?.let { resolveAdvertisementIdentity(it) }
+            ?: return null
+        recentSenders[paired.id] = RecentSender(sender, SystemClock.elapsedRealtime())
+        return sender
     }
 
     private fun senderMatches(sender: DiscoveredSender, paired: PairedDevice, kind: ContentKind?): Boolean {
@@ -739,6 +801,52 @@ class PhoneTransferClient(context: Context) : AutoCloseable, TransferObservable 
             pairing.updatePairedDeviceName(clientId, normalized)
         }
     }
+
+    private suspend fun tryExportLan(
+        context: ExportTransferContext,
+        endpoint: NetworkEndpoint,
+    ): Result<Unit> = runCatchingCancellable {
+        sendExportAttempt(
+            context.session,
+            context.clientId,
+            context.artifact,
+            context.pairingKey,
+            TransferMode.LAN,
+            endpoint,
+            context.progressCallback,
+        )
+    }
+
+    private fun prefersLan(clientId: String): Boolean =
+        transportPreferences.getBoolean(fastPathKey(clientId, LAN_SUCCESS_SUFFIX), false)
+
+    private fun rememberedRemoteLanEndpoint(clientId: String): NetworkEndpoint? = if (!prefersLan(clientId)) {
+        null
+    } else {
+        val host = transportPreferences.getString(fastPathKey(clientId, LAN_HOST_SUFFIX), null)
+        val port = transportPreferences.getInt(fastPathKey(clientId, LAN_PORT_SUFFIX), 0)
+        host?.let { runCatching { NetworkEndpoint(it, port).validated() }.getOrNull() }
+    }
+
+    private fun rememberLanSuccess(clientId: String, remoteEndpoint: NetworkEndpoint? = null) {
+        transportPreferences.edit {
+            putBoolean(fastPathKey(clientId, LAN_SUCCESS_SUFFIX), true)
+            remoteEndpoint?.let {
+                putString(fastPathKey(clientId, LAN_HOST_SUFFIX), it.host)
+                putInt(fastPathKey(clientId, LAN_PORT_SUFFIX), it.port)
+            }
+        }
+    }
+
+    private fun forgetLanSuccess(clientId: String) {
+        transportPreferences.edit {
+            remove(fastPathKey(clientId, LAN_SUCCESS_SUFFIX))
+            remove(fastPathKey(clientId, LAN_HOST_SUFFIX))
+            remove(fastPathKey(clientId, LAN_PORT_SUFFIX))
+        }
+    }
+
+    private fun fastPathKey(clientId: String, suffix: String): String = "$clientId:$suffix"
 
     /** Drops radio objects that Android commonly invalidates while the tablet sleeps. */
     suspend fun recoverAfterWake() = withContext(Dispatchers.IO) {
@@ -864,12 +972,29 @@ class PhoneTransferClient(context: Context) : AutoCloseable, TransferObservable 
     }
 
     private companion object {
+        const val FAST_PATH_PREFERENCES = "notelink_fast_path"
+        const val LAN_HOST_SUFFIX = "lan_host"
+        const val LAN_PORT_SUFFIX = "lan_port"
+        const val LAN_SUCCESS_SUFFIX = "lan_success"
         const val TAG = "NoteLinkTransfer"
-        const val SCAN_TO_GATT_SETTLE_MILLIS = 350L
+        const val SCAN_TO_GATT_SETTLE_MILLIS = 150L
         const val RECENT_SENDER_MILLIS = 30_000L
     }
 
     private data class RecentSender(val sender: DiscoveredSender, val observedAt: Long)
+
+    private data class TransportSelection(
+        val negotiation: CapabilityNegotiation?,
+        val fastLanEndpoint: NetworkEndpoint?,
+    )
+
+    private data class ExportTransferContext(
+        val session: BleGattSession,
+        val clientId: String,
+        val artifact: ExportArtifact,
+        val pairingKey: ByteArray,
+        val progressCallback: (Long, Long) -> Unit,
+    )
 
     private fun elapsed(startedAt: Long): Long = SystemClock.elapsedRealtime() - startedAt
 }

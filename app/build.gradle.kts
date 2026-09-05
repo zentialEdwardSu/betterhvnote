@@ -7,6 +7,15 @@ plugins {
     id("io.gitlab.arturbosch.detekt")
 }
 
+val releaseStoreFile = providers.environmentVariable("ANDROID_RELEASE_KEYSTORE_FILE")
+val releaseStorePassword = providers.environmentVariable("ANDROID_RELEASE_STORE_PASSWORD")
+val releaseKeyAlias = providers.environmentVariable("ANDROID_RELEASE_KEY_ALIAS")
+val releaseSigningReady = listOf(
+    releaseStoreFile,
+    releaseStorePassword,
+    releaseKeyAlias,
+).all { it.isPresent }
+
 extensions.configure<ApplicationExtension> {
     namespace = "com.betterhv.note"
     compileSdk = 34
@@ -16,8 +25,8 @@ extensions.configure<ApplicationExtension> {
         minSdk = 28
         targetSdk = 34
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
-        versionCode = 1
-        versionName = "0.1-phase6"
+        versionCode = providers.gradleProperty("noteVersionCode").get().toInt()
+        versionName = providers.gradleProperty("noteVersion").get()
         buildConfigField("long", "BUILD_TIME_EPOCH_MILLIS", "${System.currentTimeMillis()}L")
         ndk { abiFilters += "arm64-v8a" }
         externalNativeBuild {
@@ -36,15 +45,25 @@ extensions.configure<ApplicationExtension> {
         }
     }
 
+    signingConfigs {
+        if (releaseSigningReady) {
+            create("release") {
+                storeFile = file(releaseStoreFile.get())
+                storeType = "PKCS12"
+                storePassword = releaseStorePassword.get()
+                keyAlias = releaseKeyAlias.get()
+                keyPassword = releaseStorePassword.get()
+            }
+        }
+    }
+
     buildTypes {
         getByName("debug") {
             applicationIdSuffix = ".uitest"
         }
         release {
             isMinifyEnabled = false
-            // The installed development build uses the debug key. Keeping that
-            // signature lets `adb install -r` preserve the production data.
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = if (releaseSigningReady) signingConfigs.getByName("release") else null
         }
     }
     compileOptions {
@@ -82,6 +101,7 @@ dependencies {
     androidTestCompileOnly(project(":framework-stubs"))
     implementation(project(":transfer-core"))
     implementation(project(":transfer-android"))
+    implementation(project(":update-core"))
 
     implementation("androidx.core:core-ktx:1.13.1")
     implementation("androidx.activity:activity-compose:1.9.3")

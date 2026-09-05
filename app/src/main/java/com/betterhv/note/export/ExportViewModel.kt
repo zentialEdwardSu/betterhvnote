@@ -3,6 +3,7 @@ package com.betterhv.note.export
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.betterhv.note.noteText
 import com.betterhv.note.storage.NotebookRepository
 import com.betterhv.note.template.TemplateStore
 import java.io.File
@@ -58,10 +59,10 @@ class ExportViewModel(application: Application) : AndroidViewModel(application) 
                 .onSuccess {
                     val tasks = taskRepository.listSummaries()
                     withContext(Dispatchers.Main) {
-                        mutableState.value = mutableState.value.copy(tasks = tasks, message = "导出任务已创建")
+                        mutableState.value = mutableState.value.copy(tasks = tasks, message = noteText("导出任务已创建", "Export task created"))
                     }
                 }
-                .onFailure { failure(it.message ?: "创建导出任务失败") }
+                .onFailure { failure(it.message ?: noteText("创建导出任务失败", "Could not create export task")) }
         }
     }
 
@@ -71,7 +72,7 @@ class ExportViewModel(application: Application) : AndroidViewModel(application) 
             engine.deleteTask(id)
             val tasks = taskRepository.listSummaries()
             withContext(Dispatchers.Main) {
-                mutableState.value = mutableState.value.copy(tasks = tasks, message = "导出任务已删除")
+                mutableState.value = mutableState.value.copy(tasks = tasks, message = noteText("导出任务已删除", "Export task deleted"))
             }
         }
     }
@@ -79,7 +80,7 @@ class ExportViewModel(application: Application) : AndroidViewModel(application) 
     fun saveToDownloads(taskId: UUID, beforeExport: suspend (UUID) -> Boolean) {
         runTask(taskId, beforeExport) { artifact ->
             withContext(Dispatchers.IO) { downloads.save(artifact) }
-            "已保存到 Downloads/BetterHvNote"
+            noteText("已保存到 Downloads/BetterHvNote", "Saved to Downloads/BetterHvNote")
         }
     }
 
@@ -102,7 +103,7 @@ class ExportViewModel(application: Application) : AndroidViewModel(application) 
                     )
                 )
             }
-            "已发送到 NoteLink"
+            noteText("已发送到 NoteLink", "Sent to NoteLink")
         }
     }
 
@@ -124,7 +125,7 @@ class ExportViewModel(application: Application) : AndroidViewModel(application) 
                 message = null
             )
             try {
-                check(beforeExport(task.notebookId)) { "保存当前笔记本失败" }
+                check(beforeExport(task.notebookId)) { noteText("保存当前笔记本失败", "Could not save the current notebook") }
                 when (val result = engine.generate(taskId) { progress ->
                     mutableState.value = mutableState.value.copy(progress = progress)
                 }) {
@@ -132,13 +133,13 @@ class ExportViewModel(application: Application) : AndroidViewModel(application) 
                         val message = destination(result.artifact)
                         mutableState.value = mutableState.value.copy(message = message)
                     }
-                    is ExportResult.Failure -> mutableState.value = mutableState.value.copy(message = "导出失败：${result.error}")
-                    ExportResult.Cancelled -> mutableState.value = mutableState.value.copy(message = "已取消导出")
+                    is ExportResult.Failure -> mutableState.value = mutableState.value.copy(message = noteText("导出失败：${result.error}", "Export failed: ${result.error}"))
+                    ExportResult.Cancelled -> mutableState.value = mutableState.value.copy(message = noteText("已取消导出", "Export cancelled"))
                 }
             } catch (_: kotlinx.coroutines.CancellationException) {
-                mutableState.value = mutableState.value.copy(message = "已取消导出")
+                mutableState.value = mutableState.value.copy(message = noteText("已取消导出", "Export cancelled"))
             } catch (t: Throwable) {
-                mutableState.value = mutableState.value.copy(message = "导出失败：${t.message ?: t.javaClass.simpleName}")
+                mutableState.value = mutableState.value.copy(message = noteText("导出失败：${t.message ?: t.javaClass.simpleName}", "Export failed: ${t.message ?: t.javaClass.simpleName}"))
             } finally {
                 mutableState.value = mutableState.value.copy(activeTaskId = null, progress = null)
                 refresh()

@@ -158,7 +158,7 @@ fun PageManagerPanel(
                 PenButtonTracker.consumeClickModifier()
                 val (updated, changed) = model.changeChunk(side1Delta, displayedPages.size)
                 model = updated
-                if (!changed) onNotice(if (side1Delta < 0) "已经是第一组缩略图" else "已经是最后一组缩略图")
+                if (!changed) onNotice(if (side1Delta < 0) noteText("已经是第一组缩略图", "Already at the first thumbnail group") else noteText("已经是最后一组缩略图", "Already at the last thumbnail group"))
                 true
             }
             MotionEvent.ACTION_CANCEL -> {
@@ -274,9 +274,9 @@ fun PageManagerPanel(
                         val (updated, decision) = model.deleteClick(info.id, now)
                         model = updated
                         if (decision == DeleteDecision.ARMED) {
-                            onNotice("再次按 Side3 删除第 ${info.pageNumber} 页")
+                            onNotice(noteText("再次按 Side3 删除第 ${info.pageNumber} 页", "Press Side3 again to delete page ${info.pageNumber}"))
                         } else if (onDelete(info.id)) {
-                            onNotice("已删除第 ${info.pageNumber} 页")
+                            onNotice(noteText("已删除第 ${info.pageNumber} 页", "Deleted page ${info.pageNumber}"))
                             model = model.afterStructureChange(
                                 currentIndex,
                                 (displayedPages.size - 1).coerceAtLeast(0)
@@ -308,7 +308,7 @@ fun PageManagerPanel(
         .then(dragInput)
 
     ToolbarFlyoutSurface(
-        title = "页面 ${currentIndex + 1}/${displayedPages.size.coerceAtLeast(1)}",
+        title = noteText("页面 ${currentIndex + 1}/${displayedPages.size.coerceAtLeast(1)}", "Page ${currentIndex + 1}/${displayedPages.size.coerceAtLeast(1)}"),
         dockEdge = dockEdge,
         modifier = modifier,
         compactHeaderWidth = if (vertical) null else PAGE_MANAGER_HORIZONTAL_TITLE_WIDTH,
@@ -320,14 +320,14 @@ fun PageManagerPanel(
                     PageManagerTab(
                         selected = !bookmarkedOnly,
                         icon = Icons.Filled.Layers,
-                        description = "全部页面",
+                        description = noteText("全部页面", "All pages"),
                         modifier = Modifier.weight(1f),
                         onClick = showAll
                     )
                     PageManagerTab(
                         selected = bookmarkedOnly,
                         icon = Icons.Filled.Bookmark,
-                        description = "书签页面",
+                        description = noteText("书签页面", "Bookmarked pages"),
                         modifier = Modifier.weight(1f),
                         onClick = showBookmarks
                     )
@@ -347,14 +347,14 @@ fun PageManagerPanel(
                     PageManagerTab(
                         selected = !bookmarkedOnly,
                         icon = Icons.Filled.Layers,
-                        description = "全部页面",
+                        description = noteText("全部页面", "All pages"),
                         modifier = Modifier.weight(1f),
                         onClick = showAll
                     )
                     PageManagerTab(
                         selected = bookmarkedOnly,
                         icon = Icons.Filled.Bookmark,
-                        description = "书签页面",
+                        description = noteText("书签页面", "Bookmarked pages"),
                         modifier = Modifier.weight(1f),
                         onClick = showBookmarks
                     )
