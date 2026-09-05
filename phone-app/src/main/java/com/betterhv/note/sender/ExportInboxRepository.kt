@@ -10,14 +10,14 @@ import android.os.Environment
 import android.provider.MediaStore
 import androidx.core.content.FileProvider
 import com.betterhv.transfer.core.ExportTransferOffer
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import java.io.File
 import java.io.FileInputStream
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption
 import java.security.MessageDigest
 import java.util.UUID
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
 
 enum class InboxExportState { RECEIVING, COMPLETE, FAILED }
 
@@ -62,14 +62,23 @@ class ExportInboxRepository(context: Context) : AutoCloseable {
             File(existing.filePath).delete()
         }
         ContentValues().apply {
-            put("artifact_id", offer.artifactId.toString()); put("source_device_id", sourceDeviceId)
-            put("display_name", safeName(offer.displayName)); put("mime_type", offer.mimeType)
-            put("byte_length", offer.byteLength); put("sha256", offer.sha256)
-            put("file_path", final.absolutePath); put("state", InboxExportState.RECEIVING.name)
-            put("created_at", System.currentTimeMillis()); putNull("received_at"); putNull("error")
+            put("artifact_id", offer.artifactId.toString())
+            put("source_device_id", sourceDeviceId)
+            put("display_name", safeName(offer.displayName))
+            put("mime_type", offer.mimeType)
+            put("byte_length", offer.byteLength)
+            put("sha256", offer.sha256)
+            put("file_path", final.absolutePath)
+            put("state", InboxExportState.RECEIVING.name)
+            put("created_at", System.currentTimeMillis())
+            putNull("received_at")
+            putNull("error")
         }.also {
             database.writableDatabase.insertWithOnConflict(
-                "inbox_exports", null, it, SQLiteDatabase.CONFLICT_REPLACE
+                "inbox_exports",
+                null,
+                it,
+                SQLiteDatabase.CONFLICT_REPLACE
             )
         }
         publish()
@@ -84,19 +93,39 @@ class ExportInboxRepository(context: Context) : AutoCloseable {
         val target = File(item.filePath)
         target.parentFile?.mkdirs()
         runCatching {
-            Files.move(partial.toPath(), target.toPath(), StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING)
+            Files.move(
+                partial.toPath(),
+                target.toPath(),
+                StandardCopyOption.ATOMIC_MOVE,
+                StandardCopyOption.REPLACE_EXISTING
+            )
         }.getOrElse {
             Files.move(partial.toPath(), target.toPath(), StandardCopyOption.REPLACE_EXISTING)
         }
         ContentValues().apply {
-            put("state", InboxExportState.COMPLETE.name); put("received_at", System.currentTimeMillis()); putNull("error")
-        }.also { database.writableDatabase.update("inbox_exports", it, "artifact_id=?", arrayOf(artifactId.toString())) }
+            put(
+                "state",
+                InboxExportState.COMPLETE.name
+            )
+            put("received_at", System.currentTimeMillis())
+            putNull("error")
+        }.also {
+            database.writableDatabase.update(
+                "inbox_exports",
+                it,
+                "artifact_id=?",
+                arrayOf(artifactId.toString())
+            )
+        }
         publish()
     }
 
     @Synchronized
     fun fail(artifactId: UUID, message: String) {
-        ContentValues().apply { put("state", InboxExportState.FAILED.name); put("error", message) }.also {
+        ContentValues().apply {
+            put("state", InboxExportState.FAILED.name)
+            put("error", message)
+        }.also {
             database.writableDatabase.update("inbox_exports", it, "artifact_id=?", arrayOf(artifactId.toString()))
         }
         publish()
@@ -169,7 +198,9 @@ class ExportInboxRepository(context: Context) : AutoCloseable {
                 resolver.delete(uri, null, null)
                 throw t
             }
-        } else error("当前系统版本不支持无权限保存到 Downloads")
+        } else {
+            error("当前系统版本不支持无权限保存到 Downloads")
+        }
         return item.displayName
     }
 
@@ -178,14 +209,25 @@ class ExportInboxRepository(context: Context) : AutoCloseable {
 
     @Synchronized
     private fun query(): List<InboxExport> = database.readableDatabase.query(
-        "inbox_exports", COLUMNS, null, null, null, null, "COALESCE(received_at, created_at) DESC"
+        "inbox_exports",
+        COLUMNS,
+        null,
+        null,
+        null,
+        null,
+        "COALESCE(received_at, created_at) DESC"
     ).use { cursor ->
         buildList {
-            while (cursor.moveToNext()) add(InboxExport(
-                UUID.fromString(cursor.getString(0)), cursor.getString(1), cursor.getString(2), cursor.getString(3),
-                cursor.getLong(4), cursor.getBlob(5), cursor.getString(6), InboxExportState.valueOf(cursor.getString(7)),
-                cursor.getLong(8), if (cursor.isNull(9)) null else cursor.getLong(9), cursor.getString(10)
-            ))
+            while (cursor.moveToNext()) add(
+                InboxExport(
+                    UUID.fromString(cursor.getString(0)), cursor.getString(1), cursor.getString(2), cursor.getString(3),
+                    cursor.getLong(
+                        4
+                    ),
+                    cursor.getBlob(5), cursor.getString(6), InboxExportState.valueOf(cursor.getString(7)),
+                    cursor.getLong(8), if (cursor.isNull(9)) null else cursor.getLong(9), cursor.getString(10)
+                )
+            )
         }
     }
 
@@ -219,12 +261,15 @@ class ExportInboxRepository(context: Context) : AutoCloseable {
     private class InboxDatabase(context: Context) : SQLiteOpenHelper(context, "export_inbox.db", null, 1) {
         override fun onConfigure(db: SQLiteDatabase) { db.enableWriteAheadLogging() }
         override fun onCreate(db: SQLiteDatabase) {
-            db.execSQL("""CREATE TABLE inbox_exports(
+            db.execSQL(
+                """CREATE TABLE inbox_exports(
                 artifact_id TEXT PRIMARY KEY, source_device_id TEXT NOT NULL, display_name TEXT NOT NULL,
                 mime_type TEXT NOT NULL, byte_length INTEGER NOT NULL, sha256 BLOB NOT NULL,
                 file_path TEXT NOT NULL, state TEXT NOT NULL, created_at INTEGER NOT NULL,
                 received_at INTEGER, error TEXT
-            )""".trimIndent())
+            )
+                """.trimIndent()
+            )
         }
         override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) = Unit
     }

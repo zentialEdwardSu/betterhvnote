@@ -7,6 +7,15 @@ plugins {
     id("io.gitlab.arturbosch.detekt")
 }
 
+val releaseStoreFile = providers.environmentVariable("ANDROID_RELEASE_KEYSTORE_FILE")
+val releaseStorePassword = providers.environmentVariable("ANDROID_RELEASE_STORE_PASSWORD")
+val releaseKeyAlias = providers.environmentVariable("ANDROID_RELEASE_KEY_ALIAS")
+val releaseSigningReady = listOf(
+    releaseStoreFile,
+    releaseStorePassword,
+    releaseKeyAlias,
+).all { it.isPresent }
+
 // Desktop sources live in :phone-desktop; this module is Android-only.
 
 extensions.configure<ApplicationExtension> {
@@ -18,14 +27,26 @@ extensions.configure<ApplicationExtension> {
         minSdk = 29
         targetSdk = 34
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
-        versionCode = 1
-        versionName = "0.2"
+        versionCode = providers.gradleProperty("noteLinkVersionCode").get().toInt()
+        versionName = providers.gradleProperty("noteLinkVersion").get()
+    }
+
+    signingConfigs {
+        if (releaseSigningReady) {
+            create("release") {
+                storeFile = file(releaseStoreFile.get())
+                storeType = "PKCS12"
+                storePassword = releaseStorePassword.get()
+                keyAlias = releaseKeyAlias.get()
+                keyPassword = releaseStorePassword.get()
+            }
+        }
     }
 
     buildTypes {
         release {
             isMinifyEnabled = false
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = if (releaseSigningReady) signingConfigs.getByName("release") else null
         }
     }
 
@@ -33,7 +54,10 @@ extensions.configure<ApplicationExtension> {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
-    buildFeatures { compose = true }
+    buildFeatures {
+        compose = true
+        buildConfig = true
+    }
 }
 
 kotlin {
@@ -43,6 +67,7 @@ kotlin {
 dependencies {
     implementation(project(":transfer-core"))
     implementation(project(":transfer-android"))
+    implementation(project(":update-core"))
     implementation("androidx.core:core-ktx:1.13.1")
     implementation("androidx.activity:activity-compose:1.9.3")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.7")

@@ -9,20 +9,20 @@ import android.net.Uri
 import android.provider.OpenableColumns
 import com.betterhv.transfer.android.SenderContentProvider
 import com.betterhv.transfer.android.SenderLease
-import com.betterhv.transfer.core.ContentKind
 import com.betterhv.transfer.core.ContentCounts
+import com.betterhv.transfer.core.ContentKind
 import com.betterhv.transfer.core.QueueCoordinator
 import com.betterhv.transfer.core.QueueItem
 import com.betterhv.transfer.core.QueueState
 import com.betterhv.transfer.core.QueueStore
 import com.betterhv.transfer.core.TransferLimits
 import com.betterhv.transfer.core.TransferOffer
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import java.io.File
 import java.io.FileInputStream
 import java.security.MessageDigest
 import java.util.UUID
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
 
 class PhoneQueueRepository(context: Context) : QueueStore, SenderContentProvider, AutoCloseable {
     internal val appContext = context.applicationContext
@@ -74,7 +74,9 @@ class PhoneQueueRepository(context: Context) : QueueStore, SenderContentProvider
             insertWithPayload(item, target.relativeTo(appContext.filesDir).path, null)
             return item
         } catch (t: Throwable) {
-            temp.delete(); target.delete(); throw t
+            temp.delete()
+            target.delete()
+            throw t
         }
     }
 
@@ -119,9 +121,11 @@ class PhoneQueueRepository(context: Context) : QueueStore, SenderContentProvider
                     }
                 }
             }
-            require(temp.inputStream().use { input ->
-                ByteArray(5).also(input::read).contentEquals("%PDF-".encodeToByteArray())
-            }) { "文件不是有效的 PDF" }
+            require(
+                temp.inputStream().use { input ->
+                    ByteArray(5).also(input::read).contentEquals("%PDF-".encodeToByteArray())
+                }
+            ) { "文件不是有效的 PDF" }
             check(temp.renameTo(target)) { "无法保存队列 PDF" }
             val now = System.currentTimeMillis()
             val item = QueueItem(
@@ -131,14 +135,17 @@ class PhoneQueueRepository(context: Context) : QueueStore, SenderContentProvider
             insertWithPayload(item, target.relativeTo(appContext.filesDir).path, null)
             return item
         } catch (t: Throwable) {
-            temp.delete(); target.delete(); throw t
+            temp.delete()
+            target.delete()
+            throw t
         }
     }
 
     fun delete(id: UUID): Boolean {
         payloadFile(id)?.delete()
         val removed = remove(id)
-        publish(); return removed
+        publish()
+        return removed
     }
 
     @Synchronized
@@ -169,8 +176,10 @@ class PhoneQueueRepository(context: Context) : QueueStore, SenderContentProvider
         if (from < 0) return
         val to = (from + delta).coerceIn(0, ordered.lastIndex)
         if (from == to) return
-        ordered.removeAt(from); ordered.add(to, id)
-        reorder(ordered); publish()
+        ordered.removeAt(from)
+        ordered.add(to, id)
+        reorder(ordered)
+        publish()
     }
 
     fun reassignPending(deviceId: String) {
@@ -182,12 +191,34 @@ class PhoneQueueRepository(context: Context) : QueueStore, SenderContentProvider
         publish()
     }
 
+    fun reassignDestination(oldDeviceId: String, newDeviceId: String) {
+        writable().beginTransaction()
+        try {
+            items().filter { it.destinationDeviceId == oldDeviceId }
+                .forEach { update(it.copy(destinationDeviceId = newDeviceId)) }
+            writable().setTransactionSuccessful()
+        } finally { writable().endTransaction() }
+        publish()
+    }
+
     override fun counts(): ContentCounts {
         val available = items().filter { it.state == QueueState.PENDING }
+        return available.contentCounts()
+    }
+
+    fun counts(destinationDeviceId: String): ContentCounts {
+        val available = items().filter {
+            it.state == QueueState.PENDING &&
+                (it.destinationDeviceId == null || it.destinationDeviceId == destinationDeviceId)
+        }
+        return available.contentCounts()
+    }
+
+    private fun List<QueueItem>.contentCounts(): ContentCounts {
         return ContentCounts(
-            available.count { it.kind == ContentKind.IMAGE },
-            available.count { it.kind == ContentKind.TEXT },
-            available.count { it.kind == ContentKind.PDF }
+            count { it.kind == ContentKind.IMAGE },
+            count { it.kind == ContentKind.TEXT },
+            count { it.kind == ContentKind.PDF }
         )
     }
 
@@ -198,11 +229,23 @@ class PhoneQueueRepository(context: Context) : QueueStore, SenderContentProvider
     }
 
     @Synchronized override fun items(): List<QueueItem> = readable().query(
-        "queue_items", ITEM_COLUMNS, null, null, null, null, "position ASC, created_at ASC"
+        "queue_items",
+        ITEM_COLUMNS,
+        null,
+        null,
+        null,
+        null,
+        "position ASC, created_at ASC"
     ).use { cursor -> buildList { while (cursor.moveToNext()) add(cursor.item()) } }
 
     @Synchronized override fun find(id: UUID): QueueItem? = readable().query(
-        "queue_items", ITEM_COLUMNS, "id=?", arrayOf(id.toString()), null, null, null
+        "queue_items",
+        ITEM_COLUMNS,
+        "id=?",
+        arrayOf(id.toString()),
+        null,
+        null,
+        null
     ).use { if (it.moveToFirst()) it.item() else null }
 
     @Synchronized override fun next(kind: ContentKind, destinationDeviceId: String?, now: Long): QueueItem? {
@@ -223,7 +266,8 @@ class PhoneQueueRepository(context: Context) : QueueStore, SenderContentProvider
 
     @Synchronized override fun remove(id: UUID): Boolean {
         val result = writable().delete("queue_items", "id=?", arrayOf(id.toString())) > 0
-        publish(); return result
+        publish()
+        return result
     }
 
     @Synchronized override fun reorder(idsInOrder: List<UUID>) {
@@ -232,39 +276,61 @@ class PhoneQueueRepository(context: Context) : QueueStore, SenderContentProvider
         database.beginTransaction()
         try {
             idsInOrder.forEachIndexed { index, id ->
-                database.update("queue_items", ContentValues().apply { put("position", index) },
-                    "id=?", arrayOf(id.toString()))
+                database.update(
+                    "queue_items",
+                    ContentValues().apply { put("position", index) },
+                    "id=?",
+                    arrayOf(id.toString())
+                )
             }
             database.setTransactionSuccessful()
         } finally { database.endTransaction() }
         publish()
     }
 
-    @Synchronized override fun releaseExpired(now: Long): Int = releaseExpiredInternal(now).also { if (it > 0) publish() }
+    @Synchronized override fun releaseExpired(now: Long): Int = releaseExpiredInternal(
+        now
+    ).also { if (it > 0) publish() }
 
     private fun releaseExpiredInternal(now: Long): Int {
         val values = ContentValues().apply {
-            put("state", QueueState.PENDING.name); putNull("lease_expires_at"); putNull("failure_reason")
+            put("state", QueueState.PENDING.name)
+            putNull("lease_expires_at")
+            putNull("failure_reason")
         }
         return writable().update(
-            "queue_items", values,
+            "queue_items",
+            values,
             "state IN (?,?,?) AND lease_expires_at IS NOT NULL AND lease_expires_at<=?",
-            arrayOf(QueueState.LEASED.name, QueueState.TRANSFERRING.name,
-                QueueState.AWAITING_COMMIT.name, now.toString())
+            arrayOf(
+                QueueState.LEASED.name,
+                QueueState.TRANSFERRING.name,
+                QueueState.AWAITING_COMMIT.name,
+                now.toString()
+            )
         )
     }
 
     private fun insertWithPayload(item: QueueItem, payloadPath: String?, text: String?) {
-        val values = itemValues(item).apply { put("payload_path", payloadPath); put("text_content", text) }
+        val values = itemValues(item).apply {
+            put("payload_path", payloadPath)
+            put("text_content", text)
+        }
         writable().insertOrThrow("queue_items", null, values)
         publish()
     }
 
     private fun itemValues(item: QueueItem) = ContentValues().apply {
-        put("id", item.id.toString()); put("destination_device_id", item.destinationDeviceId)
-        put("kind", item.kind.name); put("mime_type", item.mimeType); put("byte_length", item.byteLength)
-        put("sha256", item.sha256); put("created_at", item.createdAt); put("position", item.position)
-        put("state", item.state.name); put("display_name", item.displayName)
+        put("id", item.id.toString())
+        put("destination_device_id", item.destinationDeviceId)
+        put("kind", item.kind.name)
+        put("mime_type", item.mimeType)
+        put("byte_length", item.byteLength)
+        put("sha256", item.sha256)
+        put("created_at", item.createdAt)
+        put("position", item.position)
+        put("state", item.state.name)
+        put("display_name", item.displayName)
         if (item.leaseExpiresAt == null) putNull("lease_expires_at") else put("lease_expires_at", item.leaseExpiresAt)
         put("failure_reason", item.failureReason)
     }
@@ -276,15 +342,30 @@ class PhoneQueueRepository(context: Context) : QueueStore, SenderContentProvider
     )
 
     private fun payloadFile(id: UUID): File? = readable().query(
-        "queue_items", arrayOf("payload_path"), "id=?", arrayOf(id.toString()), null, null, null
+        "queue_items",
+        arrayOf("payload_path"),
+        "id=?",
+        arrayOf(id.toString()),
+        null,
+        null,
+        null
     ).use { cursor ->
-        if (!cursor.moveToFirst() || cursor.isNull(0)) null
-        else File(appContext.filesDir, cursor.getString(0)).canonicalFile
-            .takeIf { it.toPath().startsWith(outboxDir.canonicalFile.toPath()) }
+        if (!cursor.moveToFirst() || cursor.isNull(0)) {
+            null
+        } else {
+            File(appContext.filesDir, cursor.getString(0)).canonicalFile
+                .takeIf { it.toPath().startsWith(outboxDir.canonicalFile.toPath()) }
+        }
     }
 
     private fun textValue(id: UUID): String? = readable().query(
-        "queue_items", arrayOf("text_content"), "id=?", arrayOf(id.toString()), null, null, null
+        "queue_items",
+        arrayOf("text_content"),
+        "id=?",
+        arrayOf(id.toString()),
+        null,
+        null,
+        null
     ).use { if (it.moveToFirst()) it.getString(0) else null }
 
     private fun nextPosition(): Long = (items().maxOfOrNull(QueueItem::position) ?: -1L) + 1L
@@ -320,7 +401,10 @@ class PhoneQueueRepository(context: Context) : QueueStore, SenderContentProvider
         }
         override fun commit() {
             if (finished) return
-            payloadFile?.delete(); coordinator.commit(offer.item.id); finished = true; publish()
+            payloadFile?.delete()
+            coordinator.commit(offer.item.id)
+            finished = true
+            publish()
         }
         override fun release() {
             if (!finished) {
@@ -346,15 +430,23 @@ class PhoneQueueRepository(context: Context) : QueueStore, SenderContentProvider
     }
 
     private class QueueDatabase(context: Context) : SQLiteOpenHelper(context, "sender_queue.db", null, 1) {
-        override fun onConfigure(db: SQLiteDatabase) { db.setForeignKeyConstraintsEnabled(true); db.enableWriteAheadLogging() }
+        override fun onConfigure(db: SQLiteDatabase) {
+            db.setForeignKeyConstraintsEnabled(
+                true
+            )
+            db.enableWriteAheadLogging()
+        }
         override fun onCreate(db: SQLiteDatabase) {
-            db.execSQL("""CREATE TABLE queue_items(
+            db.execSQL(
+                """CREATE TABLE queue_items(
                 id TEXT PRIMARY KEY, destination_device_id TEXT, kind TEXT NOT NULL,
                 mime_type TEXT NOT NULL, byte_length INTEGER NOT NULL, sha256 BLOB NOT NULL,
                 created_at INTEGER NOT NULL, position INTEGER NOT NULL, state TEXT NOT NULL,
                 display_name TEXT, lease_expires_at INTEGER, failure_reason TEXT,
                 payload_path TEXT, text_content TEXT
-            )""".trimIndent())
+            )
+                """.trimIndent()
+            )
             db.execSQL("CREATE INDEX queue_position ON queue_items(position)")
         }
         override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) = Unit

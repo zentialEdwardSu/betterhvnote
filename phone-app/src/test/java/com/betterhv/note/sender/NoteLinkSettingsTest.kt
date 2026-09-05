@@ -1,10 +1,18 @@
 package com.betterhv.note.sender
 
+import com.betterhv.note.sender.shared.NoteLinkLanguage
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertThrows
 import org.junit.Test
 
 class NoteLinkSettingsTest {
+    @Test fun languageStorageIdsAreStableAndUnknownValuesFollowSystem() {
+        assertEquals(NoteLinkLanguage.SYSTEM, NoteLinkLanguage.fromStorageId(null))
+        assertEquals(NoteLinkLanguage.SYSTEM, NoteLinkLanguage.fromStorageId("unknown"))
+        assertEquals(NoteLinkLanguage.SIMPLIFIED_CHINESE, NoteLinkLanguage.fromStorageId("zh-CN"))
+        assertEquals(NoteLinkLanguage.ENGLISH, NoteLinkLanguage.fromStorageId("en"))
+    }
+
     @Test fun displayNameIsTrimmed() {
         assertEquals("My NoteLink", NoteLinkSettings.validateDisplayName("  My NoteLink  "))
     }

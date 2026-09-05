@@ -1,6 +1,7 @@
 package com.betterhv.note.sender.shared
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -17,9 +18,12 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AddPhotoAlternate
+import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.ContentPaste
 import androidx.compose.material.icons.filled.Cancel
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.FolderOpen
@@ -31,6 +35,8 @@ import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -43,7 +49,9 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -51,6 +59,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -61,8 +70,51 @@ import com.betterhv.transfer.core.TransferLogEntry
 import com.betterhv.transfer.core.TransferLogLevel
 import com.betterhv.transfer.core.TransferModes
 import com.betterhv.transfer.core.TransferSnapshot
+import com.betterhv.update.UpdateCheckState
+import com.betterhv.update.UpdateInfo
+import com.betterhv.update.UpdateUiState
 import java.text.DateFormat
 import java.util.Date
+
+@Suppress("MagicNumber")
+private val NoteLinkColorScheme = lightColorScheme(
+    primary = Color(0xFF45494A),
+    onPrimary = Color.White,
+    primaryContainer = Color(0xFFDCE3E5),
+    onPrimaryContainer = Color(0xFF34393A),
+    inversePrimary = Color(0xFFC4CBCD),
+    secondary = Color(0xFF4FAF7C),
+    onSecondary = Color.White,
+    secondaryContainer = Color(0xFFD8F0E3),
+    onSecondaryContainer = Color(0xFF173D2A),
+    tertiary = Color(0xFF78642D),
+    onTertiary = Color.White,
+    tertiaryContainer = Color(0xFFF3E5B7),
+    onTertiaryContainer = Color(0xFF302500),
+    background = Color(0xFFFCFBFA),
+    onBackground = Color(0xFF202223),
+    surface = Color(0xFFFCFBFA),
+    onSurface = Color(0xFF202223),
+    surfaceVariant = Color(0xFFF0EFEE),
+    onSurfaceVariant = Color(0xFF535758),
+    surfaceTint = Color(0xFF45494A),
+    inverseSurface = Color(0xFF303233),
+    inverseOnSurface = Color(0xFFF4F5F4),
+    error = Color(0xFFBA1A1A),
+    onError = Color.White,
+    errorContainer = Color(0xFFFFDAD6),
+    onErrorContainer = Color(0xFF410002),
+    outline = Color(0xFF767A7B),
+    outlineVariant = Color(0xFFDDDCDC),
+    scrim = Color.Black,
+    surfaceBright = Color(0xFFFCFBFA),
+    surfaceDim = Color(0xFFE5E4E3),
+    surfaceContainerLowest = Color.White,
+    surfaceContainerLow = Color(0xFFFAF9F8),
+    surfaceContainer = Color(0xFFF5F4F3),
+    surfaceContainerHigh = Color(0xFFF1F0EF),
+    surfaceContainerHighest = Color(0xFFF7F6F5),
+)
 
 enum class DashboardItemState { PENDING, TRANSFERRING, FAILED, COMPLETE }
 
@@ -74,19 +126,25 @@ data class DashboardItem(
     val progress: Float? = null
 )
 
+data class DashboardPairedDevice(val id: String, val name: String)
+
 data class DashboardState(
     val displayName: String = "NoteLink",
-    val status: String = "正在检查设备",
+    val status: String = NoteLinkLanguage.SYSTEM.text("正在检查设备", "Checking device"),
     val statusDetail: String = "",
     val receiveEnabled: Boolean = true,
-    val pairedDeviceName: String? = null,
+    val pairedDevices: List<DashboardPairedDevice> = emptyList(),
+    val selectedDeviceId: String? = null,
     val pairingCode: String? = null,
     val queue: List<DashboardItem> = emptyList(),
     val inbox: List<DashboardItem> = emptyList(),
     val transfer: TransferSnapshot = TransferSnapshot(),
     val transferLog: List<TransferLogEntry> = emptyList(),
     val showRecentTransferEvents: Boolean = true,
-    val notice: String? = null
+    val language: NoteLinkLanguage = NoteLinkLanguage.SYSTEM,
+    val notice: String? = null,
+    val appVersion: String = "",
+    val updateUiState: UpdateUiState = UpdateUiState(),
 )
 
 data class DashboardActions(
@@ -100,38 +158,48 @@ data class DashboardActions(
     val setReceiveEnabled: (Boolean) -> Unit,
     val saveDisplayName: (String) -> Unit,
     val beginPairing: () -> Unit,
-    val unpair: () -> Unit,
+    val selectDevice: (String) -> Unit,
+    val unpair: (String) -> Unit,
     val refreshStatus: () -> Unit,
     val cancelTransfer: () -> Unit,
     val setShowRecentTransferEvents: (Boolean) -> Unit,
+    val setLanguage: (NoteLinkLanguage) -> Unit,
+    val checkForUpdates: () -> Unit,
+    val openRelease: (String) -> Unit,
+    val dismissUpdate: () -> Unit,
     val dragInboxItem: @Composable (String) -> Modifier = { Modifier }
 )
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun NoteLinkDashboard(state: DashboardState, actions: DashboardActions) {
+    val t: (String, String) -> String = { zh, en -> state.language.text(zh, en) }
     var showSettings by remember { mutableStateOf(false) }
     var showTextDialog by remember { mutableStateOf(false) }
     var textValue by remember { mutableStateOf(TextFieldValue()) }
-    MaterialTheme {
+    MaterialTheme(colorScheme = NoteLinkColorScheme) {
         Scaffold(
             topBar = {
                 TopAppBar(
                     title = {
                         Text(
-                            if (showSettings) "设置" else state.displayName,
+                            if (showSettings) t("设置", "Settings") else state.displayName,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )
                     },
                     navigationIcon = {
                         if (showSettings) {
-                            IconButton(onClick = { showSettings = false }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回") }
+                            IconButton(onClick = { showSettings = false }) {
+                                Icon(Icons.AutoMirrored.Filled.ArrowBack, t("返回", "Back"))
+                            }
                         }
                     },
                     actions = {
                         if (!showSettings) {
-                            IconButton(onClick = { showSettings = true }) { Icon(Icons.Default.Settings, "设置") }
+                            IconButton(onClick = { showSettings = true }) {
+                                Icon(Icons.Default.Settings, t("设置", "Settings"))
+                            }
                         }
                     }
                 )
@@ -142,6 +210,14 @@ fun NoteLinkDashboard(state: DashboardState, actions: DashboardActions) {
                     SettingsPage(state, actions)
                 } else {
                     StatusBand(state, actions)
+                    state.updateUiState.visibleUpdate?.let { info ->
+                        UpdateNoticeCard(
+                            info = info,
+                            language = state.language,
+                            onOpenRelease = { actions.openRelease(info.releaseUrl) },
+                            onDismiss = actions.dismissUpdate,
+                        )
+                    }
                     state.notice?.takeIf(String::isNotBlank)?.let {
                         Text(it, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp))
                     }
@@ -152,7 +228,7 @@ fun NoteLinkDashboard(state: DashboardState, actions: DashboardActions) {
         if (showTextDialog) {
             AlertDialog(
                 onDismissRequest = { showTextDialog = false },
-                title = { Text("添加文字") },
+                title = { Text(t("添加文字", "Add text")) },
                 text = {
                     OutlinedTextField(
                         value = textValue,
@@ -166,9 +242,11 @@ fun NoteLinkDashboard(state: DashboardState, actions: DashboardActions) {
                     Button(onClick = {
                         actions.addText(textValue.text)
                         showTextDialog = false
-                    }) { Text("加入队列") }
+                    }) { Text(t("加入队列", "Add to queue")) }
                 },
-                dismissButton = { OutlinedButton(onClick = { showTextDialog = false }) { Text("取消") } }
+                dismissButton = {
+                    OutlinedButton(onClick = { showTextDialog = false }) { Text(t("取消", "Cancel")) }
+                }
             )
         }
     }
@@ -176,12 +254,25 @@ fun NoteLinkDashboard(state: DashboardState, actions: DashboardActions) {
 
 @Composable
 private fun StatusBand(state: DashboardState, actions: DashboardActions) {
+    val t: (String, String) -> String = { zh, en -> state.language.text(zh, en) }
+    val selected = state.pairedDevices.firstOrNull { it.id == state.selectedDeviceId }
     Card(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp), shape = androidx.compose.foundation.shape.RoundedCornerShape(20.dp)) {
         Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text(
-                state.pairedDeviceName?.let { "已配对：$it" } ?: "尚未配对",
+                if (state.pairedDevices.isEmpty()) t("尚未配对", "Not paired")
+                else t("已配对设备 · ${state.pairedDevices.size}", "Paired devices · ${state.pairedDevices.size}"),
                 style = MaterialTheme.typography.titleMedium
             )
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box(Modifier.weight(1f)) { DeviceSelectorDropdown(state, actions) }
+                IconButton(onClick = actions.refreshStatus) {
+                    Icon(Icons.Default.Refresh, t("刷新连接状态", "Refresh connection"))
+                }
+            }
             Text(state.status)
             if (state.statusDetail.isNotBlank()) {
                 Text(state.statusDetail, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -189,32 +280,30 @@ private fun StatusBand(state: DashboardState, actions: DashboardActions) {
             TransferStatus(
                 state.transfer,
                 state.transferLog,
-                state.pairedDeviceName,
+                selected?.name,
                 state.showRecentTransferEvents,
+                state.language,
                 actions.cancelTransfer
             )
-            if (state.pairedDeviceName == null) {
-                Text("在 N10Pro 的“设置 → 手机传输”中输入此六位配对码", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Text(state.pairingCode ?: "------", style = MaterialTheme.typography.displaySmall, fontWeight = FontWeight.Bold)
+            if (state.pairingCode != null) {
+                Text(
+                    t(
+                        "在 N10Pro 的“设置 → 手机传输”中输入此六位配对码",
+                        "Enter this six-digit code in Settings > NoteLink on the N10Pro",
+                    ),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Text(state.pairingCode, style = MaterialTheme.typography.displaySmall, fontWeight = FontWeight.Bold)
             }
-            Row(
-                Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Button(onClick = actions.beginPairing, modifier = Modifier.weight(1f)) {
-                    Text(if (state.pairedDeviceName == null) "开始配对" else "重新配对")
-                }
-                if (state.pairedDeviceName != null) {
-                    OutlinedButton(onClick = actions.unpair, modifier = Modifier.weight(1f)) { Text("取消配对") }
-                }
-                IconButton(onClick = actions.refreshStatus) { Icon(Icons.Default.Refresh, "刷新连接状态") }
-            }
-            if (state.pairedDeviceName != null) {
+            if (state.pairedDevices.isNotEmpty()) {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedButton(onClick = { actions.setReceiveEnabled(!state.receiveEnabled) }, modifier = Modifier.fillMaxWidth()) {
                         Icon(if (state.receiveEnabled) Icons.Default.Pause else Icons.Default.PlayArrow, null)
-                        Text(if (state.receiveEnabled) "暂停接收" else "恢复接收", modifier = Modifier.padding(start = 6.dp))
+                        Text(
+                            if (state.receiveEnabled) t("暂停接收", "Pause receiving")
+                            else t("恢复接收", "Resume receiving"),
+                            modifier = Modifier.padding(start = 6.dp),
+                        )
                     }
                 }
             }
@@ -228,30 +317,36 @@ private fun TransferStatus(
     log: List<TransferLogEntry>,
     endpointName: String?,
     showRecentEvents: Boolean,
+    language: NoteLinkLanguage,
     onCancel: () -> Unit
 ) {
+    val t: (String, String) -> String = { zh, en -> language.text(zh, en) }
     if (!snapshot.phase.isActiveTransferPhase && (!showRecentEvents || log.isEmpty())) return
-    Text("传输状态", style = MaterialTheme.typography.titleSmall)
+    Text(t("传输状态", "Transfer status"), style = MaterialTheme.typography.titleSmall)
     Text(
         listOfNotNull("BLE", snapshot.phase.name.replace('_', ' '), snapshot.mode?.name, "SSID ${snapshot.ssidMatch.name}")
             .joinToString(" · "),
         style = MaterialTheme.typography.bodyMedium
     )
     Text(
-        "本端 ${TransferModes.describe(snapshot.localModes)} · 对端 ${TransferModes.describe(snapshot.remoteModes)}" +
-            " · 尝试 ${snapshot.attempt} · fallback ${snapshot.fallbackCount}",
+        "${t("本端", "Local")} ${TransferModes.describe(snapshot.localModes)} · " +
+            "${t("对端", "Remote")} ${TransferModes.describe(snapshot.remoteModes)}" +
+            " · ${t("尝试", "attempt")} ${snapshot.attempt} · fallback ${snapshot.fallbackCount}",
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant
     )
     snapshot.endpoint?.let {
         Text(
-            "端点 ${endpointName ?: snapshot.deviceId ?: "未知设备"} · ${it.host}:${it.port}",
+            "${t("端点", "Endpoint")} ${endpointName ?: snapshot.deviceId ?: t("未知设备", "Unknown device")} · ${it.host}:${it.port}",
             style = MaterialTheme.typography.bodySmall
         )
     }
     Text(
-        "Wi-Fi Direct 组 ${if (snapshot.wifiDirectGroupReady) "已就绪" else "未就绪"}" +
-            listOfNotNull(snapshot.deviceId?.let { " · 设备 $it" }, snapshot.operationId?.let { " · 操作 ${it.toString().take(8)}" }).joinToString(""),
+        "Wi-Fi Direct ${t("组", "group")} ${if (snapshot.wifiDirectGroupReady) t("已就绪", "ready") else t("未就绪", "not ready")}" +
+            listOfNotNull(
+                snapshot.deviceId?.let { " · ${t("设备", "device")} $it" },
+                snapshot.operationId?.let { " · ${t("操作", "operation")} ${it.toString().take(8)}" },
+            ).joinToString(""),
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant
     )
@@ -262,7 +357,8 @@ private fun TransferStatus(
         )
         Text(
             "${formatBytes(snapshot.bytesTransferred)} / ${formatBytes(snapshot.totalBytes)}" +
-                " · 当前 ${formatRate(snapshot.bytesPerSecond)} · 平均 ${formatRate(snapshot.averageBytesPerSecond)}" +
+                " · ${t("当前", "current")} ${formatRate(snapshot.bytesPerSecond)}" +
+                " · ${t("平均", "average")} ${formatRate(snapshot.averageBytesPerSecond)}" +
                 (snapshot.etaMillis?.let { " · ETA ${formatDuration(it)}" } ?: ""),
             style = MaterialTheme.typography.bodySmall
         )
@@ -272,18 +368,18 @@ private fun TransferStatus(
     }
     snapshot.lastFailure?.let {
         Text(
-            "${it.code}: ${it.message} · ${if (it.recoverable) "可重试" else "不可重试"}",
+            "${it.code}: ${it.message} · ${if (it.recoverable) t("可重试", "retryable") else t("不可重试", "not retryable")}",
             color = MaterialTheme.colorScheme.error
         )
     }
     if (snapshot.canCancel) {
         OutlinedButton(onClick = onCancel) {
             Icon(Icons.Default.Cancel, null)
-            Text("取消传输", modifier = Modifier.padding(start = 6.dp))
+            Text(t("取消传输", "Cancel transfer"), modifier = Modifier.padding(start = 6.dp))
         }
     }
     if (showRecentEvents && log.isNotEmpty()) {
-        Text("最近事件", style = MaterialTheme.typography.labelLarge)
+        Text(t("最近事件", "Recent events"), style = MaterialTheme.typography.labelLarge)
         Column(
             Modifier.fillMaxWidth().heightIn(max = 100.dp).verticalScroll(rememberScrollState())
         ) {
@@ -321,28 +417,29 @@ private fun formatDuration(millis: Long): String {
 
 @Composable
 private fun TransferPage(state: DashboardState, actions: DashboardActions, onAddText: () -> Unit) {
+    val t: (String, String) -> String = { zh, en -> state.language.text(zh, en) }
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val wide = maxWidth >= 840.dp
         Column(Modifier.fillMaxSize().padding(20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                Button(actions.addFiles) { Icon(Icons.Default.AddPhotoAlternate, null); Text("从本地选图", Modifier.padding(start = 6.dp)) }
-                OutlinedButton(onClick = onAddText) { Icon(Icons.Default.Edit, null); Text("添加文字", Modifier.padding(start = 6.dp)) }
-                OutlinedButton(actions.pasteClipboard) { Icon(Icons.Default.ContentPaste, null); Text("从剪贴板粘贴", Modifier.padding(start = 6.dp)) }
+                Button(actions.addFiles) { Icon(Icons.Default.AddPhotoAlternate, null); Text(t("添加文件", "Add files"), Modifier.padding(start = 6.dp)) }
+                OutlinedButton(onClick = onAddText) { Icon(Icons.Default.Edit, null); Text(t("添加文字", "Add text"), Modifier.padding(start = 6.dp)) }
+                OutlinedButton(actions.pasteClipboard) { Icon(Icons.Default.ContentPaste, null); Text(t("从剪贴板粘贴", "Paste clipboard"), Modifier.padding(start = 6.dp)) }
             }
             if (wide) {
                 Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                    TransferSection("发送队列 · ${state.queue.size} 项", Modifier.weight(1f), state.queue, "发送队列为空") { item ->
-                        IconButton(onClick = { actions.deleteQueueItem(item.id) }) { Icon(Icons.Default.Delete, "删除") }
+                    TransferSection(t("发送队列 · ${state.queue.size} 项", "Send queue · ${state.queue.size}"), Modifier.weight(1f), state.queue, t("发送队列为空", "Send queue is empty")) { item ->
+                        IconButton(onClick = { actions.deleteQueueItem(item.id) }) { Icon(Icons.Default.Delete, t("删除", "Delete")) }
                     }
-                    TransferSection("收到的导出 · ${state.inbox.size} 项", Modifier.weight(1f), state.inbox, "收件箱为空", actions.dragInboxItem) { item ->
+                    TransferSection(t("收到的导出 · ${state.inbox.size} 项", "Received exports · ${state.inbox.size}"), Modifier.weight(1f), state.inbox, t("收件箱为空", "Inbox is empty"), actions.dragInboxItem) { item ->
                         InboxActions(item, actions)
                     }
                 }
             } else {
-                TransferSection("发送队列 · ${state.queue.size} 项", Modifier.weight(1f), state.queue, "发送队列为空") { item ->
-                    IconButton(onClick = { actions.deleteQueueItem(item.id) }) { Icon(Icons.Default.Delete, "删除") }
+                TransferSection(t("发送队列 · ${state.queue.size} 项", "Send queue · ${state.queue.size}"), Modifier.weight(1f), state.queue, t("发送队列为空", "Send queue is empty")) { item ->
+                    IconButton(onClick = { actions.deleteQueueItem(item.id) }) { Icon(Icons.Default.Delete, t("删除", "Delete")) }
                 }
-                TransferSection("收到的导出 · ${state.inbox.size} 项", Modifier.weight(1f), state.inbox, "收件箱为空", actions.dragInboxItem) { item ->
+                TransferSection(t("收到的导出 · ${state.inbox.size} 项", "Received exports · ${state.inbox.size}"), Modifier.weight(1f), state.inbox, t("收件箱为空", "Inbox is empty"), actions.dragInboxItem) { item ->
                     InboxActions(item, actions)
                 }
             }
@@ -368,17 +465,17 @@ private fun TransferSection(
 
 @Composable
 private fun InboxActions(item: DashboardItem, actions: DashboardActions) {
-    IconButton(onClick = { actions.openInboxItem(item.id) }) { Icon(Icons.Default.FolderOpen, "打开") }
-    IconButton(onClick = { actions.saveInboxItem(item.id) }) { Icon(Icons.Default.Save, "另存为") }
-    IconButton(onClick = { actions.deleteInboxItem(item.id) }) { Icon(Icons.Default.Delete, "删除") }
+    IconButton(onClick = { actions.openInboxItem(item.id) }) { Icon(Icons.Default.FolderOpen, noteLinkText("打开", "Open")) }
+    IconButton(onClick = { actions.saveInboxItem(item.id) }) { Icon(Icons.Default.Save, noteLinkText("另存为", "Save as")) }
+    IconButton(onClick = { actions.deleteInboxItem(item.id) }) { Icon(Icons.Default.Delete, noteLinkText("删除", "Delete")) }
 }
 
 @Composable
 private fun InboxPage(items: List<DashboardItem>, actions: DashboardActions) {
-    ItemList(items, "收件箱为空", actions = { item ->
-        IconButton(onClick = { actions.openInboxItem(item.id) }) { Icon(Icons.Default.FolderOpen, "打开") }
-        IconButton(onClick = { actions.saveInboxItem(item.id) }) { Icon(Icons.Default.Save, "另存为") }
-        IconButton(onClick = { actions.deleteInboxItem(item.id) }) { Icon(Icons.Default.Delete, "删除") }
+    ItemList(items, noteLinkText("收件箱为空", "Inbox is empty"), actions = { item ->
+        IconButton(onClick = { actions.openInboxItem(item.id) }) { Icon(Icons.Default.FolderOpen, noteLinkText("打开", "Open")) }
+        IconButton(onClick = { actions.saveInboxItem(item.id) }) { Icon(Icons.Default.Save, noteLinkText("另存为", "Save as")) }
+        IconButton(onClick = { actions.deleteInboxItem(item.id) }) { Icon(Icons.Default.Delete, noteLinkText("删除", "Delete")) }
     })
 }
 
@@ -414,20 +511,21 @@ private fun ItemList(
 
 @Composable
 private fun SettingsPage(state: DashboardState, actions: DashboardActions) {
+    val t: (String, String) -> String = { zh, en -> state.language.text(zh, en) }
     var name by remember(state.displayName) { mutableStateOf(state.displayName) }
     LazyColumn(
         Modifier.fillMaxSize().padding(20.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         item {
-            OutlinedTextField(name, { name = it }, label = { Text("显示名称") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+            OutlinedTextField(name, { name = it }, label = { Text(t("显示名称", "Display name")) }, singleLine = true, modifier = Modifier.fillMaxWidth())
             Spacer(Modifier.height(8.dp))
-            Button(onClick = { actions.saveDisplayName(name) }) { Text("保存名称") }
+            Button(onClick = { actions.saveDisplayName(name) }) { Text(t("保存名称", "Save name")) }
         }
         item { HorizontalDivider() }
         item {
             ListItem(
-                headlineContent = { Text("显示最近传输事件") },
+                headlineContent = { Text(t("显示最近传输事件", "Show recent transfer events")) },
                 trailingContent = {
                     Switch(
                         checked = state.showRecentTransferEvents,
@@ -438,19 +536,136 @@ private fun SettingsPage(state: DashboardState, actions: DashboardActions) {
         }
         item { HorizontalDivider() }
         item {
-            Text("N10Pro", style = MaterialTheme.typography.titleMedium)
-            Spacer(Modifier.height(8.dp))
-            if (state.pairedDeviceName == null) {
-                Text("六位配对码仅显示在主页面", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Spacer(Modifier.height(8.dp))
-                OutlinedButton(onClick = actions.beginPairing) { Text("重新生成配对码") }
-            } else {
-                Text(state.pairedDeviceName)
-                Spacer(Modifier.height(8.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Button(onClick = actions.beginPairing) { Text("重新配对") }
-                    OutlinedButton(actions.unpair) { Text("取消配对") }
+            Column {
+                Text(t("语言", "Language"), style = MaterialTheme.typography.titleMedium)
+                NoteLinkLanguage.entries.forEach { language ->
+                    TextButton(onClick = { actions.setLanguage(language) }) {
+                        Text((if (language == state.language) "✓ " else "") + language.displayName())
+                    }
                 }
+            }
+        }
+        item { HorizontalDivider() }
+        item {
+            UpdateSettingsCard(
+                currentVersion = state.appVersion,
+                state = state.updateUiState,
+                language = state.language,
+                onCheck = actions.checkForUpdates,
+                onOpenRelease = actions.openRelease,
+            )
+        }
+        item { HorizontalDivider() }
+        item {
+            Text(t("已配对设备", "Paired devices"), style = MaterialTheme.typography.titleMedium)
+            Spacer(Modifier.height(8.dp))
+            DeviceSelectorDropdown(state, actions)
+        }
+    }
+}
+
+@Composable
+private fun DeviceSelectorDropdown(state: DashboardState, actions: DashboardActions) {
+    val t: (String, String) -> String = { zh, en -> state.language.text(zh, en) }
+    var expanded by remember { mutableStateOf(false) }
+    val selected = state.pairedDevices.firstOrNull { it.id == state.selectedDeviceId }
+    Box(Modifier.fillMaxWidth()) {
+        OutlinedButton(onClick = { expanded = true }, modifier = Modifier.fillMaxWidth()) {
+            Text(selected?.name ?: t("选择设备", "Select device"), modifier = Modifier.weight(1f))
+            Icon(Icons.Default.ArrowDropDown, t("展开设备列表", "Expand device list"))
+        }
+        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            state.pairedDevices.forEach { device ->
+                DropdownMenuItem(
+                    text = { Text(device.name) },
+                    onClick = {
+                        expanded = false
+                        actions.selectDevice(device.id)
+                    },
+                    leadingIcon = {
+                        if (device.id == state.selectedDeviceId) Icon(Icons.Default.Check, t("当前设备", "Current device"))
+                    },
+                    trailingIcon = {
+                        IconButton(onClick = {
+                            expanded = false
+                            actions.unpair(device.id)
+                        }) { Icon(Icons.Default.Delete, t("解绑 ${device.name}", "Unpair ${device.name}")) }
+                    },
+                )
+            }
+            if (state.pairedDevices.isNotEmpty()) HorizontalDivider()
+            DropdownMenuItem(
+                text = { Text(t("新增设备", "Add device")) },
+                onClick = {
+                    expanded = false
+                    actions.beginPairing()
+                },
+                leadingIcon = { Icon(Icons.Default.Add, null) },
+            )
+        }
+    }
+}
+
+@Composable
+private fun UpdateNoticeCard(
+    info: UpdateInfo,
+    language: NoteLinkLanguage,
+    onOpenRelease: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val t: (String, String) -> String = { zh, en -> language.text(zh, en) }
+    Card(Modifier.fillMaxWidth().padding(horizontal = 20.dp)) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(t("发现新版本 ${info.latestVersion.display}", "New version ${info.latestVersion.display}"), style = MaterialTheme.typography.titleMedium)
+            Text(info.releaseTitle, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(onClick = onOpenRelease) { Text(t("查看 Release", "View release")) }
+                OutlinedButton(onClick = onDismiss) { Text(t("关闭", "Close")) }
+            }
+        }
+    }
+}
+
+@Composable
+private fun UpdateSettingsCard(
+    currentVersion: String,
+    state: UpdateUiState,
+    language: NoteLinkLanguage,
+    onCheck: () -> Unit,
+    onOpenRelease: (String) -> Unit,
+) {
+    val t: (String, String) -> String = { zh, en -> language.text(zh, en) }
+    val checkState = state.checkState
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(t("应用更新", "App updates"), style = MaterialTheme.typography.titleMedium)
+        Text(t("当前版本 $currentVersion", "Current version $currentVersion"))
+        Text(
+            when (checkState) {
+                UpdateCheckState.Idle -> t("尚未检查", "Not checked yet")
+                UpdateCheckState.Checking -> t("正在检查 GitHub Releases…", "Checking GitHub Releases...")
+                is UpdateCheckState.UpToDate -> checkState.latestVersion?.let {
+                    t("已是最新版本（${it.display}）", "Up to date (${it.display})")
+                } ?: t("暂无可用正式版本", "No stable release available")
+                is UpdateCheckState.UpdateAvailable ->
+                    t("发现新版本 ${checkState.info.latestVersion.display}：${checkState.info.releaseTitle}", "New version ${checkState.info.latestVersion.display}: ${checkState.info.releaseTitle}")
+                is UpdateCheckState.Failed -> if (state.manualErrorVisible) {
+                    t("检查失败：${checkState.message}", "Check failed: ${checkState.message}")
+                } else {
+                    t("自动检查暂时不可用", "Automatic check is temporarily unavailable")
+                }
+            },
+            color = if (checkState is UpdateCheckState.Failed && state.manualErrorVisible) {
+                MaterialTheme.colorScheme.error
+            } else {
+                MaterialTheme.colorScheme.onSurfaceVariant
+            },
+        )
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedButton(onClick = onCheck, enabled = checkState !is UpdateCheckState.Checking) {
+                Text(if (checkState is UpdateCheckState.Checking) t("检查中", "Checking") else t("检查更新", "Check for updates"))
+            }
+            (checkState as? UpdateCheckState.UpdateAvailable)?.let { available ->
+                Button(onClick = { onOpenRelease(available.info.releaseUrl) }) { Text(t("查看 Release", "View release")) }
             }
         }
     }

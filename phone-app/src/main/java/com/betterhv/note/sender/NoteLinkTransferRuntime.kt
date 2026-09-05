@@ -30,7 +30,8 @@ object NoteLinkTransferRuntime : TransferObservable {
     private var eventJob: Job? = null
 
     @Synchronized fun attach(scope: CoroutineScope, observable: TransferObservable) {
-        snapshotJob?.cancel(); eventJob?.cancel()
+        snapshotJob?.cancel()
+        eventJob?.cancel()
         source = observable
         snapshotJob = scope.launch { observable.snapshot.collect(mutableSnapshot) }
         eventJob = scope.launch {
@@ -48,8 +49,11 @@ object NoteLinkTransferRuntime : TransferObservable {
 
     @Synchronized fun detach(observable: TransferObservable) {
         if (source !== observable) return
-        snapshotJob?.cancel(); eventJob?.cancel()
-        snapshotJob = null; eventJob = null; source = null
+        snapshotJob?.cancel()
+        eventJob?.cancel()
+        snapshotJob = null
+        eventJob = null
+        source = null
         mutableSnapshot.value = TransferSnapshot()
     }
 

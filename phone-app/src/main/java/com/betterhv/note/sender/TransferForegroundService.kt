@@ -12,6 +12,7 @@ import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
+import com.betterhv.note.sender.shared.noteLinkText
 import com.betterhv.transfer.android.AndroidPairingController
 import com.betterhv.transfer.android.AndroidSenderEndpoint
 import com.betterhv.transfer.android.HighBandwidthSessionManager
@@ -61,10 +62,12 @@ class TransferForegroundService : Service() {
         }
         if (intent?.action == ACTION_PAUSE) {
             setReceiveEnabled(this, false)
-            stopSelf(); return START_NOT_STICKY
+            stopSelf()
+            return START_NOT_STICKY
         }
         if (!shouldRun()) {
-            stopSelf(); return START_NOT_STICKY
+            stopSelf()
+            return START_NOT_STICKY
         }
         showNotification()
         foregroundStarted = true
@@ -77,22 +80,31 @@ class TransferForegroundService : Service() {
                 this, pairing.localDeviceId, NoteLinkSettings(this).displayName,
                 queue, { _, bytes -> processor.handle(bytes) }
             ).also(AndroidSenderEndpoint::start)
-        } else endpoint?.refreshAdvertisement()
+        } else {
+            endpoint?.refreshAdvertisement()
+        }
         return START_STICKY
     }
 
     override fun onDestroy() {
         foregroundStarted = false
-        endpoint?.close(); endpoint = null
+        endpoint?.close()
+        endpoint = null
         NoteLinkTransferRuntime.detach(processor)
-        processor.close(); highBandwidth.close(); serviceScope.cancel(); inbox.close(); queue.close()
+        processor.close()
+        highBandwidth.close()
+        serviceScope.cancel()
+        inbox.close()
+        queue.close()
         super.onDestroy()
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
     private fun refreshOrStop() {
-        if (!shouldRun()) stopSelf() else {
+        if (!shouldRun()) {
+            stopSelf()
+        } else {
             showNotification()
             endpoint?.refreshAdvertisement()
         }
@@ -102,57 +114,79 @@ class TransferForegroundService : Service() {
         val count = queue.items().size
         val displayName = NoteLinkSettings(this).displayName
         val open = PendingIntent.getActivity(
-            this, 1, Intent(this, MainActivity::class.java),
+            this,
+            1,
+            Intent(this, MainActivity::class.java),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
         val pause = PendingIntent.getService(
-            this, 2, Intent(this, TransferForegroundService::class.java).setAction(ACTION_PAUSE),
+            this,
+            2,
+            Intent(this, TransferForegroundService::class.java).setAction(ACTION_PAUSE),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
         val cancel = PendingIntent.getService(
-            this, 3, Intent(this, TransferForegroundService::class.java).setAction(ACTION_CANCEL_TRANSFER),
+            this,
+            3,
+            Intent(this, TransferForegroundService::class.java).setAction(ACTION_CANCEL_TRANSFER),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
         val transfer = processor.snapshot.value
         val group = highBandwidth.state.value
         val phaseText = when (transfer.phase) {
             TransferPhase.IDLE -> null
-            TransferPhase.TRANSFERRING -> "${transfer.mode?.name ?: "网络"} · ${transfer.bytesTransferred}/${transfer.totalBytes} 字节 · ${transfer.bytesPerSecond} B/s"
-            TransferPhase.FAILED -> transfer.lastFailure?.let { "${it.code}: ${it.message}" } ?: "传输失败"
+            TransferPhase.TRANSFERRING -> "${transfer.mode?.name ?: noteLinkText("网络", "Network")} · ${transfer.bytesTransferred}/${transfer.totalBytes} ${noteLinkText(
+                "字节",
+                "bytes"
+            )} · ${transfer.bytesPerSecond} B/s"
+            TransferPhase.FAILED -> transfer.lastFailure?.let {
+                "${it.code}: ${it.message}"
+            } ?: noteLinkText("传输失败", "Transfer failed")
             else -> transfer.phase.name.replace('_', ' ')
         }
         val groupText = when (group) {
-            is HostedGroupState.Ready -> "Wi-Fi Direct 已准备"
-            is HostedGroupState.Preparing -> "正在准备 Wi-Fi Direct"
-            is HostedGroupState.Unavailable -> "Wi-Fi Direct 暂不可用"
-            HostedGroupState.Stopped -> "Wi-Fi Direct 已停止"
+            is HostedGroupState.Ready -> noteLinkText("Wi-Fi Direct 已准备", "Wi-Fi Direct ready")
+            is HostedGroupState.Preparing -> noteLinkText("正在准备 Wi-Fi Direct", "Preparing Wi-Fi Direct")
+            is HostedGroupState.Unavailable -> noteLinkText("Wi-Fi Direct 暂不可用", "Wi-Fi Direct unavailable")
+            HostedGroupState.Stopped -> noteLinkText("Wi-Fi Direct 已停止", "Wi-Fi Direct stopped")
         }
         val diagnostic = buildList {
-            add(phaseText ?: "等待传输")
-            add("SSID ${transfer.ssidMatch} · 本端 modes=${transfer.localModes} · 对端 modes=${transfer.remoteModes}")
+            add(phaseText ?: noteLinkText("等待传输", "Waiting for transfer"))
+            add(
+                "SSID ${transfer.ssidMatch} · ${noteLinkText(
+                    "本端",
+                    "local"
+                )} modes=${transfer.localModes} · ${noteLinkText("对端", "remote")} modes=${transfer.remoteModes}"
+            )
             transfer.endpoint?.let { add("${it.host}:${it.port}") }
             add("Wi-Fi Direct $groupText · attempt=${transfer.attempt} · fallback=${transfer.fallbackCount}")
-            transfer.etaMillis?.let { add("平均 ${transfer.averageBytesPerSecond} B/s · ETA ${it / 1000}s") }
+            transfer.etaMillis?.let {
+                add("${noteLinkText("平均", "Average")} ${transfer.averageBytesPerSecond} B/s · ETA ${it / 1000}s")
+            }
             transfer.lastFailure?.let { add("${it.code} · recoverable=${it.recoverable}") }
         }.joinToString("\n")
         val builder = NotificationCompat.Builder(this, CHANNEL)
             .setSmallIcon(android.R.drawable.stat_sys_upload)
-            .setContentTitle("$displayName 已准备接收")
-            .setContentText(phaseText ?: if (count > 0) "$count 项待发送 · $groupText" else "等待 Note 导出 · $groupText")
+            .setContentTitle(noteLinkText("$displayName 已准备接收", "$displayName is ready"))
+            .setContentText(
+                phaseText ?: if (count > 0) noteLinkText("$count 项待发送 · $groupText", "$count items pending · $groupText") else noteLinkText("等待 Note 导出 · $groupText", "Waiting for Note exports · $groupText")
+            )
             .setStyle(NotificationCompat.BigTextStyle().bigText(diagnostic))
             .setContentIntent(open).setOngoing(true)
-            .addAction(0, "暂停等待", pause)
-        if (transfer.canCancel) builder.addAction(0, "取消传输", cancel)
+            .addAction(0, noteLinkText("暂停等待", "Pause"), pause)
+        if (transfer.canCancel) builder.addAction(0, noteLinkText("取消传输", "Cancel transfer"), cancel)
         val notification = builder.build()
         ServiceCompat.startForeground(
-            this, NOTIFICATION_ID, notification,
+            this,
+            NOTIFICATION_ID,
+            notification,
             ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE
         )
     }
 
     private fun createChannel() {
         getSystemService(NotificationManager::class.java).createNotificationChannel(
-            NotificationChannel(CHANNEL, "Note 传输", NotificationManager.IMPORTANCE_LOW)
+            NotificationChannel(CHANNEL, noteLinkText("Note 传输", "Note transfers"), NotificationManager.IMPORTANCE_LOW)
         )
     }
 
@@ -170,8 +204,11 @@ class TransferForegroundService : Service() {
         fun sync(context: Context, hasItems: Boolean) {
             val intent = Intent(context, TransferForegroundService::class.java)
             val paired = AndroidPairingController(context).pairedDevice != null
-            if (hasItems || (paired && isReceiveEnabled(context))) ContextCompat.startForegroundService(context, intent)
-            else context.stopService(intent)
+            if (hasItems || (paired && isReceiveEnabled(context))) {
+                ContextCompat.startForegroundService(context, intent)
+            } else {
+                context.stopService(intent)
+            }
         }
 
         fun setReceiveEnabled(context: Context, enabled: Boolean) {
