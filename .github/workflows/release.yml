@@ -1,0 +1,310 @@
+name: Pre-release
+
+on:
+  push:
+    tags:
+      - 'note-v*'
+      - 'notelink-v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag (note-vX.Y.Z or notelink-vX.Y.Z)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    name: Resolve release tag
+    runs-on: ubuntu-24.04
+    outputs:
+      tag: ${{ steps.release.outputs.tag }}
+      product: ${{ steps.release.outputs.product }}
+      version: ${{ steps.release.outputs.version }}
+      version_code: ${{ steps.release.outputs.version_code }}
+      commit: ${{ steps.release.outputs.commit }}
+    steps:
+      - name: Check out workflow helpers
+        uses: actions/checkout@v6.0.2
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Test release tag parser
+        shell: pwsh
+        run: ./.github/scripts/test-release-tag.ps1
+
+      - name: Validate tag and resolve commit
+        id: release
+        shell: pwsh
+        env:
+          RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $release = ./.github/scripts/resolve-release-tag.ps1 -Tag $env:RELEASE_TAG | ConvertFrom-Json
+          git ls-remote --exit-code --tags origin "refs/tags/$($release.tag)" | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw "Remote tag '$($release.tag)' does not exist." }
+          git fetch --force origin "refs/tags/$($release.tag):refs/tags/$($release.tag)"
+          $commit = (git rev-list -n 1 $release.tag).Trim()
+          if (-not $commit) { throw "Could not resolve '$($release.tag)' to a commit." }
+          "tag=$($release.tag)" >> $env:GITHUB_OUTPUT
+          "product=$($release.product)" >> $env:GITHUB_OUTPUT
+          "version=$($release.version)" >> $env:GITHUB_OUTPUT
+          "version_code=$($release.versionCode)" >> $env:GITHUB_OUTPUT
+          "commit=$commit" >> $env:GITHUB_OUTPUT
+
+  quality:
+    name: Release quality gate
+    needs: prepare
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out tagged sources
+        uses: actions/checkout@v6.0.2
+        with:
+          ref: ${{ needs.prepare.outputs.commit }}
+          submodules: recursive
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v6.0.0
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v6.2.0
+        with:
+          cache-provider: basic
+
+      - name: Install pinned Android native tools
+        shell: bash
+        run: sdkmanager 'build-tools;34.0.0' 'ndk;30.0.15729638' 'cmake;4.1.2'
+
+      - name: Run release quality checks
+        shell: bash
+        run: chmod +x ./gradlew && ./gradlew test detekt lint --stacktrace
+
+  android:
+    name: Signed Android package
+    needs: [prepare, quality]
+    runs-on: ubuntu-24.04
+    env:
+      ANDROID_RELEASE_STORE_PASSWORD: ${{ secrets.ANDROID_RELEASE_STORE_PASSWORD }}
+      ANDROID_RELEASE_KEY_ALIAS: ${{ secrets.ANDROID_RELEASE_KEY_ALIAS }}
+      EXPECTED_CERT_SHA256: ${{ vars.ANDROID_RELEASE_CERT_SHA256 }}
+    steps:
+      - name: Check out tagged sources
+        uses: actions/checkout@v6.0.2
+        with:
+          ref: ${{ needs.prepare.outputs.commit }}
+          submodules: recursive
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v6.0.0
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v6.2.0
+        with:
+          cache-provider: basic
+
+      - name: Install pinned Android native tools
+        shell: bash
+        run: sdkmanager 'build-tools;34.0.0' 'ndk;30.0.15729638' 'cmake;4.1.2'
+
+      - name: Restore signing key
+        shell: bash
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_RELEASE_KEYSTORE_BASE64 }}
+        run: |
+          set -euo pipefail
+          test -n "$KEYSTORE_BASE64"
+          test -n "$ANDROID_RELEASE_STORE_PASSWORD"
+          test -n "$ANDROID_RELEASE_KEY_ALIAS"
+          test -n "$EXPECTED_CERT_SHA256"
+          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/android-release.p12"
+          echo "ANDROID_RELEASE_KEYSTORE_FILE=$RUNNER_TEMP/android-release.p12" >> "$GITHUB_ENV"
+
+      - name: Build signed APK
+        shell: bash
+        env:
+          PRODUCT: ${{ needs.prepare.outputs.product }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+          VERSION_CODE: ${{ needs.prepare.outputs.version_code }}
+        run: |
+          set -euo pipefail
+          chmod +x ./gradlew
+          if [[ "$PRODUCT" == 'note' ]]; then
+            ./gradlew :app:assembleRelease -PnoteVersion="$VERSION" -PnoteVersionCode="$VERSION_CODE" --stacktrace
+          else
+            ./gradlew :phone-app:assembleRelease -PnoteLinkVersion="$VERSION" -PnoteLinkVersionCode="$VERSION_CODE" --stacktrace
+          fi
+
+      - name: Verify and stage APK
+        shell: bash
+        env:
+          PRODUCT: ${{ needs.prepare.outputs.product }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+          VERSION_CODE: ${{ needs.prepare.outputs.version_code }}
+        run: |
+          set -euo pipefail
+          mkdir -p release-assets
+          if [[ "$PRODUCT" == 'note' ]]; then
+            source_apk='app/build/outputs/apk/release/app-release.apk'
+            target_apk="release-assets/BetterHvNote-$VERSION-android-arm64.apk"
+          else
+            source_apk='phone-app/build/outputs/apk/release/phone-app-release.apk'
+            target_apk="release-assets/NoteLink-$VERSION-android.apk"
+          fi
+          test -f "$source_apk"
+          apksigner="$ANDROID_HOME/build-tools/34.0.0/apksigner"
+          aapt="$ANDROID_HOME/build-tools/34.0.0/aapt"
+          "$apksigner" verify --verbose "$source_apk"
+          actual_cert=$("$apksigner" verify --print-certs "$source_apk" | sed -n 's/^Signer #1 certificate SHA-256 digest: //p' | head -n 1 | tr -d ':[:space:]' | tr '[:lower:]' '[:upper:]')
+          expected_cert=$(printf '%s' "$EXPECTED_CERT_SHA256" | tr -d ':[:space:]' | tr '[:lower:]' '[:upper:]')
+          test "$actual_cert" = "$expected_cert"
+          badging=$("$aapt" dump badging "$source_apk" | head -n 1)
+          grep -F "versionCode='$VERSION_CODE'" <<< "$badging"
+          grep -F "versionName='$VERSION'" <<< "$badging"
+          cp "$source_apk" "$target_apk"
+
+      - name: Upload Android release asset
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: release-android-${{ needs.prepare.outputs.tag }}
+          path: release-assets/*.apk
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Remove signing key
+        if: always()
+        shell: pwsh
+        run: Remove-Item -LiteralPath "$env:RUNNER_TEMP/android-release.p12" -Force -ErrorAction SilentlyContinue
+
+  windows:
+    name: Windows portable package
+    if: needs.prepare.outputs.product == 'notelink'
+    needs: [prepare, quality]
+    runs-on: windows-2025
+    steps:
+      - name: Check out tagged sources
+        uses: actions/checkout@v6.0.2
+        with:
+          ref: ${{ needs.prepare.outputs.commit }}
+          submodules: recursive
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v6.0.0
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v6.2.0
+        with:
+          cache-provider: basic
+
+      - name: Test and build portable ZIP
+        shell: pwsh
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: ./gradlew.bat :phone-desktop:test :transfer-windows:test :phone-desktop:packagePortableZip "-PnoteLinkVersion=$env:VERSION" --stacktrace
+
+      - name: Verify portable ZIP
+        shell: pwsh
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $zip = Get-Item "phone-desktop/build/distributions/NoteLink-$env:VERSION-windows-x64.zip"
+          $target = Join-Path $env:RUNNER_TEMP 'notelink-release-check'
+          Expand-Archive -LiteralPath $zip.FullName -DestinationPath $target
+          $root = Join-Path $target "NoteLink-$env:VERSION"
+          @('NoteLink.exe', 'README.txt', 'Allow-NoteLink-Firewall.ps1', 'Remove-NoteLink-Firewall.ps1') | ForEach-Object {
+            if (-not (Test-Path -LiteralPath (Join-Path $root $_) -PathType Leaf)) { throw "Missing $_" }
+          }
+          if (-not (Test-Path -LiteralPath (Join-Path $root 'runtime') -PathType Container)) { throw 'Missing runtime directory' }
+          if (-not (Get-ChildItem -LiteralPath $root -Recurse -Filter 'notelink_windows.dll')) { throw 'Missing notelink_windows.dll' }
+          @('Allow-NoteLink-Firewall.ps1', 'Remove-NoteLink-Firewall.ps1') | ForEach-Object {
+            $tokens = $null
+            $errors = $null
+            $ast = [System.Management.Automation.Language.Parser]::ParseFile(
+              (Join-Path $root $_), [ref]$tokens, [ref]$errors
+            )
+            if ($errors.Count -ne 0) { throw "PowerShell syntax error in $_`: $errors" }
+            if (-not ($ast.ParamBlock.Parameters.Name.VariablePath.UserPath -contains 'Elevated')) {
+              throw "Missing -Elevated parameter in $_"
+            }
+          }
+
+      - name: Upload Windows release asset
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: release-windows-${{ needs.prepare.outputs.tag }}
+          path: phone-desktop/build/distributions/NoteLink-${{ needs.prepare.outputs.version }}-windows-x64.zip
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    name: Publish GitHub pre-release
+    if: >-
+      always() &&
+      needs.prepare.result == 'success' &&
+      needs.quality.result == 'success' &&
+      needs.android.result == 'success' &&
+      (needs.windows.result == 'success' || needs.windows.result == 'skipped')
+    needs: [prepare, quality, android, windows]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - name: Download release assets
+        uses: actions/download-artifact@v8.0.1
+        with:
+          pattern: release-*-${{ needs.prepare.outputs.tag }}
+          path: release-assets
+          merge-multiple: true
+
+      - name: Generate SHA-256 checksums
+        shell: pwsh
+        run: |
+          $lines = Get-ChildItem -LiteralPath release-assets -File |
+            Sort-Object Name |
+            ForEach-Object { '{0}  {1}' -f (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant(), $_.Name }
+          $lines | Set-Content -LiteralPath release-assets/SHA256SUMS.txt -Encoding utf8NoBOM
+
+      - name: Create or refresh pre-release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
+          PRODUCT: ${{ needs.prepare.outputs.product }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $assets = @(Get-ChildItem -LiteralPath release-assets -File | ForEach-Object FullName)
+          $existingJson = gh api "repos/$env:GH_REPO/releases/tags/$env:RELEASE_TAG" 2>$null
+          if ($LASTEXITCODE -eq 0) {
+            $existing = $existingJson | ConvertFrom-Json
+            if ($existing.draft -or -not $existing.prerelease) {
+              throw "Release $env:RELEASE_TAG is draft or already stable; refusing to replace its assets."
+            }
+            gh release upload $env:RELEASE_TAG @assets --clobber --repo $env:GH_REPO
+          } else {
+            $title = if ($env:PRODUCT -eq 'note') { "BetterHvNote $env:VERSION" } else { "NoteLink $env:VERSION" }
+            gh release create $env:RELEASE_TAG @assets `
+              --repo $env:GH_REPO `
+              --verify-tag `
+              --prerelease `
+              --latest=false `
+              --generate-notes `
+              --title $title
+          }

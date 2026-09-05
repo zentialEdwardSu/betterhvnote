@@ -1,0 +1,105 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  android-and-quality:
+    name: Android and quality checks
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out sources
+        uses: actions/checkout@v6.0.2
+        with:
+          submodules: recursive
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v6.0.0
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v6.2.0
+        with:
+          cache-provider: basic
+
+      - name: Install pinned Android native tools
+        shell: bash
+        run: sdkmanager 'build-tools;34.0.0' 'ndk;30.0.15729638' 'cmake;4.1.2'
+
+      - name: Make Gradle wrapper executable
+        shell: bash
+        run: chmod +x ./gradlew
+
+      - name: Test release tag parser
+        shell: pwsh
+        run: ./.github/scripts/test-release-tag.ps1
+
+      - name: Run tests, static analysis, lint, and debug builds
+        shell: bash
+        run: ./gradlew test detekt lint :app:assembleDebug :phone-app:assembleDebug --stacktrace
+
+  windows-portable:
+    name: Windows portable package
+    runs-on: windows-2025
+    steps:
+      - name: Check out sources
+        uses: actions/checkout@v6.0.2
+        with:
+          submodules: recursive
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v6.0.0
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v6.2.0
+        with:
+          cache-provider: basic
+
+      - name: Test and package NoteLink
+        shell: pwsh
+        run: ./gradlew.bat :phone-desktop:test :transfer-windows:test :phone-desktop:packagePortableZip --stacktrace
+
+      - name: Verify portable archive
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $zip = Get-Item 'phone-desktop/build/distributions/NoteLink-*-windows-x64.zip'
+          $target = Join-Path $env:RUNNER_TEMP 'notelink-portable-check'
+          Expand-Archive -LiteralPath $zip.FullName -DestinationPath $target
+          $roots = @(Get-ChildItem -LiteralPath $target -Directory)
+          if ($roots.Count -ne 1) { throw "Expected one archive root, found $($roots.Count)" }
+          $root = $roots[0]
+          @('NoteLink.exe', 'README.txt', 'Allow-NoteLink-Firewall.ps1', 'Remove-NoteLink-Firewall.ps1') | ForEach-Object {
+            if (-not (Test-Path -LiteralPath (Join-Path $root.FullName $_) -PathType Leaf)) { throw "Missing $_" }
+          }
+          if (-not (Test-Path -LiteralPath (Join-Path $root.FullName 'runtime') -PathType Container)) {
+            throw 'Missing runtime directory'
+          }
+          if (-not (Get-ChildItem -LiteralPath $root.FullName -Recurse -Filter 'notelink_windows.dll')) {
+            throw 'Missing notelink_windows.dll'
+          }
+          @('Allow-NoteLink-Firewall.ps1', 'Remove-NoteLink-Firewall.ps1') | ForEach-Object {
+            $tokens = $null
+            $errors = $null
+            $ast = [System.Management.Automation.Language.Parser]::ParseFile(
+              (Join-Path $root.FullName $_), [ref]$tokens, [ref]$errors
+            )
+            if ($errors.Count -ne 0) { throw "PowerShell syntax error in $_`: $errors" }
+            if (-not ($ast.ParamBlock.Parameters.Name.VariablePath.UserPath -contains 'Elevated')) {
+              throw "Missing -Elevated parameter in $_"
+            }
+          }

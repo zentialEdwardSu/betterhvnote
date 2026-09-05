@@ -25,7 +25,9 @@ For refactoring, building, or deploying to a device, prefer the Android Studio M
 
 The framework-free `ink`, `doc`, `tool`, and pure `storage` components use plain JUnit4 without Robolectric. Android SQLite, `android.graphics`, `View`, and vendor JNI/ROM integration (`PenDrawView`, `ThumbnailManager`, `PenGeometry`, `NativeSelfTest`) still require an Android device for end-to-end verification.
 
-There is no CI config in this repo; `./gradlew test` and `./gradlew assembleDebug` are the checks to run before considering a change done.
+GitHub Actions runs JVM tests, detekt, Android lint, both Android debug builds,
+and a Windows portable-package build for pull requests and pushes to `main`.
+Locally, `./gradlew test` and `./gradlew assembleDebug` remain the baseline checks.
 
 ## Architecture
 
@@ -37,8 +39,10 @@ There is no CI config in this repo; `./gradlew test` and `./gradlew assembleDebu
 - `:phone-desktop` — the Compose Desktop NoteLink application. Desktop implementation, tests, resources, and packaging live under this module; shared UI remains in `phone-app/src/commonMain`.
 - `:transfer-core` — platform-neutral transfer protocol, cryptography, observability, and shared file-transfer orchestration.
 - `:transfer-android` — Android BLE, LAN, and Wi-Fi Direct discovery/session integration used by the tablet and phone apps.
-- `:transfer-windows` — Windows Kotlin/JNA transport plus the native Wi-Fi Direct and firewall helpers used by desktop NoteLink.
+- `:transfer-windows` — Windows Kotlin/JNA transport plus the native Wi-Fi Direct integration used by desktop NoteLink.
 - `icon-assets/` — versioned icon sources and the generation script for app icons.
+- `.github/` — CI and tag-triggered pre-release workflows. `note-vX.Y.Z` publishes
+  BetterHvNote; `notelink-vX.Y.Z` publishes Android and portable Windows NoteLink builds.
 - `tools/elfsyms.py` — standalone ELF64 dynamic-symbol dumper (no deps) for inspecting the vendor `.so` files under `app/src/main/jniLibs/arm64-v8a/` when porting JNI bindings, to confirm exact exported symbol names before writing a Java/Kotlin wrapper.
 - `hvNote/` — decompiled reference material from the original vendor app (smali, extracted `.so`s, APK) used as the porting source. Read-only reference, not part of the build (excluded via `.gitignore`).
 

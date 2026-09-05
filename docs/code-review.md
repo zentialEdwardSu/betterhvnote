@@ -16,7 +16,7 @@
   and notebook-naming composables; extracted notebook covers and toolbars into
   focused children.
 - Moved the active desktop implementation and tests into `phone-desktop/src`
-  and the MSI customization scripts into `tools/windows-installer`.
+  and the Windows portable distribution support files into `phone-desktop/src/main/portable`.
 - Removed the JVM `PageRendererTest` placeholder; the real renderer coverage is
   kept in `androidTest` where Android Canvas is available.
 - Preserved coroutine cancellation in the tablet transfer and insertion flows;
@@ -43,5 +43,5 @@ The connected build completed successfully with:
 
 The old `phone-app/src/desktopMain`, `src/desktopTest`, and `installer`
 directories no longer contain executable sources, tests, scripts, or duplicate
-icons. Desktop implementation and tests live in `phone-desktop/src`, and MSI
-customization scripts live in `tools/windows-installer`.
+icons. Desktop implementation, tests, and portable distribution support files
+live in `phone-desktop/src`.
