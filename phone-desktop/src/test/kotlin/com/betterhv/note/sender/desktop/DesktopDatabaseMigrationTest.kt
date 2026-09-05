@@ -1,5 +1,6 @@
 package com.betterhv.note.sender.desktop
 
+import com.betterhv.transfer.core.ContentKind
 import java.io.File
 import java.sql.DriverManager
 import java.util.UUID
@@ -7,6 +8,7 @@ import kotlin.io.path.createTempDirectory
 import kotlin.test.Test
 import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
+import kotlin.test.assertNull
 
 class DesktopDatabaseMigrationTest {
     @Test fun readsExistingVersionOneQueueAndInboxDatabases() {
@@ -30,6 +32,33 @@ class DesktopDatabaseMigrationTest {
                 assertEquals(artifactId, item.artifactId)
                 assertEquals("legacy.pdf", item.displayName)
                 assertContentEquals(hash, item.sha256)
+            }
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    @Test fun queueCountsAndLeasesAreIsolatedByDestination() {
+        val root = createTempDirectory("notelink-multi-queue-").toFile()
+        try {
+            val paths = DesktopPaths(root)
+            DesktopQueueRepository(paths).use { queue ->
+                queue.enqueueText("for a", "note-a")
+                queue.enqueueText("for b", "note-b")
+                queue.enqueueText("legacy unassigned", null)
+
+                assertEquals(2, queue.counts("note-a").texts)
+                assertEquals(2, queue.counts("note-b").texts)
+                val first = requireNotNull(queue.leaseNext(ContentKind.TEXT, "note-a"))
+                assertEquals("note-a", first.item.destinationDeviceId)
+                first.commit()
+                val second = requireNotNull(queue.leaseNext(ContentKind.TEXT, "note-a"))
+                assertEquals("note-a", second.item.destinationDeviceId)
+                second.release()
+                val forB = requireNotNull(queue.leaseNext(ContentKind.TEXT, "note-b"))
+                assertEquals("note-b", forB.item.destinationDeviceId)
+                forB.commit()
+                assertNull(queue.leaseNext(ContentKind.TEXT, "note-b"))
             }
         } finally {
             root.deleteRecursively()

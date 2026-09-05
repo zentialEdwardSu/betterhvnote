@@ -1,12 +1,29 @@
-import org.jetbrains.compose.desktop.application.dsl.TargetFormat
+import org.gradle.api.file.DuplicatesStrategy
+import org.gradle.api.tasks.bundling.Zip
+import org.gradle.api.tasks.testing.Test
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 plugins {
     id("org.jetbrains.kotlin.jvm")
-    id("io.gitlab.arturbosch.detekt")
     id("org.jetbrains.compose")
     id("org.jetbrains.kotlin.plugin.compose")
     id("app.cash.sqldelight")
+    id("io.gitlab.arturbosch.detekt")
+}
+
+val noteLinkVersion = providers.gradleProperty("noteLinkVersion").get()
+val generatedVersionResources = layout.buildDirectory.dir("generated/version-resources")
+
+val generateVersionResource by tasks.registering {
+    val outputFile = generatedVersionResources.map { it.file("notelink-version.properties") }
+    inputs.property("version", noteLinkVersion)
+    outputs.file(outputFile)
+    doLast {
+        outputFile.get().asFile.apply {
+            parentFile.mkdirs()
+            writeText("version=$noteLinkVersion\n")
+        }
+    }
 }
 
 java {
@@ -28,7 +45,14 @@ kotlin {
 }
 
 sourceSets.main {
-    resources.srcDir("src/main/resources")
+    resources.srcDir(generatedVersionResources)
+}
+
+tasks.named("processResources") { dependsOn(generateVersionResource) }
+
+tasks.withType<Test>().configureEach {
+    inputs.property("noteLinkVersion", noteLinkVersion)
+    systemProperty("notelink.expectedVersion", noteLinkVersion)
 }
 
 sqldelight {
@@ -50,6 +74,7 @@ dependencies {
     implementation(compose.materialIconsExtended)
     implementation(project(":transfer-core"))
     implementation(project(":transfer-windows"))
+    implementation(project(":update-core"))
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.9.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-swing:1.9.0")
     implementation("org.xerial:sqlite-jdbc:3.46.1.3")
@@ -62,36 +87,32 @@ compose.desktop {
     application {
         mainClass = "com.betterhv.note.sender.desktop.MainKt"
         nativeDistributions {
-            targetFormats(TargetFormat.Msi)
             modules("java.instrument", "java.sql", "jdk.unsupported")
             packageName = "NoteLink"
-            packageVersion = "0.2.3"
+            packageVersion = noteLinkVersion
             description = "Transfer images, text and BetterHvNote exports over BLE and Wi-Fi Direct"
             vendor = "BetterHv"
             windows {
                 iconFile.set(file("src/main/resources/icons/notelink.ico"))
-                menuGroup = "NoteLink"
-                upgradeUuid = "0ec5e7be-a75d-4aaa-b38d-f43f3823bd87"
             }
         }
     }
 }
 
-val addWindowsFirewallActions by tasks.registering(Exec::class) {
-    onlyIf { System.getProperty("os.name").startsWith("Windows", ignoreCase = true) }
-    dependsOn(":transfer-windows:buildWindowsNative")
-    val msiDirectory = layout.buildDirectory.dir("compose/binaries/main/msi")
-    val actionExecutable = project(":transfer-windows").layout.buildDirectory.file("native-x64/notelink_firewall_action.exe")
-    inputs.file(actionExecutable)
-    outputs.dir(msiDirectory)
-    commandLine(
-        "powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
-        rootProject.file("tools/windows-installer/add-firewall-actions.ps1").absolutePath,
-        "-MsiDirectory", msiDirectory.get().asFile.absolutePath,
-        "-ActionExecutable", actionExecutable.get().asFile.absolutePath
-    )
-}
-
-tasks.matching { it.name == "packageMsi" }.configureEach {
-    finalizedBy(addWindowsFirewallActions)
+val packagePortableZip by tasks.registering(Zip::class) {
+    dependsOn("createDistributable")
+    val archiveRoot = "NoteLink-$noteLinkVersion"
+    val applicationImage = layout.buildDirectory.dir("compose/binaries/main/app/NoteLink")
+    inputs.dir(applicationImage)
+    inputs.dir(layout.projectDirectory.dir("src/main/portable"))
+    archiveFileName.set("NoteLink-$noteLinkVersion-windows-x64.zip")
+    destinationDirectory.set(layout.buildDirectory.dir("distributions"))
+    duplicatesStrategy = DuplicatesStrategy.FAIL
+    from(applicationImage) { into(archiveRoot) }
+    from(layout.projectDirectory.dir("src/main/portable")) { into(archiveRoot) }
+    doFirst {
+        require(applicationImage.get().asFile.resolve("NoteLink.exe").isFile) {
+            "Compose Desktop application image is missing NoteLink.exe"
+        }
+    }
 }

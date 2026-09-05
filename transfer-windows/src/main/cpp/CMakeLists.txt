@@ -12,8 +12,3 @@ target_compile_features(notelink_windows PRIVATE cxx_std_20)
 target_compile_definitions(notelink_windows PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX NOTELINK_WINDOWS_EXPORTS)
 target_link_libraries(notelink_windows PRIVATE windowsapp crypt32 ole32 wlanapi iphlpapi ws2_32)
 set_target_properties(notelink_windows PROPERTIES OUTPUT_NAME "notelink_windows")
-
-add_executable(notelink_firewall_action firewall_action.cpp)
-target_compile_features(notelink_firewall_action PRIVATE cxx_std_20)
-target_compile_definitions(notelink_firewall_action PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
-target_link_libraries(notelink_firewall_action PRIVATE ole32 oleaut32)

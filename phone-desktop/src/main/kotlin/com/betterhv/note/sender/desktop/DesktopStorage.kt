@@ -5,6 +5,9 @@ import com.betterhv.note.sender.shared.db.inbox.ExportInboxDatabase
 import com.betterhv.note.sender.shared.db.inbox.Inbox_exports
 import com.betterhv.note.sender.shared.db.queue.Queue_items
 import com.betterhv.note.sender.shared.db.queue.SenderQueueDatabase
+import com.betterhv.note.sender.shared.NoteLinkLanguage
+import com.betterhv.note.sender.shared.NoteLinkI18n
+import com.betterhv.note.sender.shared.noteLinkText
 import com.betterhv.transfer.core.ContentKind
 import com.betterhv.transfer.core.ContentCounts
 import com.betterhv.transfer.core.ExportTransferOffer
@@ -43,8 +46,14 @@ class DesktopPaths(root: File = defaultRoot()) {
     }
 }
 
-data class DesktopPairing(val deviceId: String, val deviceName: String, val sharedKey: ByteArray)
+data class DesktopPairing(
+    val deviceId: String,
+    val deviceName: String,
+    val sharedKey: ByteArray,
+    val lastUsedAt: Long = 0L,
+)
 
+@Suppress("TooManyFunctions")
 class DesktopSettings(private val paths: DesktopPaths, private val native: WindowsNativeApi) {
     private val lock = Any()
     private val values = Properties()
@@ -52,6 +61,7 @@ class DesktopSettings(private val paths: DesktopPaths, private val native: Windo
     init {
         synchronized(lock) {
             if (paths.settings.isFile) paths.settings.inputStream().use(values::load)
+            migrateSinglePairingLocked()
         }
     }
 
@@ -66,7 +76,9 @@ class DesktopSettings(private val paths: DesktopPaths, private val native: Windo
         get() = synchronized(lock) { values.getProperty(KEY_DISPLAY_NAME, "NoteLink-${System.getenv("COMPUTERNAME") ?: "Windows"}") }
         set(value) = synchronized(lock) {
             val normalized = value.trim()
-            require(normalized.isNotBlank() && normalized.encodeToByteArray().size <= 48) { "显示名称不能为空且不能超过 48 字节" }
+            require(normalized.isNotBlank() && normalized.encodeToByteArray().size <= 48) {
+                noteLinkText("显示名称不能为空且不能超过 48 字节", "Display name cannot be empty or exceed 48 UTF-8 bytes")
+            }
             values.setProperty(KEY_DISPLAY_NAME, normalized)
             persist()
         }
@@ -79,43 +91,50 @@ class DesktopSettings(private val paths: DesktopPaths, private val native: Windo
         get() = synchronized(lock) { values.getProperty(KEY_SHOW_RECENT_EVENTS, "true").toBooleanStrictOrNull() ?: true }
         set(value) = synchronized(lock) { values.setProperty(KEY_SHOW_RECENT_EVENTS, value.toString()); persist() }
 
-    val pairing: DesktopPairing? get() = synchronized(lock) {
-        val id = values.getProperty(KEY_PEER_ID) ?: return@synchronized null
-        val encoded = values.getProperty(KEY_SECRET) ?: return@synchronized null
-        val protected = runCatching { Base64.getDecoder().decode(encoded) }.getOrNull() ?: return@synchronized null
-        val secret = runCatching { native.unprotect(protected) }.getOrNull() ?: return@synchronized null
-        DesktopPairing(id, values.getProperty(KEY_PEER_NAME, id), secret)
-    }
+    var language: NoteLinkLanguage
+        get() = synchronized(lock) { NoteLinkLanguage.fromStorageId(values.getProperty(KEY_LANGUAGE)) }
+        set(value) = synchronized(lock) {
+            values.setProperty(KEY_LANGUAGE, value.storageId)
+            NoteLinkI18n.language = value
+            persist()
+        }
+
+    val pairings: List<DesktopPairing> get() = synchronized(lock) { pairingsLocked() }
+
+    val pairing: DesktopPairing? get() = pairings.maxByOrNull(DesktopPairing::lastUsedAt)
 
     /** Owner-side pairing used while the N10Pro enters the code shown by NoteLink. */
     val ownerPairing: DesktopPairing get() = synchronized(lock) {
         val code = ownerPairingCodeLocked()
-        DesktopPairing("betterhv-note", "N10Pro", derivePairingKey(code))
+        DesktopPairing(ownerPairingPendingIdLocked(), "N10Pro", derivePairingKey(code))
     }
 
     val ownerPairingCode: String get() = synchronized(lock) { ownerPairingCodeLocked() }
+    val pendingOwnerPairingCode: String? get() = synchronized(lock) { values.getProperty(KEY_OWNER_CODE) }
+    val pendingOwnerPairing: DesktopPairing? get() = synchronized(lock) {
+        val code = values.getProperty(KEY_OWNER_CODE) ?: return@synchronized null
+        DesktopPairing(ownerPairingPendingIdLocked(), "N10Pro", derivePairingKey(code))
+    }
 
     fun beginOwnerPairing() = synchronized(lock) {
-        values.remove(KEY_PEER_ID)
-        values.remove(KEY_PEER_NAME)
-        values.remove(KEY_SECRET)
         values.remove(KEY_OWNER_CODE)
+        values.remove(KEY_OWNER_PENDING_ID)
         ownerPairingCodeLocked()
         persist()
     }
 
     fun pairWithCode(code: String, deviceId: String = "betterhv-note", deviceName: String = "N10Pro") {
-        require(code.length == 6 && code.all(Char::isDigit)) { "配对码必须是六位数字" }
+        require(code.length == 6 && code.all(Char::isDigit)) { noteLinkText("配对码必须是六位数字", "Pairing code must contain six digits") }
         val key = TransferCrypto.hkdfSha256(
             code.encodeToByteArray(), "BetterHv-manual-v1".encodeToByteArray(),
             "paired-device".encodeToByteArray(), 32
         )
         val protected = native.protect(key)
         synchronized(lock) {
-            values.setProperty(KEY_PEER_ID, deviceId)
-            values.setProperty(KEY_PEER_NAME, deviceName)
-            values.setProperty(KEY_SECRET, Base64.getEncoder().encodeToString(protected))
-            persist()
+            savePairingLocked(
+                DesktopPairing(deviceId, deviceName, key, nextLastUsedLocked()),
+                protected,
+            )
         }
     }
 
@@ -124,21 +143,112 @@ class DesktopSettings(private val paths: DesktopPaths, private val native: Windo
         val key = ownerPairing.sharedKey
         val protected = native.protect(key)
         synchronized(lock) {
-            values.setProperty(KEY_PEER_ID, deviceId)
-            values.setProperty(KEY_PEER_NAME, deviceName)
-            values.setProperty(KEY_SECRET, Base64.getEncoder().encodeToString(protected))
+            savePairingLocked(
+                DesktopPairing(deviceId, deviceName, key, nextLastUsedLocked()),
+                protected,
+                persist = false,
+            )
             values.remove(KEY_OWNER_CODE)
+            values.remove(KEY_OWNER_PENDING_ID)
             persist()
         }
     }
 
-    fun unpair() = synchronized(lock) {
-        values.remove(KEY_PEER_ID); values.remove(KEY_PEER_NAME); values.remove(KEY_SECRET); values.remove(KEY_OWNER_CODE)
+    fun markLastUsed(deviceId: String) = synchronized(lock) {
+        val pairing = pairingsLocked().firstOrNull { it.deviceId == deviceId } ?: return@synchronized
+        savePairingLocked(pairing.copy(lastUsedAt = nextLastUsedLocked()), native.protect(pairing.sharedKey))
+    }
+
+    fun resolveIdentity(oldDeviceId: String, deviceId: String): DesktopPairing = synchronized(lock) {
+        val old = requireNotNull(pairingsLocked().firstOrNull { it.deviceId == oldDeviceId })
+        if (oldDeviceId == deviceId) {
+            markLastUsed(deviceId)
+            return@synchronized requireNotNull(pairing)
+        }
+        require(pairingsLocked().none { it.deviceId == deviceId }) { "该设备身份已存在" }
+        removePairingLocked(oldDeviceId)
+        old.copy(deviceId = deviceId, lastUsedAt = nextLastUsedLocked()).also {
+            savePairingLocked(it, native.protect(it.sharedKey))
+        }
+    }
+
+    fun unpair(deviceId: String? = null) = synchronized(lock) {
+        val ids = if (deviceId == null) pairingIdsLocked() else listOf(deviceId)
+        ids.forEach(::removePairingLocked)
+        if (deviceId == null) {
+            values.remove(KEY_OWNER_CODE)
+            values.remove(KEY_OWNER_PENDING_ID)
+        }
         persist()
+    }
+
+    private fun removePairingLocked(deviceId: String) {
+        val token = pairingToken(deviceId)
+        values.remove("$PAIRING_PREFIX$token.name")
+        values.remove("$PAIRING_PREFIX$token.secret")
+        values.remove("$PAIRING_PREFIX$token.lastUsed")
+        values.setProperty(
+            KEY_PAIRING_IDS,
+            pairingIdsLocked().filterNot { it == deviceId }.joinToString(",") { pairingToken(it) },
+        )
     }
 
     private fun ownerPairingCodeLocked(): String = values.getProperty(KEY_OWNER_CODE)
         ?: (0..999999).random().toString().padStart(6, '0').also { values.setProperty(KEY_OWNER_CODE, it); persist() }
+
+    private fun ownerPairingPendingIdLocked(): String = values.getProperty(KEY_OWNER_PENDING_ID)
+        ?: "pending:${UUID.randomUUID()}".also { values.setProperty(KEY_OWNER_PENDING_ID, it); persist() }
+
+    private fun pairingsLocked(): List<DesktopPairing> = pairingIdsLocked().mapNotNull { id ->
+        val token = pairingToken(id)
+        val encoded = values.getProperty("$PAIRING_PREFIX$token.secret") ?: return@mapNotNull null
+        val protected = runCatching { Base64.getDecoder().decode(encoded) }.getOrNull() ?: return@mapNotNull null
+        val secret = runCatching { native.unprotect(protected) }.getOrNull() ?: return@mapNotNull null
+        DesktopPairing(
+            id,
+            values.getProperty("$PAIRING_PREFIX$token.name", id),
+            secret,
+            values.getProperty("$PAIRING_PREFIX$token.lastUsed", "0").toLongOrNull() ?: 0L,
+        )
+    }
+
+    private fun pairingIdsLocked(): List<String> = values.getProperty(KEY_PAIRING_IDS, "")
+        .split(',').filter(String::isNotBlank).mapNotNull { token ->
+            runCatching { Base64.getUrlDecoder().decode(token).decodeToString() }.getOrNull()
+        }
+
+    private fun savePairingLocked(pairing: DesktopPairing, protected: ByteArray, persist: Boolean = true) {
+        val ids = (pairingIdsLocked().filterNot { it == pairing.deviceId } + pairing.deviceId)
+        values.setProperty(KEY_PAIRING_IDS, ids.joinToString(",") { pairingToken(it) })
+        val token = pairingToken(pairing.deviceId)
+        values.setProperty("$PAIRING_PREFIX$token.name", pairing.deviceName)
+        values.setProperty("$PAIRING_PREFIX$token.secret", Base64.getEncoder().encodeToString(protected))
+        values.setProperty("$PAIRING_PREFIX$token.lastUsed", pairing.lastUsedAt.toString())
+        if (persist) persist()
+    }
+
+    @Suppress("ReturnCount")
+    private fun migrateSinglePairingLocked() {
+        val id = values.getProperty(KEY_PEER_ID) ?: return
+        val secret = values.getProperty(KEY_SECRET) ?: return
+        val protected = runCatching { Base64.getDecoder().decode(secret) }.getOrNull() ?: return
+        val raw = runCatching { native.unprotect(protected) }.getOrNull() ?: return
+        savePairingLocked(
+            DesktopPairing(id, values.getProperty(KEY_PEER_NAME, id), raw, System.currentTimeMillis()),
+            protected,
+            persist = false,
+        )
+        values.remove(KEY_PEER_ID); values.remove(KEY_PEER_NAME); values.remove(KEY_SECRET)
+        persist()
+    }
+
+    private fun pairingToken(deviceId: String): String = Base64.getUrlEncoder().withoutPadding()
+        .encodeToString(deviceId.encodeToByteArray())
+
+    private fun nextLastUsedLocked(): Long = maxOf(
+        System.currentTimeMillis(),
+        (pairingsLocked().maxOfOrNull(DesktopPairing::lastUsedAt) ?: 0L) + 1L,
+    )
 
     private fun derivePairingKey(code: String): ByteArray = TransferCrypto.hkdfSha256(
         code.encodeToByteArray(), "BetterHv-manual-v1".encodeToByteArray(),
@@ -161,10 +271,14 @@ class DesktopSettings(private val paths: DesktopPaths, private val native: Windo
         const val KEY_DISPLAY_NAME = "displayName"
         const val KEY_RECEIVE = "receiveEnabled"
         const val KEY_SHOW_RECENT_EVENTS = "showRecentTransferEvents"
+        const val KEY_LANGUAGE = "language"
         const val KEY_PEER_ID = "peerDeviceId"
         const val KEY_PEER_NAME = "peerDeviceName"
         const val KEY_SECRET = "protectedSharedKey"
         const val KEY_OWNER_CODE = "ownerPairingCode"
+        const val KEY_OWNER_PENDING_ID = "ownerPairingPendingId"
+        const val KEY_PAIRING_IDS = "pairedDeviceIds"
+        const val PAIRING_PREFIX = "paired."
     }
 }
 
@@ -232,12 +346,22 @@ class DesktopQueueRepository(private val paths: DesktopPaths) : QueueStore, Auto
     }
 
     @Synchronized fun counts(): ContentCounts = items().filter { it.state == QueueState.PENDING }.let { available ->
-        ContentCounts(
-            available.count { it.kind == ContentKind.IMAGE },
-            available.count { it.kind == ContentKind.TEXT },
-            available.count { it.kind == ContentKind.PDF }
-        )
+        available.contentCounts()
     }
+
+    @Synchronized fun counts(destinationDeviceId: String): ContentCounts = items().filter {
+        it.state == QueueState.PENDING &&
+            (it.destinationDeviceId == null || it.destinationDeviceId == destinationDeviceId)
+    }.let { available ->
+        available.contentCounts()
+    }
+
+    private fun List<QueueItem>.contentCounts(): ContentCounts =
+        ContentCounts(
+            count { it.kind == ContentKind.IMAGE },
+            count { it.kind == ContentKind.TEXT },
+            count { it.kind == ContentKind.PDF }
+        )
 
     @Synchronized fun leaseNext(kind: ContentKind, destinationDeviceId: String): DesktopSenderLease? {
         val leased = coordinator.leaseNext(kind, destinationDeviceId) ?: return null

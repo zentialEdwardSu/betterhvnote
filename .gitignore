@@ -13,13 +13,6 @@ build/
 hvNote/
 tools/
 
-# Keep the checked-in Windows installer helpers visible while leaving other
-# local tooling ignored.
-!tools/
-tools/*
-!tools/windows-installer/
-!tools/windows-installer/**
-
 # make github happy
 *.zip 
 

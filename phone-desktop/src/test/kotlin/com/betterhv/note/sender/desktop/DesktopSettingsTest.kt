@@ -1,5 +1,6 @@
 package com.betterhv.note.sender.desktop
 
+import com.betterhv.note.sender.shared.NoteLinkLanguage
 import com.betterhv.transfer.windows.WindowsCapabilities
 import com.betterhv.transfer.windows.WindowsNativeApi
 import kotlin.io.path.createTempDirectory
@@ -7,8 +8,26 @@ import kotlin.test.Test
 import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
 
 class DesktopSettingsTest {
+    @Test
+    fun languagePreferencePersists() {
+        val root = createTempDirectory("notelink-settings-language-").toFile()
+        try {
+            val paths = DesktopPaths(root)
+            val native = PassthroughNativeApi()
+            val settings = DesktopSettings(paths, native)
+            assertEquals(NoteLinkLanguage.SYSTEM, settings.language)
+
+            settings.language = NoteLinkLanguage.ENGLISH
+
+            assertEquals(NoteLinkLanguage.ENGLISH, DesktopSettings(paths, native).language)
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
     @Test
     fun recentTransferEventPreferencePersists() {
         val root = createTempDirectory("notelink-settings-events-").toFile()
@@ -46,6 +65,30 @@ class DesktopSettingsTest {
             assertEquals("betterhv-note", reloaded?.deviceId)
             assertEquals("N10Pro", reloaded?.deviceName)
             assertContentEquals(ownerKey, reloaded?.sharedKey)
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun multiplePairingsPersistAndCanBeSelectedOrRemovedIndividually() {
+        val root = createTempDirectory("notelink-settings-multi-").toFile()
+        try {
+            val native = PassthroughNativeApi()
+            val paths = DesktopPaths(root)
+            val settings = DesktopSettings(paths, native)
+            settings.pairWithCode("111111", "note-1", "书房")
+            settings.pairWithCode("222222", "note-2", "办公室")
+
+            val reloaded = DesktopSettings(paths, native)
+            assertEquals(setOf("note-1", "note-2"), reloaded.pairings.map { it.deviceId }.toSet())
+            assertEquals("note-2", reloaded.pairing?.deviceId)
+
+            reloaded.markLastUsed("note-1")
+            assertEquals("note-1", reloaded.pairing?.deviceId)
+            reloaded.unpair("note-1")
+            assertEquals(listOf("note-2"), reloaded.pairings.map { it.deviceId })
+            assertTrue(reloaded.pairings.single().sharedKey.isNotEmpty())
         } finally {
             root.deleteRecursively()
         }
