@@ -1,9 +1,17 @@
 # BetterHvNote
 
-BetterHvNote is a Kotlin note-taking and file-transfer workspace for Hanvon
-e-ink tablets. The repository contains the tablet note app, Android and desktop
-NoteLink clients, and the shared transfer stack used by all three applications.
+BetterHvNote 立志成为汉王N10 Pro 2一个更加顺手的笔记软件，其主要目标是：通过更高效的用户交互，更简洁的页面设计以及配套手机与电脑应用，更提供更加接近纸的笔记体验。
 
+目前只支持汉王N10 Pro 2，Notelink只支持带有BLE的Windows和Android设备
+## Features of Betterhvnote
+
+- 通过对原装笔记软件`hvnote`的学习，Betterhvnote同样可以使用电子纸固件提供的实时笔画功能，而不是像其他笔记软件一样需要刷新或者延迟才能看到笔画。同时，与原版实现不同，Betterhvnote使用笔压和路径重绘而不是直接把笔画当作位图处理。
+- 向笔记添加图片/文字或者导出笔记在原版软件一直是非常麻烦的事情，对于导入：你需要先使用官方的途径（扫描软件，wifi传输，微信打开或第三方软件）将图片导入到本地，而后在笔记中选择插入，再寻找并选中图片。对于导出，虽然图片能够扫码分享，导出的pdf需要导出到本地之后再用某种方式发送到电脑或者手机。Betterhvnote通过引入客户端解决了这个问题，客户端与Betterhvnote共用一套AI写的数据协议，通过低功耗蓝牙通信，局域网或者WIFI P2P(仅手机应用支持)收发数据，做到便捷与较快地在Betterhvnote与手机/Windows notelink之间传输(图片，文字以及导出的pdf)，整个过程中不需要离开Betterhvnote，切换到别的应用。
+- 通过引入`mupdf`，Betterhvnote还支持pdf批注功能。受Kindle的Margin Paper启发，Betterhvnote通过在当前页之后新增空白页(`夹纸`)满足了额外批注区域的需要，还提供框选摘抄pdf到原文并从夹纸的摘抄项跳转回原文对应位置的便捷导航功能
+- 在`mupdf`的帮助下，Betterhvnote的所有手写批注都可以以annotations的形式导出，保留后期编辑能力
+
+
+以下为AI生成内容
 ## Repository layout
 
 ```text
@@ -54,66 +62,6 @@ On a connected Hanvon device, Android instrumentation tests can be run with:
 
 See `CLAUDE.md` for the pen pipeline, storage invariants, native integration,
 and module-specific development constraints.
-
-## CI and releases
-
-Pull requests and pushes to `main` run JVM tests, detekt, Android lint, both
-Android debug builds, and the Windows portable-package build.
-
-Releases use two independent version streams:
-
-- `note-vX.Y.Z` builds `BetterHvNote-X.Y.Z-android-arm64.apk`.
-- `notelink-vX.Y.Z` builds `NoteLink-X.Y.Z-android.apk` and
-  `NoteLink-X.Y.Z-windows-x64.zip`.
-
-Pushing either tag creates a GitHub pre-release with generated release notes and
-`SHA256SUMS.txt`. After testing the downloaded packages, manually edit the
-GitHub release and clear the pre-release flag. The in-app update checker ignores
-pre-releases, so users only see a version after that manual promotion. The
-release workflow can also be run manually with an existing tag; it never creates
-or moves tags. A manual rerun may replace assets on an existing pre-release, but
-refuses to alter a release that has already been promoted.
-
-Both Android apps use one PKCS12 release key. Generate and securely back up the
-keystore outside this repository. A new one can be created with:
-
-```powershell
-keytool -genkeypair -v `
-  -keystore "D:\SecureBackup\betterhv-release.p12" `
-  -storetype PKCS12 `
-  -alias betterhv-release `
-  -keyalg RSA `
-  -keysize 4096 `
-  -validity 36500
-```
-
-If `keytool` asks for a separate key password, press Enter to reuse the store
-password. The workflow only accepts PKCS12 content and always restores it as a
-`.p12` file. Configure these GitHub Actions secrets:
-
-```text
-ANDROID_RELEASE_KEYSTORE_BASE64
-ANDROID_RELEASE_STORE_PASSWORD
-ANDROID_RELEASE_KEY_ALIAS
-```
-
-`ANDROID_RELEASE_KEYSTORE_BASE64` is the Base64 representation of the complete
-PKCS12 file. Also configure the non-secret repository variable
-`ANDROID_RELEASE_CERT_SHA256` with the signing certificate's SHA-256 fingerprint;
-the workflow normalizes spaces and colons before comparing it with each APK.
-
-The release key does not require a Google Play account. It must remain unchanged
-for the lifetime of each application. Current development releases used the
-Android debug key, so the first formally signed build cannot update those
-installations in place. Back up BetterHvNote data before uninstalling a debug-key
-installation and installing the first formally signed APK.
-
-The Windows ZIP is portable and unsigned. Extract the entire archive, run
-`Allow-NoteLink-Firewall.ps1` manually with PowerShell, approve the administrator
-prompt, and then start `NoteLink.exe`. NoteLink checks the expected inbound TCP
-39817 rule at startup and warns when it is absent or incorrect. The archive also
-contains `Remove-NoteLink-Firewall.ps1`; Windows SmartScreen may show an unknown
-publisher warning on first launch.
 
 ## PDF notebooks
 
