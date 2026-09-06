@@ -14,10 +14,10 @@ import com.betterhv.note.ink.InkPoint
  * project memory for the on-device experiments establishing this).
  */
 interface Tool {
-    fun onDown(x: Float, y: Float)
-    fun onBatch(points: List<InkPoint>)
-    fun onUp()
-    fun onCancel()
+  fun onDown(x: Float, y: Float)
+  fun onBatch(points: List<InkPoint>)
+  fun onUp()
+  fun onCancel()
 }
 
 /**
@@ -29,12 +29,12 @@ interface Tool {
  * batches).
  */
 interface EraserTool : Tool {
-    fun eraseAt(x: Float, y: Float)
-    fun commit()
+  fun eraseAt(x: Float, y: Float)
+  fun commit()
 }
 
 /** Callbacks a [Tool] uses to ask the view to repaint or update selection UI. */
 interface ToolHost {
-    fun requestRepaint(bounds: Bounds)
-    fun onSelectionChanged(selection: SelectionSet)
+  fun requestRepaint(bounds: Bounds)
+  fun onSelectionChanged(selection: SelectionSet)
 }

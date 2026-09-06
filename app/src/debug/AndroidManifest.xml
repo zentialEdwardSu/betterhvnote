@@ -3,6 +3,7 @@
     <application>
         <receiver
             android:name=".DebugTransferReceiver"
+            android:permission="android.permission.DUMP"
             android:exported="true" />
     </application>
 </manifest>

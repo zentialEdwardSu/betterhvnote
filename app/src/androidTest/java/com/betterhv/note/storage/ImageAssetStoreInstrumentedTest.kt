@@ -1,5 +1,7 @@
 package com.betterhv.note.storage
 
+import androidx.core.graphics.createBitmap
+
 import android.content.Context
 import android.content.ContextWrapper
 import android.graphics.Bitmap
@@ -29,7 +31,7 @@ class ImageAssetStoreInstrumentedTest {
         val source = File(root, "source.png")
         source.parentFile!!.mkdirs()
         source.outputStream().use {
-            Bitmap.createBitmap(8, 6, Bitmap.Config.ARGB_8888).compress(Bitmap.CompressFormat.PNG, 100, it)
+            createBitmap(8, 6).compress(Bitmap.CompressFormat.PNG, 100, it)
         }
         val store = ImageAssetStore(context)
         val discarded = store.stageFile(source, "image/png")

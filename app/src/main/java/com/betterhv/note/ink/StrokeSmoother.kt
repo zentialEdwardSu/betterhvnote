@@ -13,39 +13,39 @@ import kotlin.math.abs
  * gesture, or calls [reset] between strokes.
  */
 interface StrokeSmoother {
-    fun smooth(point: InkPoint): InkPoint
+  fun smooth(point: InkPoint): InkPoint
 
-    /**
-     * Smooth a whole delivered batch at once. The default degrades to a
-     * per-point [smooth] so existing 1:1 smoothers (OneEuro, Noop) need no
-     * change. Exists because a model-based smoother can emit a DIFFERENT number
-     * of points than it consumes (upsampling a slow batch, or lagging behind
-     * fast input) -- a 1:1 signature cannot express that, so batching is the
-     * honest boundary. Returned points are already smoothed and ready to
-     * accumulate; the batch is one ROM delivery, always within a single
-     * gesture, in temporal order.
-     */
-    fun smoothBatch(batch: List<InkPoint>): List<InkPoint> = batch.map { smooth(it) }
+  /**
+   * Smooth a whole delivered batch at once. The default degrades to a
+   * per-point [smooth] so existing 1:1 smoothers (OneEuro, Noop) need no
+   * change. Exists because a model-based smoother can emit a DIFFERENT number
+   * of points than it consumes (upsampling a slow batch, or lagging behind
+   * fast input) -- a 1:1 signature cannot express that, so batching is the
+   * honest boundary. Returned points are already smoothed and ready to
+   * accumulate; the batch is one ROM delivery, always within a single
+   * gesture, in temporal order.
+   */
+  fun smoothBatch(batch: List<InkPoint>): List<InkPoint> = batch.map { smooth(it) }
 
-    /**
-     * Signal end-of-stroke and return any trailing smoothed points the smoother
-     * was still holding back. A lagging model-based smoother (the spring-mass
-     * modeler) trails behind the raw input mid-stroke; at pen-up it emits a
-     * final "catch-up" run so the committed stroke reaches the last real
-     * sample. The default returns nothing -- a 1:1 smoother has no backlog and
-     * ends exactly where its last [smooth] left off. Called once per gesture,
-     * after the last [smoothBatch]; the returned points append to the stroke
-     * before simplification.
-     */
-    fun finishStroke(): List<InkPoint> = emptyList()
+  /**
+   * Signal end-of-stroke and return any trailing smoothed points the smoother
+   * was still holding back. A lagging model-based smoother (the spring-mass
+   * modeler) trails behind the raw input mid-stroke; at pen-up it emits a
+   * final "catch-up" run so the committed stroke reaches the last real
+   * sample. The default returns nothing -- a 1:1 smoother has no backlog and
+   * ends exactly where its last [smooth] left off. Called once per gesture,
+   * after the last [smoothBatch]; the returned points append to the stroke
+   * before simplification.
+   */
+  fun finishStroke(): List<InkPoint> = emptyList()
 
-    fun reset()
+  fun reset()
 }
 
 /** Passthrough, for tests and for A/B-ing smoothing against raw input on device. */
 class NoopSmoother : StrokeSmoother {
-    override fun smooth(point: InkPoint): InkPoint = point
-    override fun reset() {}
+  override fun smooth(point: InkPoint): InkPoint = point
+  override fun reset() {}
 }
 
 /**
@@ -66,74 +66,74 @@ class NoopSmoother : StrokeSmoother {
  * against real hardware.
  */
 class OneEuroSmoother(
-    nominalSampleHz: Float = 120.0f,
-    private val minCutoff: Float = 1.5f,
-    private val beta: Float = 0.05f,
-    private val derivativeCutoff: Float = 1.0f,
-    private val pressureCutoff: Float = 4.0f
+  nominalSampleHz: Float = 120.0f,
+  private val minCutoff: Float = 1.5f,
+  private val beta: Float = 0.05f,
+  private val derivativeCutoff: Float = 1.0f,
+  private val pressureCutoff: Float = 4.0f,
 ) : StrokeSmoother {
 
-    private val dt: Float = 1.0f / nominalSampleHz
+  private val dt: Float = 1.0f / nominalSampleHz
 
-    private val xFilter = LowPass()
-    private val yFilter = LowPass()
-    private val dxFilter = LowPass()
-    private val dyFilter = LowPass()
-    private val pressureFilter = LowPass()
+  private val xFilter = LowPass()
+  private val yFilter = LowPass()
+  private val dxFilter = LowPass()
+  private val dyFilter = LowPass()
+  private val pressureFilter = LowPass()
 
-    private var hasPrevious = false
-    private var previousX = 0.0f
-    private var previousY = 0.0f
+  private var hasPrevious = false
+  private var previousX = 0.0f
+  private var previousY = 0.0f
 
-    override fun smooth(point: InkPoint): InkPoint {
-        val rawDx = if (hasPrevious) (point.x - previousX) / dt else 0.0f
-        val rawDy = if (hasPrevious) (point.y - previousY) / dt else 0.0f
-        previousX = point.x
-        previousY = point.y
-        hasPrevious = true
+  override fun smooth(point: InkPoint): InkPoint {
+    val rawDx = if (hasPrevious) (point.x - previousX) / dt else 0.0f
+    val rawDy = if (hasPrevious) (point.y - previousY) / dt else 0.0f
+    previousX = point.x
+    previousY = point.y
+    hasPrevious = true
 
-        val dxHat = dxFilter.filter(rawDx, alpha(derivativeCutoff))
-        val dyHat = dyFilter.filter(rawDy, alpha(derivativeCutoff))
+    val dxHat = dxFilter.filter(rawDx, alpha(derivativeCutoff))
+    val dyHat = dyFilter.filter(rawDy, alpha(derivativeCutoff))
 
-        val smoothedX = xFilter.filter(point.x, alpha(minCutoff + beta * abs(dxHat)))
-        val smoothedY = yFilter.filter(point.y, alpha(minCutoff + beta * abs(dyHat)))
-        val smoothedPressure =
-            pressureFilter.filter(point.pressure, alpha(pressureCutoff)).coerceIn(0.0f, 1.0f)
+    val smoothedX = xFilter.filter(point.x, alpha(minCutoff + beta * abs(dxHat)))
+    val smoothedY = yFilter.filter(point.y, alpha(minCutoff + beta * abs(dyHat)))
+    val smoothedPressure =
+      pressureFilter.filter(point.pressure, alpha(pressureCutoff)).coerceIn(0.0f, 1.0f)
 
-        return point.copy(x = smoothedX, y = smoothedY, pressure = smoothedPressure)
+    return point.copy(x = smoothedX, y = smoothedY, pressure = smoothedPressure)
+  }
+
+  override fun reset() {
+    xFilter.reset()
+    yFilter.reset()
+    dxFilter.reset()
+    dyFilter.reset()
+    pressureFilter.reset()
+    hasPrevious = false
+  }
+
+  private fun alpha(cutoff: Float): Float {
+    val tau = 1.0f / (2.0f * PI.toFloat() * cutoff)
+    return 1.0f / (1.0f + tau / dt)
+  }
+
+  private class LowPass {
+    private var initialized = false
+    private var previous = 0.0f
+
+    fun filter(value: Float, alpha: Float): Float {
+      if (!initialized) {
+        initialized = true
+        previous = value
+        return value
+      }
+      val output = alpha * value + (1.0f - alpha) * previous
+      previous = output
+      return output
     }
 
-    override fun reset() {
-        xFilter.reset()
-        yFilter.reset()
-        dxFilter.reset()
-        dyFilter.reset()
-        pressureFilter.reset()
-        hasPrevious = false
+    fun reset() {
+      initialized = false
     }
-
-    private fun alpha(cutoff: Float): Float {
-        val tau = 1.0f / (2.0f * PI.toFloat() * cutoff)
-        return 1.0f / (1.0f + tau / dt)
-    }
-
-    private class LowPass {
-        private var initialized = false
-        private var previous = 0.0f
-
-        fun filter(value: Float, alpha: Float): Float {
-            if (!initialized) {
-                initialized = true
-                previous = value
-                return value
-            }
-            val output = alpha * value + (1.0f - alpha) * previous
-            previous = output
-            return output
-        }
-
-        fun reset() {
-            initialized = false
-        }
-    }
+  }
 }

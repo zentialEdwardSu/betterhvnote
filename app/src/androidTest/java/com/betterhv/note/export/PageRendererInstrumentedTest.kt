@@ -1,5 +1,7 @@
 package com.betterhv.note.export
 
+import androidx.core.graphics.get
+
 import android.graphics.Color
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -76,7 +78,7 @@ class PageRendererInstrumentedTest {
         try {
             assertEquals(1600, bitmap.width)
             assertEquals(2560, bitmap.height)
-            assertEquals(Color.WHITE, bitmap.getPixel(800, 1280))
+            assertEquals(Color.WHITE, bitmap[800, 1280])
         } finally {
             bitmap.recycle()
         }

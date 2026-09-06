@@ -38,70 +38,65 @@ private val NotionBorder = Color(0xFFE3E3E1)
  */
 @Composable
 fun PageSelectionGrid(
-    pages: List<PageUiInfo>,
-    selectedIds: Set<UUID>,
-    pageBitmap: (UUID) -> Bitmap?,
-    onToggle: (UUID) -> Unit,
-    modifier: Modifier = Modifier
+  pages: List<PageUiInfo>,
+  selectedIds: Set<UUID>,
+  pageBitmap: (UUID) -> Bitmap?,
+  onToggle: (UUID) -> Unit,
+  modifier: Modifier = Modifier,
 ) {
-    LazyVerticalGrid(
-        columns = GridCells.Adaptive(116.dp),
-        modifier = modifier.fillMaxSize().padding(24.dp),
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
-    ) {
-        items(pages, key = PageUiInfo::id) { page ->
-            SelectablePageCard(
-                page = page,
-                bitmap = pageBitmap(page.id),
-                selected = page.id in selectedIds,
-                onToggle = { onToggle(page.id) }
-            )
-        }
+  LazyVerticalGrid(
+    columns = GridCells.Adaptive(116.dp),
+    modifier = modifier.fillMaxSize().padding(24.dp),
+    horizontalArrangement = Arrangement.spacedBy(12.dp),
+    verticalArrangement = Arrangement.spacedBy(12.dp),
+  ) {
+    items(pages, key = PageUiInfo::id) { page ->
+      SelectablePageCard(
+        page = page,
+        bitmap = pageBitmap(page.id),
+        selected = page.id in selectedIds,
+        onToggle = { onToggle(page.id) },
+      )
     }
+  }
 }
 
 @Composable
-private fun SelectablePageCard(
-    page: PageUiInfo,
-    bitmap: Bitmap?,
-    selected: Boolean,
-    onToggle: () -> Unit
-) {
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .aspectRatio(0.75f)
-            .background(Color.White, RectangleShape)
-            .border(
-                if (selected) 2.dp else 1.dp,
-                if (selected) Color.Black else NotionBorder,
-                RectangleShape
-            )
-            .clickable(onClick = onToggle)
-    ) {
-        bitmap?.let {
-            Image(
-                it.asImageBitmap(),
-                contentDescription = noteText("第 ${page.pageNumber} 页", "Page ${page.pageNumber}"),
-                modifier = Modifier.fillMaxSize(),
-                contentScale = ContentScale.Fit
-            )
-        }
-        Text(
-            page.pageNumber.toString(),
-            modifier = Modifier.align(Alignment.TopStart).background(Color.White).padding(4.dp)
-        )
-        if (selected) {
-            Box(
-                Modifier
-                    .align(Alignment.TopEnd)
-                    .size(28.dp)
-                    .background(Color.Black, RectangleShape),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(Icons.Filled.Check, contentDescription = noteText("已选择", "Selected"), tint = Color.White)
-            }
-        }
+private fun SelectablePageCard(page: PageUiInfo, bitmap: Bitmap?, selected: Boolean, onToggle: () -> Unit) {
+  Box(
+    modifier = Modifier
+      .fillMaxWidth()
+      .aspectRatio(0.75f)
+      .background(Color.White, RectangleShape)
+      .border(
+        if (selected) 2.dp else 1.dp,
+        if (selected) Color.Black else NotionBorder,
+        RectangleShape,
+      )
+      .clickable(onClick = onToggle),
+  ) {
+    bitmap?.let {
+      Image(
+        it.asImageBitmap(),
+        contentDescription = noteText("第 ${page.pageNumber} 页", "Page ${page.pageNumber}"),
+        modifier = Modifier.fillMaxSize(),
+        contentScale = ContentScale.Fit,
+      )
     }
+    Text(
+      page.pageNumber.toString(),
+      modifier = Modifier.align(Alignment.TopStart).background(Color.White).padding(4.dp),
+    )
+    if (selected) {
+      Box(
+        Modifier
+          .align(Alignment.TopEnd)
+          .size(28.dp)
+          .background(Color.Black, RectangleShape),
+        contentAlignment = Alignment.Center,
+      ) {
+        Icon(Icons.Filled.Check, contentDescription = noteText("已选择", "Selected"), tint = Color.White)
+      }
+    }
+  }
 }

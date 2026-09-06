@@ -8,13 +8,13 @@ plugins {
     id("org.jetbrains.compose")
     id("org.jetbrains.kotlin.plugin.compose")
     id("app.cash.sqldelight")
-    id("io.gitlab.arturbosch.detekt")
+    id("dev.detekt")
 }
 
 val noteLinkVersion = providers.gradleProperty("noteLinkVersion").get()
 val generatedVersionResources = layout.buildDirectory.dir("generated/version-resources")
 
-val generateVersionResource by tasks.registering {
+val generateVersionResource = tasks.register("generateVersionResource") {
     val outputFile = generatedVersionResources.map { it.file("notelink-version.properties") }
     inputs.property("version", noteLinkVersion)
     outputs.file(outputFile)
@@ -70,8 +70,8 @@ sqldelight {
 
 dependencies {
     implementation(compose.desktop.currentOs)
-    implementation(compose.material3)
-    implementation(compose.materialIconsExtended)
+    implementation("org.jetbrains.compose.material3:material3:1.9.0")
+    implementation("org.jetbrains.compose.material:material-icons-extended:1.7.3")
     implementation(project(":transfer-core"))
     implementation(project(":transfer-windows"))
     implementation(project(":update-core"))
@@ -99,7 +99,7 @@ compose.desktop {
     }
 }
 
-val packagePortableZip by tasks.registering(Zip::class) {
+val packagePortableZip = tasks.register<Zip>("packagePortableZip") {
     dependsOn("createDistributable", ":transfer-windows:buildWindowsNative")
     val archiveRoot = "NoteLink-$noteLinkVersion"
     val applicationImage = layout.buildDirectory.dir("compose/binaries/main/app/NoteLink")

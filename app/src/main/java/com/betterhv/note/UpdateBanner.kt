@@ -17,24 +17,19 @@ import androidx.compose.ui.unit.dp
 import com.betterhv.update.UpdateInfo
 
 @Composable
-fun UpdateBanner(
-    info: UpdateInfo,
-    onOpenRelease: () -> Unit,
-    onDismiss: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    Surface(
-        modifier = modifier.border(2.dp, Color.DarkGray, RectangleShape),
-        color = Color.White,
-        shape = RectangleShape,
-    ) {
-        Row(Modifier.padding(14.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            Column(Modifier.weight(1f)) {
-                Text(noteText("发现新版本 ${info.latestVersion.display}", "New version ${info.latestVersion.display}"))
-                Text(info.releaseTitle, color = Color.DarkGray)
-            }
-            Button(onClick = onOpenRelease) { Text(noteText("查看 Release", "View release")) }
-            OutlinedButton(onClick = onDismiss) { Text(noteText("关闭", "Close")) }
-        }
+fun UpdateBanner(info: UpdateInfo, onOpenRelease: () -> Unit, onDismiss: () -> Unit, modifier: Modifier = Modifier) {
+  Surface(
+    modifier = modifier.border(2.dp, Color.DarkGray, RectangleShape),
+    color = Color.White,
+    shape = RectangleShape,
+  ) {
+    Row(Modifier.padding(14.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+      Column(Modifier.weight(1f)) {
+        Text(noteText("发现新版本 ${info.latestVersion.display}", "New version ${info.latestVersion.display}"))
+        Text(info.releaseTitle, color = Color.DarkGray)
+      }
+      Button(onClick = onOpenRelease) { Text(noteText("查看 Release", "View release")) }
+      OutlinedButton(onClick = onDismiss) { Text(noteText("关闭", "Close")) }
     }
+  }
 }

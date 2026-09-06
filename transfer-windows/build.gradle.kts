@@ -1,6 +1,6 @@
 plugins {
     id("org.jetbrains.kotlin.jvm")
-    id("io.gitlab.arturbosch.detekt")
+    id("dev.detekt")
 }
 
 java {
@@ -16,8 +16,8 @@ kotlin {
 
 dependencies {
     api(project(":transfer-core"))
-    implementation("net.java.dev.jna:jna:5.15.0")
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.9.0")
+    implementation("net.java.dev.jna:jna:5.19.1")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.11.0")
     testImplementation(kotlin("test"))
     testImplementation("junit:junit:4.13.2")
 }
@@ -25,7 +25,7 @@ dependencies {
 val generatedNativeResources = layout.buildDirectory.dir("generated/native-resources")
 sourceSets.main { resources.srcDir(generatedNativeResources) }
 
-val buildWindowsNative by tasks.registering(Exec::class) {
+val buildWindowsNative = tasks.register<Exec>("buildWindowsNative") {
     onlyIf { System.getProperty("os.name").startsWith("Windows", ignoreCase = true) }
     inputs.files(fileTree("src/main/cpp"))
     outputs.file(generatedNativeResources.map { it.file("win32-x86-64/notelink_windows.dll") })

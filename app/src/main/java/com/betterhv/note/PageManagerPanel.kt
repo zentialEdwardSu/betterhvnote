@@ -39,9 +39,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.pointerInteropFilter
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
-import androidx.compose.ui.input.pointer.pointerInteropFilter
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
@@ -55,399 +55,425 @@ internal val PAGE_MANAGER_CONTENT_PADDING = 6.dp
 internal val PAGE_MANAGER_HORIZONTAL_TITLE_WIDTH = 132.dp
 
 data class PageManagerPanelState(
-    val modifier: Modifier,
-    val dockEdge: DockEdge,
-    val thumbnailSize: DpSize,
-    val pages: List<PageUiInfo>,
-    val currentPageId: UUID?,
+  val modifier: Modifier,
+  val dockEdge: DockEdge,
+  val thumbnailSize: DpSize,
+  val pages: List<PageUiInfo>,
+  val currentPageId: UUID?,
 )
 
 data class PageManagerPanelActions(
-    val thumbnail: (UUID) -> android.graphics.Bitmap?,
-    val requestThumbnails: (List<UUID>) -> Unit,
-    val onSelect: (UUID) -> Unit,
-    val onAddAfter: (UUID) -> UUID,
-    val onDelete: (UUID) -> Boolean,
-    val onMove: (UUID, Int) -> Boolean,
-    val onNotice: (String) -> Unit,
+  val thumbnail: (UUID) -> android.graphics.Bitmap?,
+  val requestThumbnails: (List<UUID>) -> Unit,
+  val onSelect: (UUID) -> Unit,
+  val onAddAfter: (UUID) -> UUID,
+  val onDelete: (UUID) -> Boolean,
+  val onMove: (UUID, Int) -> Boolean,
+  val onNotice: (String) -> Unit,
 )
 
 private data class PageThumbnailCardState(
-    val modifier: Modifier,
-    val info: PageUiInfo,
-    val bitmap: android.graphics.Bitmap?,
-    val current: Boolean,
-    val pendingDelete: Boolean,
-    val dragging: Boolean,
+  val modifier: Modifier,
+  val info: PageUiInfo,
+  val bitmap: android.graphics.Bitmap?,
+  val current: Boolean,
+  val pendingDelete: Boolean,
+  val dragging: Boolean,
 )
 
 private data class PageThumbnailCardActions(
-    val onNormalClick: () -> Unit,
-    val onSide2Click: () -> Unit,
-    val onSide3Click: () -> Unit,
+  val onNormalClick: () -> Unit,
+  val onSide2Click: () -> Unit,
+  val onSide3Click: () -> Unit,
 )
 
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
-fun PageManagerPanel(
-    state: PageManagerPanelState,
-    actions: PageManagerPanelActions,
-) {
-    val modifier = state.modifier
-    val dockEdge = state.dockEdge
-    val thumbnailSize = state.thumbnailSize
-    val pages = state.pages
-    val currentPageId = state.currentPageId
-    val thumbnail = actions.thumbnail
-    val requestThumbnails = actions.requestThumbnails
-    val onSelect = actions.onSelect
-    val onAddAfter = actions.onAddAfter
-    val onDelete = actions.onDelete
-    val onMove = actions.onMove
-    val onNotice = actions.onNotice
-    var bookmarkedOnly by remember { mutableStateOf(false) }
-    val displayedPages = if (bookmarkedOnly) pages.filter(PageUiInfo::bookmarked) else pages
-    val currentIndex = displayedPages.indexOfFirst { it.id == currentPageId }.coerceAtLeast(0)
-    var model by remember { mutableStateOf(PageManagerModel().openAt(currentIndex)) }
-    var panelWidth by remember { mutableFloatStateOf(1f) }
-    var panelHeight by remember { mutableFloatStateOf(1f) }
-    var side1Armed by remember { mutableStateOf(false) }
-    var side1Delta by remember { mutableStateOf(0) }
-    var draggingId by remember { mutableStateOf<UUID?>(null) }
-    var dragTargetIndex by remember { mutableStateOf<Int?>(null) }
-    var edgeDirection by remember { mutableStateOf(0) }
-    var edgeSince by remember { mutableLongStateOf(0L) }
-    val vertical = dockEdge == DockEdge.START || dockEdge == DockEdge.END
-    val scrollState = rememberScrollState()
+fun PageManagerPanel(state: PageManagerPanelState, actions: PageManagerPanelActions) {
+  val modifier = state.modifier
+  val dockEdge = state.dockEdge
+  val thumbnailSize = state.thumbnailSize
+  val pages = state.pages
+  val currentPageId = state.currentPageId
+  val thumbnail = actions.thumbnail
+  val requestThumbnails = actions.requestThumbnails
+  val onSelect = actions.onSelect
+  val onAddAfter = actions.onAddAfter
+  val onDelete = actions.onDelete
+  val onMove = actions.onMove
+  val onNotice = actions.onNotice
+  var bookmarkedOnly by remember { mutableStateOf(false) }
+  val displayedPages = if (bookmarkedOnly) pages.filter(PageUiInfo::bookmarked) else pages
+  val currentIndex = displayedPages.indexOfFirst { it.id == currentPageId }.coerceAtLeast(0)
+  var model by remember { mutableStateOf(PageManagerModel().openAt(currentIndex)) }
+  var panelWidth by remember { mutableFloatStateOf(1f) }
+  var panelHeight by remember { mutableFloatStateOf(1f) }
+  var side1Armed by remember { mutableStateOf(false) }
+  var side1Delta by remember { mutableStateOf(0) }
+  var draggingId by remember { mutableStateOf<UUID?>(null) }
+  var dragTargetIndex by remember { mutableStateOf<Int?>(null) }
+  var edgeDirection by remember { mutableStateOf(0) }
+  var edgeSince by remember { mutableLongStateOf(0L) }
+  val vertical = dockEdge == DockEdge.START || dockEdge == DockEdge.END
+  val scrollState = rememberScrollState()
 
-    LaunchedEffect(currentPageId, displayedPages.map(PageUiInfo::id)) {
-        model = model.afterStructureChange(currentIndex, displayedPages.size)
+  LaunchedEffect(currentPageId, displayedPages.map(PageUiInfo::id)) {
+    model = model.afterStructureChange(currentIndex, displayedPages.size)
+  }
+  LaunchedEffect(model.pendingDeleteId, model.pendingDeleteAt) {
+    if (model.pendingDeleteId != null) {
+      val stamp = model.pendingDeleteAt
+      delay(PageManagerModel.DELETE_CONFIRM_MS)
+      if (model.pendingDeleteAt == stamp) model = model.cancelDelete()
     }
-    LaunchedEffect(model.pendingDeleteId, model.pendingDeleteAt) {
-        if (model.pendingDeleteId != null) {
-            val stamp = model.pendingDeleteAt
-            delay(PageManagerModel.DELETE_CONFIRM_MS)
-            if (model.pendingDeleteAt == stamp) model = model.cancelDelete()
-        }
-    }
-    LaunchedEffect(model.chunkIndex, vertical) {
-        scrollState.scrollTo(0)
-    }
-    val visibleIndices = model.visibleRange(displayedPages.size).toList()
-    val visiblePages = visibleIndices.mapNotNull(displayedPages::getOrNull)
-    LaunchedEffect(visiblePages.map { it.id to it.contentRevision }) {
-        requestThumbnails(visiblePages.map { it.id })
-    }
+  }
+  LaunchedEffect(model.chunkIndex, vertical) {
+    scrollState.scrollTo(0)
+  }
+  val visibleIndices = model.visibleRange(displayedPages.size).toList()
+  val visiblePages = visibleIndices.mapNotNull(displayedPages::getOrNull)
+  LaunchedEffect(visiblePages.map { it.id to it.contentRevision }) {
+    requestThumbnails(visiblePages.map { it.id })
+  }
 
-    val side1Input = Modifier.pointerInteropFilter { event ->
-        when (event.actionMasked) {
-            MotionEvent.ACTION_DOWN -> {
-                val tool = if (event.pointerCount > 0) event.getToolType(0) else MotionEvent.TOOL_TYPE_UNKNOWN
-                val modifierKey = PenFunctionKey.classifyClickModifier(
-                    tool, event.buttonState or PenButtonTracker.currentButtonState, event.source
-                )
-                side1Armed = modifierKey == PenSideButton.SIDE_1
-                val main = if (vertical) event.y else event.x
-                val mainSize = if (vertical) panelHeight else panelWidth
-                side1Delta = if (main < mainSize / 2f) -1 else 1
-                side1Armed
-            }
-            MotionEvent.ACTION_UP -> {
-                if (!side1Armed) return@pointerInteropFilter false
-                side1Armed = false
-                PenButtonTracker.consumeClickModifier()
-                val (updated, changed) = model.changeChunk(side1Delta, displayedPages.size)
-                model = updated
-                if (!changed) onNotice(if (side1Delta < 0) noteText("已经是第一组缩略图", "Already at the first thumbnail group") else noteText("已经是最后一组缩略图", "Already at the last thumbnail group"))
-                true
-            }
-            MotionEvent.ACTION_CANCEL -> {
-                val consumed = side1Armed
-                side1Armed = false
-                consumed
-            }
-            else -> side1Armed
-        }
-    }
-
-    val dragInput = Modifier.pointerInput(vertical, displayedPages.map { it.id }) {
-        val slotExtent = if (vertical) thumbnailSize.height.toPx() else thumbnailSize.width.toPx()
-        detectDragGesturesAfterLongPress(
-            onDragStart = { position ->
-                model = model.cancelDelete()
-                val main = (if (vertical) position.y else position.x) + scrollState.value
-                val slot = floor(main / slotExtent).toInt()
-                    .coerceIn(0, PageManagerModel.CHUNK_SIZE - 1)
-                val index = model.chunkIndex * PageManagerModel.CHUNK_SIZE + slot
-                draggingId = displayedPages.getOrNull(index)?.id
-                dragTargetIndex = index.takeIf { it in displayedPages.indices }
-                edgeDirection = 0
-                edgeSince = 0L
-            },
-            onDrag = { change, _ ->
-                val id = draggingId ?: return@detectDragGesturesAfterLongPress
-                change.consume()
-                val mainSize = if (vertical) panelHeight else panelWidth
-                val viewportMain = if (vertical) change.position.y else change.position.x
-                val main = viewportMain + scrollState.value
-                val slot = floor(main / slotExtent).toInt().coerceIn(0, PageManagerModel.CHUNK_SIZE - 1)
-                dragTargetIndex = (model.chunkIndex * PageManagerModel.CHUNK_SIZE + slot)
-                    .coerceIn(0, displayedPages.lastIndex)
-                val edge = when {
-                    viewportMain < slotExtent * 0.55f -> -1
-                    viewportMain > mainSize - slotExtent * 0.55f -> 1
-                    else -> 0
-                }
-                val now = SystemClock.uptimeMillis()
-                if (edge == 0) {
-                    edgeDirection = 0
-                    edgeSince = 0L
-                } else if (edge != edgeDirection) {
-                    edgeDirection = edge
-                    edgeSince = now
-                } else if (now - edgeSince >= PageManagerModel.EDGE_DWELL_MS) {
-                    val (updated, changed) = model.changeChunk(edge, displayedPages.size)
-                    if (changed) {
-                        model = updated
-                        dragTargetIndex = if (edge < 0) {
-                            minOf(
-                                (model.chunkIndex + 1) * PageManagerModel.CHUNK_SIZE - 1,
-                                displayedPages.lastIndex
-                            )
-                        } else {
-                            model.chunkIndex * PageManagerModel.CHUNK_SIZE
-                        }
-                    }
-                    edgeSince = now
-                }
-                @Suppress("UNUSED_VARIABLE") val keepGestureAlive = id
-            },
-            onDragEnd = {
-                val id = draggingId
-                val target = dragTargetIndex
-                if (id != null && target != null) {
-                    val targetPageId = displayedPages.getOrNull(target)?.id
-                    val fullTarget = targetPageId?.let { targetId ->
-                        pages.indexOfFirst { it.id == targetId }
-                    }?.takeIf { it >= 0 } ?: target
-                    onMove(id, fullTarget)
-                }
-                draggingId = null
-                dragTargetIndex = null
-            },
-            onDragCancel = {
-                draggingId = null
-                dragTargetIndex = null
-            }
+  val side1Input = Modifier.pointerInteropFilter { event ->
+    when (event.actionMasked) {
+      MotionEvent.ACTION_DOWN -> {
+        val tool = if (event.pointerCount > 0) event.getToolType(0) else MotionEvent.TOOL_TYPE_UNKNOWN
+        val modifierKey = PenFunctionKey.classifyClickModifier(
+          tool,
+          event.buttonState or PenButtonTracker.currentButtonState,
+          event.source,
         )
-    }
+        side1Armed = modifierKey == PenSideButton.SIDE_1
+        val main = if (vertical) event.y else event.x
+        val mainSize = if (vertical) panelHeight else panelWidth
+        side1Delta = if (main < mainSize / 2f) -1 else 1
+        side1Armed
+      }
 
-    val card: @Composable (Int, Modifier) -> Unit = { slot, cardModifier ->
-        val pageIndex = model.chunkIndex * PageManagerModel.CHUNK_SIZE + slot
-        val info = displayedPages.getOrNull(pageIndex)
-        if (info == null) {
-            Box(cardModifier)
-        } else {
-            PageThumbnailCard(
-                state = PageThumbnailCardState(
-                    modifier = cardModifier.padding(2.dp),
-                    info = info,
-                    bitmap = thumbnail(info.id),
-                    current = info.id == currentPageId,
-                    pendingDelete = info.id == model.pendingDeleteId,
-                    dragging = info.id == draggingId,
-                ),
-                actions = PageThumbnailCardActions(
-                    onNormalClick = {
-                        model = model.cancelDelete()
-                        onSelect(info.id)
-                    },
-                    onSide2Click = {
-                        model = model.cancelDelete()
-                        onAddAfter(info.id)
-                        if (bookmarkedOnly) bookmarkedOnly = false
-                        val fullIndex = pages.indexOfFirst { it.id == info.id }.coerceAtLeast(0)
-                        model = model.afterStructureChange(fullIndex + 1, pages.size + 1)
-                    },
-                    onSide3Click = {
-                        val now = SystemClock.uptimeMillis()
-                        val (updated, decision) = model.deleteClick(info.id, now)
-                        model = updated
-                        if (decision == DeleteDecision.ARMED) {
-                            onNotice(noteText("再次按 Side3 删除第 ${info.pageNumber} 页", "Press Side3 again to delete page ${info.pageNumber}"))
-                        } else if (onDelete(info.id)) {
-                            onNotice(noteText("已删除第 ${info.pageNumber} 页", "Deleted page ${info.pageNumber}"))
-                            model = model.afterStructureChange(
-                                currentIndex,
-                                (displayedPages.size - 1).coerceAtLeast(0)
-                            )
-                        }
-                    },
-                ),
-            )
+      MotionEvent.ACTION_UP -> {
+        if (!side1Armed) return@pointerInteropFilter false
+        side1Armed = false
+        PenButtonTracker.consumeClickModifier()
+        val (updated, changed) = model.changeChunk(side1Delta, displayedPages.size)
+        model = updated
+        if (!changed) {
+          onNotice(
+            if (side1Delta < 0) {
+              noteText(
+                "已经是第一组缩略图",
+                "Already at the first thumbnail group",
+              )
+            } else {
+              noteText("已经是最后一组缩略图", "Already at the last thumbnail group")
+            },
+          )
         }
-    }
-    val showAll = {
-        bookmarkedOnly = false
-        model = PageManagerModel().openAt(
-            pages.indexOfFirst { it.id == currentPageId }.coerceAtLeast(0)
-        )
-    }
-    val showBookmarks = {
-        bookmarkedOnly = true
-        val bookmarkIndex = pages.filter(PageUiInfo::bookmarked)
-            .indexOfFirst { it.id == currentPageId }
-            .coerceAtLeast(0)
-        model = PageManagerModel().openAt(bookmarkIndex)
-    }
-    val viewportModifier = Modifier
-        .fillMaxSize()
-        .padding(PAGE_MANAGER_CONTENT_PADDING)
-        .onSizeChanged { panelWidth = it.width.toFloat(); panelHeight = it.height.toFloat() }
-        .then(side1Input)
-        .then(dragInput)
+        true
+      }
 
-    ToolbarFlyoutSurface(
-        title = noteText("页面 ${currentIndex + 1}/${displayedPages.size.coerceAtLeast(1)}", "Page ${currentIndex + 1}/${displayedPages.size.coerceAtLeast(1)}"),
-        dockEdge = dockEdge,
-        modifier = modifier,
-        compactHeaderWidth = if (vertical) null else PAGE_MANAGER_HORIZONTAL_TITLE_WIDTH,
-        wrapContentWidth = false
-    ) {
-        if (vertical) {
-            Column(Modifier.fillMaxSize()) {
-                Row(Modifier.fillMaxWidth().height(PAGE_MANAGER_TAB_RAIL_WIDTH)) {
-                    PageManagerTab(
-                        selected = !bookmarkedOnly,
-                        icon = Icons.Filled.Layers,
-                        description = noteText("全部页面", "All pages"),
-                        modifier = Modifier.weight(1f),
-                        onClick = showAll
-                    )
-                    PageManagerTab(
-                        selected = bookmarkedOnly,
-                        icon = Icons.Filled.Bookmark,
-                        description = noteText("书签页面", "Bookmarked pages"),
-                        modifier = Modifier.weight(1f),
-                        onClick = showBookmarks
-                    )
-                }
-                Column(
-                    viewportModifier.verticalScroll(scrollState),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    repeat(PageManagerModel.CHUNK_SIZE) { slot ->
-                        card(slot, Modifier.size(thumbnailSize))
-                    }
-                }
-            }
-        } else {
-            Row(Modifier.fillMaxSize()) {
-                Column(Modifier.width(PAGE_MANAGER_TAB_RAIL_WIDTH).fillMaxHeight()) {
-                    PageManagerTab(
-                        selected = !bookmarkedOnly,
-                        icon = Icons.Filled.Layers,
-                        description = noteText("全部页面", "All pages"),
-                        modifier = Modifier.weight(1f),
-                        onClick = showAll
-                    )
-                    PageManagerTab(
-                        selected = bookmarkedOnly,
-                        icon = Icons.Filled.Bookmark,
-                        description = noteText("书签页面", "Bookmarked pages"),
-                        modifier = Modifier.weight(1f),
-                        onClick = showBookmarks
-                    )
-                }
-                Row(
-                    viewportModifier.horizontalScroll(scrollState),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    repeat(PageManagerModel.CHUNK_SIZE) { slot ->
-                        card(slot, Modifier.size(thumbnailSize))
-                    }
-                }
-            }
-        }
+      MotionEvent.ACTION_CANCEL -> {
+        val consumed = side1Armed
+        side1Armed = false
+        consumed
+      }
+
+      else -> side1Armed
     }
+  }
+
+  val dragInput = Modifier.pointerInput(vertical, displayedPages.map { it.id }) {
+    val slotExtent = if (vertical) thumbnailSize.height.toPx() else thumbnailSize.width.toPx()
+    detectDragGesturesAfterLongPress(
+      onDragStart = { position ->
+        model = model.cancelDelete()
+        val main = (if (vertical) position.y else position.x) + scrollState.value
+        val slot = floor(main / slotExtent).toInt()
+          .coerceIn(0, PageManagerModel.CHUNK_SIZE - 1)
+        val index = model.chunkIndex * PageManagerModel.CHUNK_SIZE + slot
+        draggingId = displayedPages.getOrNull(index)?.id
+        dragTargetIndex = index.takeIf { it in displayedPages.indices }
+        edgeDirection = 0
+        edgeSince = 0L
+      },
+      onDrag = { change, _ ->
+        val id = draggingId ?: return@detectDragGesturesAfterLongPress
+        change.consume()
+        val mainSize = if (vertical) panelHeight else panelWidth
+        val viewportMain = if (vertical) change.position.y else change.position.x
+        val main = viewportMain + scrollState.value
+        val slot = floor(main / slotExtent).toInt().coerceIn(0, PageManagerModel.CHUNK_SIZE - 1)
+        dragTargetIndex = (model.chunkIndex * PageManagerModel.CHUNK_SIZE + slot)
+          .coerceIn(0, displayedPages.lastIndex)
+        val edge = when {
+          viewportMain < slotExtent * 0.55f -> -1
+          viewportMain > mainSize - slotExtent * 0.55f -> 1
+          else -> 0
+        }
+        val now = SystemClock.uptimeMillis()
+        if (edge == 0) {
+          edgeDirection = 0
+          edgeSince = 0L
+        } else if (edge != edgeDirection) {
+          edgeDirection = edge
+          edgeSince = now
+        } else if (now - edgeSince >= PageManagerModel.EDGE_DWELL_MS) {
+          val (updated, changed) = model.changeChunk(edge, displayedPages.size)
+          if (changed) {
+            model = updated
+            dragTargetIndex = if (edge < 0) {
+              minOf(
+                (model.chunkIndex + 1) * PageManagerModel.CHUNK_SIZE - 1,
+                displayedPages.lastIndex,
+              )
+            } else {
+              model.chunkIndex * PageManagerModel.CHUNK_SIZE
+            }
+          }
+          edgeSince = now
+        }
+        @Suppress("UNUSED_VARIABLE")
+        val keepGestureAlive = id
+      },
+      onDragEnd = {
+        val id = draggingId
+        val target = dragTargetIndex
+        if (id != null && target != null) {
+          val targetPageId = displayedPages.getOrNull(target)?.id
+          val fullTarget = targetPageId?.let { targetId ->
+            pages.indexOfFirst { it.id == targetId }
+          }?.takeIf { it >= 0 } ?: target
+          onMove(id, fullTarget)
+        }
+        draggingId = null
+        dragTargetIndex = null
+      },
+      onDragCancel = {
+        draggingId = null
+        dragTargetIndex = null
+      },
+    )
+  }
+
+  val card: @Composable (Int, Modifier) -> Unit = { slot, cardModifier ->
+    val pageIndex = model.chunkIndex * PageManagerModel.CHUNK_SIZE + slot
+    val info = displayedPages.getOrNull(pageIndex)
+    if (info == null) {
+      Box(cardModifier)
+    } else {
+      PageThumbnailCard(
+        state = PageThumbnailCardState(
+          modifier = cardModifier.padding(2.dp),
+          info = info,
+          bitmap = thumbnail(info.id),
+          current = info.id == currentPageId,
+          pendingDelete = info.id == model.pendingDeleteId,
+          dragging = info.id == draggingId,
+        ),
+        actions = PageThumbnailCardActions(
+          onNormalClick = {
+            model = model.cancelDelete()
+            onSelect(info.id)
+          },
+          onSide2Click = {
+            model = model.cancelDelete()
+            onAddAfter(info.id)
+            if (bookmarkedOnly) bookmarkedOnly = false
+            val fullIndex = pages.indexOfFirst { it.id == info.id }.coerceAtLeast(0)
+            model = model.afterStructureChange(fullIndex + 1, pages.size + 1)
+          },
+          onSide3Click = {
+            val now = SystemClock.uptimeMillis()
+            val (updated, decision) = model.deleteClick(info.id, now)
+            model = updated
+            if (decision == DeleteDecision.ARMED) {
+              onNotice(
+                noteText("再次按 Side3 删除第 ${info.pageNumber} 页", "Press Side3 again to delete page ${info.pageNumber}"),
+              )
+            } else if (onDelete(info.id)) {
+              onNotice(noteText("已删除第 ${info.pageNumber} 页", "Deleted page ${info.pageNumber}"))
+              model = model.afterStructureChange(
+                currentIndex,
+                (displayedPages.size - 1).coerceAtLeast(0),
+              )
+            }
+          },
+        ),
+      )
+    }
+  }
+  val showAll = {
+    bookmarkedOnly = false
+    model = PageManagerModel().openAt(
+      pages.indexOfFirst { it.id == currentPageId }.coerceAtLeast(0),
+    )
+  }
+  val showBookmarks = {
+    bookmarkedOnly = true
+    val bookmarkIndex = pages.filter(PageUiInfo::bookmarked)
+      .indexOfFirst { it.id == currentPageId }
+      .coerceAtLeast(0)
+    model = PageManagerModel().openAt(bookmarkIndex)
+  }
+  val viewportModifier = Modifier
+    .fillMaxSize()
+    .padding(PAGE_MANAGER_CONTENT_PADDING)
+    .onSizeChanged {
+      panelWidth = it.width.toFloat();
+      panelHeight = it.height.toFloat()
+    }
+    .then(side1Input)
+    .then(dragInput)
+
+  ToolbarFlyoutSurface(
+    title = noteText(
+      "页面 ${currentIndex + 1}/${displayedPages.size.coerceAtLeast(1)}",
+      "Page ${currentIndex + 1}/${displayedPages.size.coerceAtLeast(1)}",
+    ),
+    dockEdge = dockEdge,
+    modifier = modifier,
+    compactHeaderWidth = if (vertical) null else PAGE_MANAGER_HORIZONTAL_TITLE_WIDTH,
+    wrapContentWidth = false,
+  ) {
+    if (vertical) {
+      Column(Modifier.fillMaxSize()) {
+        Row(Modifier.fillMaxWidth().height(PAGE_MANAGER_TAB_RAIL_WIDTH)) {
+          PageManagerTab(
+            selected = !bookmarkedOnly,
+            icon = Icons.Filled.Layers,
+            description = noteText("全部页面", "All pages"),
+            modifier = Modifier.weight(1f),
+            onClick = showAll,
+          )
+          PageManagerTab(
+            selected = bookmarkedOnly,
+            icon = Icons.Filled.Bookmark,
+            description = noteText("书签页面", "Bookmarked pages"),
+            modifier = Modifier.weight(1f),
+            onClick = showBookmarks,
+          )
+        }
+        Column(
+          viewportModifier.verticalScroll(scrollState),
+          horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+          repeat(PageManagerModel.CHUNK_SIZE) { slot ->
+            card(slot, Modifier.size(thumbnailSize))
+          }
+        }
+      }
+    } else {
+      Row(Modifier.fillMaxSize()) {
+        Column(Modifier.width(PAGE_MANAGER_TAB_RAIL_WIDTH).fillMaxHeight()) {
+          PageManagerTab(
+            selected = !bookmarkedOnly,
+            icon = Icons.Filled.Layers,
+            description = noteText("全部页面", "All pages"),
+            modifier = Modifier.weight(1f),
+            onClick = showAll,
+          )
+          PageManagerTab(
+            selected = bookmarkedOnly,
+            icon = Icons.Filled.Bookmark,
+            description = noteText("书签页面", "Bookmarked pages"),
+            modifier = Modifier.weight(1f),
+            onClick = showBookmarks,
+          )
+        }
+        Row(
+          viewportModifier.horizontalScroll(scrollState),
+          verticalAlignment = Alignment.CenterVertically,
+        ) {
+          repeat(PageManagerModel.CHUNK_SIZE) { slot ->
+            card(slot, Modifier.size(thumbnailSize))
+          }
+        }
+      }
+    }
+  }
 }
 
 @Composable
 private fun PageManagerTab(
-    selected: Boolean,
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    description: String,
-    modifier: Modifier,
-    onClick: () -> Unit
+  selected: Boolean,
+  icon: androidx.compose.ui.graphics.vector.ImageVector,
+  description: String,
+  modifier: Modifier,
+  onClick: () -> Unit,
 ) {
-    Box(
-        modifier
-            .fillMaxSize()
-            .background(if (selected) Color.Black else Color(0xFFE5E5E5))
-            .border(0.5.dp, Color(0xFF808080))
-            .clickable(onClick = onClick),
-        contentAlignment = Alignment.Center
-    ) {
-        Icon(icon, contentDescription = description, tint = if (selected) Color.White else Color.Black)
-    }
+  Box(
+    modifier
+      .fillMaxSize()
+      .background(if (selected) Color.Black else Color(0xFFE5E5E5))
+      .border(0.5.dp, Color(0xFF808080))
+      .clickable(onClick = onClick),
+    contentAlignment = Alignment.Center,
+  ) {
+    Icon(icon, contentDescription = description, tint = if (selected) Color.White else Color.Black)
+  }
 }
 
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
-private fun PageThumbnailCard(
-    state: PageThumbnailCardState,
-    actions: PageThumbnailCardActions,
-) {
-    val modifier = state.modifier
-    val info = state.info
-    val bitmap = state.bitmap
-    val current = state.current
-    val pendingDelete = state.pendingDelete
-    val dragging = state.dragging
-    val onNormalClick = actions.onNormalClick
-    val onSide2Click = actions.onSide2Click
-    val onSide3Click = actions.onSide3Click
-    val stylus = remember(info.id) { StylusClickResolver() }
-    val border = when {
-        pendingDelete -> Color(0xFFB00020)
-        current -> Color.Black
-        else -> Color(0xFF888888)
-    }
-    @Suppress("DEPRECATION")
-    Box(
-        modifier = modifier
-            .background(if (dragging) Color(0xFFD0D0D0) else Color.White)
-            .border(if (current || pendingDelete) 3.dp else 1.dp, border)
-            .pointerInteropFilter { event -> stylus.observe(event); false }
-            .clickable {
-                when (stylus.consume()) {
-                    PenSideButton.SIDE_2 -> onSide2Click()
-                    PenSideButton.SIDE_3 -> onSide3Click()
-                    PenSideButton.SIDE_1 -> Unit // Parent consumes Side1 for chunk paging.
-                    PenSideButton.NONE -> onNormalClick()
-                }
-            }
-    ) {
-        if (bitmap != null) {
-            Image(
-                bitmap = bitmap.asImageBitmap(),
-                contentDescription = "Page ${info.pageNumber}",
-                modifier = Modifier.fillMaxSize(),
-                contentScale = ContentScale.Fit
-            )
+private fun PageThumbnailCard(state: PageThumbnailCardState, actions: PageThumbnailCardActions) {
+  val modifier = state.modifier
+  val info = state.info
+  val bitmap = state.bitmap
+  val current = state.current
+  val pendingDelete = state.pendingDelete
+  val dragging = state.dragging
+  val onNormalClick = actions.onNormalClick
+  val onSide2Click = actions.onSide2Click
+  val onSide3Click = actions.onSide3Click
+  val stylus = remember(info.id) { StylusClickResolver() }
+  val border = when {
+    pendingDelete -> Color(0xFFB00020)
+    current -> Color.Black
+    else -> Color(0xFF888888)
+  }
+  @Suppress("DEPRECATION")
+  Box(
+    modifier = modifier
+      .background(if (dragging) Color(0xFFD0D0D0) else Color.White)
+      .border(if (current || pendingDelete) 3.dp else 1.dp, border)
+      .pointerInteropFilter { event ->
+        stylus.observe(event);
+        false
+      }
+      .clickable {
+        when (stylus.consume()) {
+          PenSideButton.SIDE_2 -> onSide2Click()
+
+          PenSideButton.SIDE_3 -> onSide3Click()
+
+          PenSideButton.SIDE_1 -> Unit
+
+          // Parent consumes Side1 for chunk paging.
+          PenSideButton.NONE -> onNormalClick()
         }
-        Text(
-            text = info.pageNumber.toString(),
-            modifier = Modifier.align(Alignment.TopStart).background(Color(0xDFFFFFFF)).padding(2.dp),
-            color = Color.Black
-        )
-        if (info.bookmarked) {
-            Icon(
-                Icons.Filled.Bookmark,
-                contentDescription = "Bookmarked",
-                modifier = Modifier.align(Alignment.TopEnd).padding(2.dp).size(16.dp),
-                tint = Color.Black
-            )
-        }
+      },
+  ) {
+    if (bitmap != null) {
+      Image(
+        bitmap = bitmap.asImageBitmap(),
+        contentDescription = "Page ${info.pageNumber}",
+        modifier = Modifier.fillMaxSize(),
+        contentScale = ContentScale.Fit,
+      )
     }
+    Text(
+      text = info.pageNumber.toString(),
+      modifier = Modifier.align(Alignment.TopStart).background(Color(0xDFFFFFFF)).padding(2.dp),
+      color = Color.Black,
+    )
+    if (info.bookmarked) {
+      Icon(
+        Icons.Filled.Bookmark,
+        contentDescription = "Bookmarked",
+        modifier = Modifier.align(Alignment.TopEnd).padding(2.dp).size(16.dp),
+        tint = Color.Black,
+      )
+    }
+  }
 }

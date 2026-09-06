@@ -31,61 +31,60 @@ import android.os.EinkManager
  * the erase.
  */
 class EinkRefreshController(context: Context) {
-    private val appContext = context.applicationContext
-    private var eink: EinkManager? = null
-    private var einkLookupFailed = false
+  private val appContext = context.applicationContext
+  private var eink: EinkManager? = null
+  private var einkLookupFailed = false
 
-    private fun manager(): EinkManager? {
-        var m = eink
-        if (m == null && !einkLookupFailed) {
-            m = try {
-                appContext.getSystemService("eink") as? EinkManager
-            } catch (t: Throwable) {
-                null
-            }
-            if (m == null) {
-                einkLookupFailed = true
-                EventLog.log(TAG, "ERROR getSystemService(eink) returned null/unavailable")
-            } else {
-                eink = m
-                EventLog.log(TAG, "eink service acquired")
-            }
-        }
-        return m
+  private fun manager(): EinkManager? {
+    var m = eink
+    if (m == null && !einkLookupFailed) {
+      m = try {
+        appContext.getSystemService("eink") as? EinkManager
+      } catch (t: Throwable) {
+        null
+      }
+      if (m == null) {
+        einkLookupFailed = true
+        EventLog.log(TAG, "ERROR getSystemService(eink) returned null/unavailable")
+      } else {
+        eink = m
+        EventLog.log(TAG, "eink service acquired")
+      }
     }
+    return m
+  }
 
-    /** Enter autowrite/fast mode. Call when an erase gesture begins. */
-    fun enterEraseFastMode() {
-        setMode(MODE_AUTOWRITE_FAST)
+  /** Enter autowrite/fast mode. Call when an erase gesture begins. */
+  fun enterEraseFastMode() {
+    setMode(MODE_AUTOWRITE_FAST)
+  }
+
+  /**
+   * Revert to quality/full-refresh mode. Call once an erase gesture has
+   * been applied, so any fast-mode residue from it is flushed before the
+   * next pen-down lands nearby.
+   */
+  fun exitEraseFastMode() {
+    setMode(qualityModeForSdk())
+  }
+
+  private fun setMode(mode: String) {
+    val m = manager() ?: return
+    try {
+      m.setMode(mode)
+      EventLog.log(TAG, "setMode($mode)")
+    } catch (t: Throwable) {
+      EventLog.log(TAG, "ERROR setMode($mode): ${t.javaClass.simpleName}: ${t.message}")
     }
+  }
 
-    /**
-     * Revert to quality/full-refresh mode. Call once an erase gesture has
-     * been applied, so any fast-mode residue from it is flushed before the
-     * next pen-down lands nearby.
-     */
-    fun exitEraseFastMode() {
-        setMode(qualityModeForSdk())
-    }
+  private fun qualityModeForSdk(): String = if (Build.VERSION.SDK_INT == 34) MODE_QUALITY_SDK34 else MODE_QUALITY_LEGACY
 
-    private fun setMode(mode: String) {
-        val m = manager() ?: return
-        try {
-            m.setMode(mode)
-            EventLog.log(TAG, "setMode($mode)")
-        } catch (t: Throwable) {
-            EventLog.log(TAG, "ERROR setMode($mode): ${t.javaClass.simpleName}: ${t.message}")
-        }
-    }
+  companion object {
+    private const val TAG = "EinkRefresh"
 
-    private fun qualityModeForSdk(): String =
-        if (Build.VERSION.SDK_INT == 34) MODE_QUALITY_SDK34 else MODE_QUALITY_LEGACY
-
-    companion object {
-        private const val TAG = "EinkRefresh"
-
-        private const val MODE_AUTOWRITE_FAST = "0"
-        private const val MODE_QUALITY_SDK34 = "9"
-        private const val MODE_QUALITY_LEGACY = "7"
-    }
+    private const val MODE_AUTOWRITE_FAST = "0"
+    private const val MODE_QUALITY_SDK34 = "9"
+    private const val MODE_QUALITY_LEGACY = "7"
+  }
 }

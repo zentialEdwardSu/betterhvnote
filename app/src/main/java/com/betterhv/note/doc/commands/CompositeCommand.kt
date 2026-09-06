@@ -12,27 +12,27 @@ import java.util.UUID
  * [com.betterhv.note.doc.CommandStack.push] since the operations already ran.
  */
 class CompositeCommand(private val operations: List<Command>) : Command {
-    override val affectedObjects: Map<java.util.UUID, Set<java.util.UUID>> =
-        operations.flatMap { it.affectedObjects.entries }
-            .groupBy({ it.key }, { it.value })
-            .mapValues { (_, values) -> values.flatten().toSet() }
-    override val affectedPages: Set<java.util.UUID> = operations.flatMap { it.affectedPages }.toSet()
-    override val changesPageStructure: Boolean = operations.any { it.changesPageStructure }
-    override fun currentObject(pageId: UUID, objectId: UUID): PageObject? {
-        for (operation in operations) {
-            if (objectId in operation.affectedObjects[pageId].orEmpty()) {
-                return operation.currentObject(pageId, objectId)
-            }
-        }
-        return null
+  override val affectedObjects: Map<java.util.UUID, Set<java.util.UUID>> =
+    operations.flatMap { it.affectedObjects.entries }
+      .groupBy({ it.key }, { it.value })
+      .mapValues { (_, values) -> values.flatten().toSet() }
+  override val affectedPages: Set<java.util.UUID> = operations.flatMap { it.affectedPages }.toSet()
+  override val changesPageStructure: Boolean = operations.any { it.changesPageStructure }
+  override fun currentObject(pageId: UUID, objectId: UUID): PageObject? {
+    for (operation in operations) {
+      if (objectId in operation.affectedObjects[pageId].orEmpty()) {
+        return operation.currentObject(pageId, objectId)
+      }
     }
-    override fun currentPage(pageId: UUID) = operations.firstNotNullOfOrNull { it.currentPage(pageId) }
+    return null
+  }
+  override fun currentPage(pageId: UUID) = operations.firstNotNullOfOrNull { it.currentPage(pageId) }
 
-    override fun execute() {
-        for (op in operations) op.execute()
-    }
+  override fun execute() {
+    for (op in operations) op.execute()
+  }
 
-    override fun undo() {
-        for (op in operations.asReversed()) op.undo()
-    }
+  override fun undo() {
+    for (op in operations.asReversed()) op.undo()
+  }
 }

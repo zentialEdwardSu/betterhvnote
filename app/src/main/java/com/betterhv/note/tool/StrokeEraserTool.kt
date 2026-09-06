@@ -20,66 +20,66 @@ import java.util.UUID
  * stroke touched.
  */
 class StrokeEraserTool(
-    private val page: Page,
-    private val commandStack: CommandStack,
-    private val host: ToolHost,
-    private val eraserRadiusProvider: () -> Float
+  private val page: Page,
+  private val commandStack: CommandStack,
+  private val host: ToolHost,
+  private val eraserRadiusProvider: () -> Float,
 ) : EraserTool {
-    private val hitIdsThisGesture = LinkedHashSet<UUID>()
-    private val executedThisGesture = ArrayList<DeleteObjectsCommand>()
+  private val hitIdsThisGesture = LinkedHashSet<UUID>()
+  private val executedThisGesture = ArrayList<DeleteObjectsCommand>()
 
-    override fun onDown(x: Float, y: Float) {
-        hitIdsThisGesture.clear()
-        executedThisGesture.clear()
-        eraseAt(x, y)
-    }
+  override fun onDown(x: Float, y: Float) {
+    hitIdsThisGesture.clear()
+    executedThisGesture.clear()
+    eraseAt(x, y)
+  }
 
-    override fun onBatch(points: List<InkPoint>) {
-        for (p in points) eraseAt(p.x, p.y)
-    }
+  override fun onBatch(points: List<InkPoint>) {
+    for (p in points) eraseAt(p.x, p.y)
+  }
 
-    override fun onUp() {
-        commit()
-    }
+  override fun onUp() {
+    commit()
+  }
 
-    override fun onCancel() {
-        for (cmd in executedThisGesture.asReversed()) cmd.undo()
-        hitIdsThisGesture.clear()
-        executedThisGesture.clear()
-    }
+  override fun onCancel() {
+    for (cmd in executedThisGesture.asReversed()) cmd.undo()
+    hitIdsThisGesture.clear()
+    executedThisGesture.clear()
+  }
 
-    /** One eraser sample in page/view coordinates -- also called directly by the tail-eraser overlay. */
-    override fun eraseAt(x: Float, y: Float) {
-        val radius = eraserRadiusProvider()
-        val hit = Bounds(x - radius, y - radius, x + radius, y + radius)
-        var dirty: Bounds? = null
-        val newlyHit = ArrayList<UUID>()
-        for (obj in page.queryObjects(hit)) {
-            if (obj !is StrokeObject) continue
-            if (obj.id in hitIdsThisGesture) continue
-            if (!obj.pageBounds.intersects(hit)) continue
-            val inv = obj.transform.invert() ?: continue
-            val local = inv.mapPoint(x, y)
-            val localRadius = radius / obj.transform.approximateScale().coerceAtLeast(1e-3f)
-            if (HitTest.strokeTouchesLocal(obj.stroke.points, local[0], local[1], localRadius)) {
-                hitIdsThisGesture.add(obj.id)
-                newlyHit.add(obj.id)
-                dirty = dirty?.union(obj.pageBounds) ?: obj.pageBounds
-            }
-        }
-        if (newlyHit.isEmpty()) return
-        val cmd = DeleteObjectsCommand(page, newlyHit)
-        cmd.execute()
-        executedThisGesture.add(cmd)
-        dirty?.let { host.requestRepaint(it) }
+  /** One eraser sample in page/view coordinates -- also called directly by the tail-eraser overlay. */
+  override fun eraseAt(x: Float, y: Float) {
+    val radius = eraserRadiusProvider()
+    val hit = Bounds(x - radius, y - radius, x + radius, y + radius)
+    var dirty: Bounds? = null
+    val newlyHit = ArrayList<UUID>()
+    for (obj in page.queryObjects(hit)) {
+      if (obj !is StrokeObject) continue
+      if (obj.id in hitIdsThisGesture) continue
+      if (!obj.pageBounds.intersects(hit)) continue
+      val inv = obj.transform.invert() ?: continue
+      val local = inv.mapPoint(x, y)
+      val localRadius = radius / obj.transform.approximateScale().coerceAtLeast(1e-3f)
+      if (HitTest.strokeTouchesLocal(obj.stroke.points, local[0], local[1], localRadius)) {
+        hitIdsThisGesture.add(obj.id)
+        newlyHit.add(obj.id)
+        dirty = dirty?.union(obj.pageBounds) ?: obj.pageBounds
+      }
     }
+    if (newlyHit.isEmpty()) return
+    val cmd = DeleteObjectsCommand(page, newlyHit)
+    cmd.execute()
+    executedThisGesture.add(cmd)
+    dirty?.let { host.requestRepaint(it) }
+  }
 
-    /** Bundles every deletion executed so far into one undo step and clears gesture state. */
-    override fun commit() {
-        if (executedThisGesture.isNotEmpty()) {
-            commandStack.push(CompositeCommand(executedThisGesture.toList()))
-        }
-        hitIdsThisGesture.clear()
-        executedThisGesture.clear()
+  /** Bundles every deletion executed so far into one undo step and clears gesture state. */
+  override fun commit() {
+    if (executedThisGesture.isNotEmpty()) {
+      commandStack.push(CompositeCommand(executedThisGesture.toList()))
     }
+    hitIdsThisGesture.clear()
+    executedThisGesture.clear()
+  }
 }

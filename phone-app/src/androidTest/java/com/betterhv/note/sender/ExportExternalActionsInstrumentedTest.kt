@@ -5,6 +5,7 @@ import android.net.Uri
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.core.content.IntentCompat
+import androidx.core.net.toUri
 import java.util.UUID
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
@@ -19,7 +20,7 @@ class ExportExternalActionsInstrumentedTest {
             scenario.onActivity { activity ->
                 listOf("application/pdf" to "test.pdf", "image/png" to "test.png").forEach { (mime, name) ->
                     val item = inboxItem(mime, name)
-                    val uri = Uri.parse("content://${activity.packageName}.files/inbox/${item.artifactId}.${name.substringAfterLast('.')}")
+                    val uri = "content://${activity.packageName}.files/inbox/${item.artifactId}.${name.substringAfterLast('.')}".toUri()
                     val view = viewExportIntent(activity, item, uri)
 
                     assertEquals(Intent.ACTION_VIEW, view.action)
@@ -31,7 +32,7 @@ class ExportExternalActionsInstrumentedTest {
                 }
 
                 val item = inboxItem("application/pdf", "test.pdf")
-                val uri = Uri.parse("content://${activity.packageName}.files/inbox/${item.artifactId}.pdf")
+                val uri = "content://${activity.packageName}.files/inbox/${item.artifactId}.pdf".toUri()
                 val chooser = shareExportIntent(activity, item, uri)
                 val send = IntentCompat.getParcelableExtra(chooser, Intent.EXTRA_INTENT, Intent::class.java)
 

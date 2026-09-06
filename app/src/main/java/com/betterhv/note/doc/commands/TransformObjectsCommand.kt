@@ -14,31 +14,30 @@ import java.util.UUID
  * drag" (spec §44's command-merge intent) without a separate merge pass.
  */
 class TransformObjectsCommand(
-    private val page: Page,
-    private val ids: List<UUID>,
-    private val before: Map<UUID, Transform2D>,
-    private var after: Map<UUID, Transform2D>
+  private val page: Page,
+  private val ids: List<UUID>,
+  private val before: Map<UUID, Transform2D>,
+  private var after: Map<UUID, Transform2D>,
 ) : Command {
-    override val affectedObjects = mapOf(page.id to ids.toSet())
-    override fun currentObject(pageId: UUID, objectId: UUID): PageObject? =
-        if (pageId == page.id) page.getObject(objectId) else null
-    override fun currentPage(pageId: UUID): Page? = if (pageId == page.id) page else null
+  override val affectedObjects = mapOf(page.id to ids.toSet())
+  override fun currentObject(pageId: UUID, objectId: UUID): PageObject? =
+    if (pageId == page.id) page.getObject(objectId) else null
+  override fun currentPage(pageId: UUID): Page? = if (pageId == page.id) page else null
 
+  fun updateAfter(newAfter: Map<UUID, Transform2D>) {
+    after = newAfter
+  }
 
-    fun updateAfter(newAfter: Map<UUID, Transform2D>) {
-        after = newAfter
-    }
+  /** Applies the current [after] transforms immediately, for live drag feedback. */
+  fun applyLive() {
+    for (id in ids) after[id]?.let { page.updateObjectTransform(id, it) }
+  }
 
-    /** Applies the current [after] transforms immediately, for live drag feedback. */
-    fun applyLive() {
-        for (id in ids) after[id]?.let { page.updateObjectTransform(id, it) }
-    }
+  override fun execute() {
+    for (id in ids) after[id]?.let { page.updateObjectTransform(id, it) }
+  }
 
-    override fun execute() {
-        for (id in ids) after[id]?.let { page.updateObjectTransform(id, it) }
-    }
-
-    override fun undo() {
-        for (id in ids) before[id]?.let { page.updateObjectTransform(id, it) }
-    }
+  override fun undo() {
+    for (id in ids) before[id]?.let { page.updateObjectTransform(id, it) }
+  }
 }

@@ -4,7 +4,7 @@ import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.plugin.compose")
-    id("io.gitlab.arturbosch.detekt")
+    id("dev.detekt")
 }
 
 val releaseStoreFile = providers.environmentVariable("ANDROID_RELEASE_KEYSTORE_FILE")
@@ -18,11 +18,11 @@ val releaseSigningReady = listOf(
 
 extensions.configure<ApplicationExtension> {
     namespace = "com.betterhv.note"
-    compileSdk = 34
+    compileSdk = 37
 
     defaultConfig {
         applicationId = "com.betterhv.note"
-        minSdk = 28
+        minSdk = 29
         targetSdk = 34
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         versionCode = providers.gradleProperty("noteVersionCode").get().toInt()
@@ -103,13 +103,14 @@ dependencies {
     implementation(project(":transfer-android"))
     implementation(project(":update-core"))
 
-    implementation("androidx.core:core-ktx:1.13.1")
-    implementation("androidx.activity:activity-compose:1.9.3")
-    implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.7")
-    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.7")
-    implementation("androidx.documentfile:documentfile:1.0.1")
-    implementation("com.google.code.gson:gson:2.11.0")
-    implementation(platform("androidx.compose:compose-bom:2024.10.01"))
+    implementation("androidx.core:core-ktx:1.19.0")
+    implementation("androidx.activity:activity-compose:1.13.0")
+    implementation("androidx.lifecycle:lifecycle-runtime-compose:2.11.0")
+    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.11.0")
+    implementation("androidx.documentfile:documentfile:1.1.0")
+    implementation("androidx.exifinterface:exifinterface:1.4.2")
+    implementation("com.google.code.gson:gson:2.14.0")
+    implementation(platform("androidx.compose:compose-bom:2026.08.00"))
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-graphics")
     implementation("androidx.compose.foundation:foundation")
@@ -122,8 +123,8 @@ dependencies {
     // The ink core (com.betterhv.note.ink, excluding InkRenderer) has no Android
     // dependencies, so plain JUnit on the JVM covers it -- no Robolectric needed.
     testImplementation("junit:junit:4.13.2")
-    androidTestImplementation("androidx.test:core:1.6.1")
-    androidTestImplementation("androidx.test:runner:1.6.2")
-    androidTestImplementation("androidx.test.ext:junit:1.2.1")
-    androidTestImplementation("androidx.test.uiautomator:uiautomator:2.3.0")
+    androidTestImplementation("androidx.test:core:1.7.0")
+    androidTestImplementation("androidx.test:runner:1.7.0")
+    androidTestImplementation("androidx.test.ext:junit:1.3.0")
+    androidTestImplementation("androidx.test.uiautomator:uiautomator:2.4.0")
 }

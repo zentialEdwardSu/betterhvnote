@@ -1,9 +1,12 @@
+@file:Suppress("ApplySharedPref")
+
 package com.betterhv.transfer.android
 
 import android.content.Context
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.Base64
+import androidx.core.content.edit
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import javax.crypto.Cipher
@@ -22,20 +25,20 @@ class PairingMigrationInstrumentedTest {
 
     @Before fun reset() {
         context.deleteDatabase("notelink_pairings.db")
-        context.getSharedPreferences(AndroidPairingController.PREFS, Context.MODE_PRIVATE).edit().clear().commit()
+        context.getSharedPreferences(AndroidPairingController.PREFS, Context.MODE_PRIVATE).edit(commit = true) {clear()}
     }
 
     @After fun cleanUp() = reset()
 
     @Test fun legacySinglePairingMigratesWithoutChangingSecret() {
         val secret = ByteArray(32) { (it * 3).toByte() }
-        context.getSharedPreferences(AndroidPairingController.PREFS, Context.MODE_PRIVATE).edit()
-            .putString(AndroidPairingController.KEY_LOCAL_ID, "note-id")
-            .putString(AndroidPairingController.KEY_PEER_ID, AndroidPairingController.LEGACY_PHONE_ID)
-            .putString(AndroidPairingController.KEY_PEER_NAME, "Old NoteLink")
-            .putLong(AndroidPairingController.KEY_PAIRED_AT, 1234L)
-            .putString(AndroidPairingController.KEY_SECRET, encryptLikeLegacyApp(secret))
-            .commit()
+        context.getSharedPreferences(AndroidPairingController.PREFS, Context.MODE_PRIVATE).edit(commit = true) {
+                putString(AndroidPairingController.KEY_LOCAL_ID, "note-id")
+                .putString(AndroidPairingController.KEY_PEER_ID, AndroidPairingController.LEGACY_PHONE_ID)
+                .putString(AndroidPairingController.KEY_PEER_NAME, "Old NoteLink")
+                .putLong(AndroidPairingController.KEY_PAIRED_AT, 1234L)
+                .putString(AndroidPairingController.KEY_SECRET, encryptLikeLegacyApp(secret))
+            }
 
         val controller = AndroidPairingController(context)
         val migrated = controller.pairedClients.single()

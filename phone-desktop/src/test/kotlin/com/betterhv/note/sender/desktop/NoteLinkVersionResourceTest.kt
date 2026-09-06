@@ -5,14 +5,14 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 
 class NoteLinkVersionResourceTest {
-    @Test
-    fun generatedResourceMatchesInjectedVersion() {
-        val expected = requireNotNull(System.getProperty("notelink.expectedVersion"))
-        val properties = Properties()
-        val resource = requireNotNull(javaClass.classLoader.getResourceAsStream("notelink-version.properties"))
+  @Test
+  fun generatedResourceMatchesInjectedVersion() {
+    val expected = requireNotNull(System.getProperty("notelink.expectedVersion"))
+    val properties = Properties()
+    val resource = requireNotNull(javaClass.classLoader.getResourceAsStream("notelink-version.properties"))
 
-        resource.use(properties::load)
+    resource.use(properties::load)
 
-        assertEquals(expected, properties.getProperty("version"))
-    }
+    assertEquals(expected, properties.getProperty("version"))
+  }
 }

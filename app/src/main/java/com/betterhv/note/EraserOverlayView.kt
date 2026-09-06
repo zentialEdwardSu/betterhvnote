@@ -28,37 +28,39 @@ import android.view.View
  */
 class EraserOverlayView(context: Context, private val pen: PenDrawView) : View(context) {
 
-    private var erasing = false
+  private var erasing = false
 
-    override fun onTouchEvent(event: MotionEvent): Boolean {
-        val isEraser = event.getToolType(0) == MotionEvent.TOOL_TYPE_ERASER
+  override fun onTouchEvent(event: MotionEvent): Boolean {
+    val isEraser = event.getToolType(0) == MotionEvent.TOOL_TYPE_ERASER
 
-        when (event.actionMasked) {
-            MotionEvent.ACTION_DOWN -> {
-                if (!isEraser) return false  // pen: let it reach PenDrawView/hvpen
-                erasing = true
-                pen.beginErase()
-                pen.eraseMove(event.x, event.y)
-                return true
-            }
-            MotionEvent.ACTION_MOVE -> {
-                if (!erasing) return false
-                // Replay batched historical samples so a fast erase drag doesn't
-                // skip over strokes between coarse MOVE deliveries.
-                for (h in 0 until event.historySize) {
-                    pen.eraseMove(event.getHistoricalX(h), event.getHistoricalY(h))
-                }
-                pen.eraseMove(event.x, event.y)
-                return true
-            }
-            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                if (!erasing) return false
-                pen.eraseMove(event.x, event.y)
-                pen.endErase()
-                erasing = false
-                return true
-            }
+    when (event.actionMasked) {
+      MotionEvent.ACTION_DOWN -> {
+        if (!isEraser) return false // pen: let it reach PenDrawView/hvpen
+        erasing = true
+        pen.beginErase()
+        pen.eraseMove(event.x, event.y)
+        return true
+      }
+
+      MotionEvent.ACTION_MOVE -> {
+        if (!erasing) return false
+        // Replay batched historical samples so a fast erase drag doesn't
+        // skip over strokes between coarse MOVE deliveries.
+        for (h in 0 until event.historySize) {
+          pen.eraseMove(event.getHistoricalX(h), event.getHistoricalY(h))
         }
-        return false
+        pen.eraseMove(event.x, event.y)
+        return true
+      }
+
+      MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+        if (!erasing) return false
+        pen.eraseMove(event.x, event.y)
+        pen.endErase()
+        erasing = false
+        return true
+      }
     }
+    return false
+  }
 }

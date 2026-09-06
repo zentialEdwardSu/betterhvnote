@@ -14,11 +14,11 @@ package com.betterhv.note.ink
  * Tilt fields are reserved by the spec but this device does not report them.
  */
 data class InkPoint(
-    val x: Float,
-    val y: Float,
-    val pressure: Float,
-    val timestamp: Long,
-    val tiltX: Float = 0.0f,
-    val tiltY: Float = 0.0f,
-    val azimuth: Float = 0.0f
+  val x: Float,
+  val y: Float,
+  val pressure: Float,
+  val timestamp: Long,
+  val tiltX: Float = 0.0f,
+  val tiltY: Float = 0.0f,
+  val azimuth: Float = 0.0f,
 )

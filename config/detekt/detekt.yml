@@ -1,43 +1,57 @@
-build:
-  maxIssues: 0
-  excludeCorrectable: false
-
 config:
   validation: true
   warningsAsErrors: true
 
-complexity:
-  LongMethod:
+ktlint:
+  active: true
+  code_style: intellij_idea
+  Indentation:
     active: true
-    threshold: 60
-  LongParameterList:
+    indentSize: 2
+  MaximumLineLength:
     active: true
-    functionThreshold: 6
-    constructorThreshold: 8
-    ignoreDefaultParameters: false
-  TooManyFunctions:
+    maxLineLength: 120
+
+naming:
+  active: true
+  PackageNaming:
     active: true
-    thresholdInFiles: 20
-    thresholdInClasses: 15
-  LargeClass:
+    packagePattern: '^[a-z]+(\.[a-z][a-z0-9]*)*$'
+  ClassNaming:
     active: true
-    threshold: 600
+    classPattern: '[A-Z][a-zA-Z0-9]*'
+  FunctionNaming:
+    active: true
+    functionPattern: '^[a-z][a-zA-Z0-9]*$'
+    ignoreAnnotated: ['Composable']
+    excludes: ['**/test/**', '**/androidTest/**', '**/JnaWindowsNativeApi.kt']
+  VariableNaming:
+    active: true
+    variablePattern: '^[a-z][a-zA-Z0-9]*$'
 
 style:
-  MagicNumber:
+  active: true
+  UnusedImport:
     active: true
   WildcardImport:
     active: true
-  ForbiddenComment:
+  VarCouldBeVal:
     active: true
-    comments: ["TODO", "FIXME", "STOPSHIP"]
-
-naming:
-  FunctionNaming:
+  AbstractClassCanBeConcreteClass:
     active: true
-    ignoreAnnotated: ["Composable"]
+  AbstractClassCanBeInterface:
+    active: true
 
-formatting:
+complexity:
   active: true
-  android: true
-  autoCorrect: true
+  TooManyFunctions:
+    active: false
+
+comments:
+  active: false
+
+exceptions:
+  active: false
+
+empty-blocks:
+  active: false

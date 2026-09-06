@@ -1,5 +1,7 @@
 package com.betterhv.note
 
+import androidx.core.graphics.createBitmap
+
 import android.graphics.Bitmap
 import android.content.Intent
 import android.os.SystemClock
@@ -131,7 +133,7 @@ class RichObjectUiTest {
             val asset = File(activity.filesDir, "documents/assets/ui-test.png")
             asset.parentFile!!.mkdirs()
             asset.outputStream().use {
-                Bitmap.createBitmap(80, 60, Bitmap.Config.ARGB_8888)
+                createBitmap(80, 60)
                     .compress(Bitmap.CompressFormat.PNG, 100, it)
             }
             image = pen.placeImage(

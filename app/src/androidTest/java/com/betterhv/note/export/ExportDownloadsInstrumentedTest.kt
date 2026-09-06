@@ -1,7 +1,6 @@
 package com.betterhv.note.export
 
 import android.content.ContentUris
-import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
 import androidx.test.core.app.ApplicationProvider
@@ -10,7 +9,6 @@ import java.io.File
 import java.util.UUID
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
-import org.junit.Assume.assumeTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 
@@ -19,7 +17,6 @@ class ExportDownloadsInstrumentedTest {
     private val context = ApplicationProvider.getApplicationContext<android.content.Context>()
 
     @Test fun repeatedSaveOverwritesSingleMediaStoreEntry() {
-        assumeTrue(Build.VERSION.SDK_INT >= 29)
         val displayName = "overwrite-${System.nanoTime()}_abcdef12.pdf"
         val source = File(context.cacheDir, displayName)
         val taskId = UUID.randomUUID()

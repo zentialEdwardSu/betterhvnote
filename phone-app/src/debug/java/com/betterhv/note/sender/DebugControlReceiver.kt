@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
 import androidx.core.content.FileProvider
+import androidx.core.graphics.createBitmap
 import com.betterhv.transfer.android.AndroidPairingController
 import java.io.File
 
@@ -26,7 +27,7 @@ class DebugControlReceiver : BroadcastReceiver() {
                     val source = File(context.filesDir, "camera/debug-transfer.png")
                     source.parentFile?.mkdirs()
                     source.outputStream().use {
-                        Bitmap.createBitmap(640, 480, Bitmap.Config.ARGB_8888)
+                        createBitmap(640, 480)
                             .apply { eraseColor(0xff3f51b5.toInt()) }
                             .compress(Bitmap.CompressFormat.PNG, 100, it)
                     }
