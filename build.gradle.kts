@@ -1,6 +1,7 @@
 plugins {
     id("com.android.application") version "9.3.2" apply false
     id("com.android.library") version "9.3.2" apply false
+    id("com.android.lint") version "9.3.2" apply false
     id("org.jetbrains.kotlin.jvm") version "2.4.10" apply false
     id("org.jetbrains.kotlin.plugin.compose") version "2.4.10" apply false
     id("org.jetbrains.compose") version "1.12.0" apply false
@@ -35,6 +36,14 @@ subprojects {
                 checkReleaseBuilds = true
                 checkTestSources = true
             }
+        }
+    }
+    pluginManager.withPlugin("com.android.lint") {
+        extensions.configure<com.android.build.api.dsl.Lint> {
+            abortOnError = true
+            warningsAsErrors = true
+            checkDependencies = true
+            checkTestSources = true
         }
     }
     pluginManager.withPlugin("dev.detekt") {

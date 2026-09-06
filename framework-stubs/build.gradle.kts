@@ -1,5 +1,6 @@
 plugins {
     id("java-library")
+    id("com.android.lint")
 }
 
 // Pure-Java stubs for Hanvon ROM framework classes (android.os.HvPenDraw*).

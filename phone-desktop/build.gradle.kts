@@ -5,6 +5,7 @@ import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 plugins {
     id("org.jetbrains.kotlin.jvm")
+    id("com.android.lint")
     id("org.jetbrains.compose")
     id("org.jetbrains.kotlin.plugin.compose")
     id("app.cash.sqldelight")
@@ -75,11 +76,11 @@ dependencies {
     implementation(project(":transfer-core"))
     implementation(project(":transfer-windows"))
     implementation(project(":update-core"))
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.9.0")
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-swing:1.9.0")
-    implementation("org.xerial:sqlite-jdbc:3.46.1.3")
-    implementation("app.cash.sqldelight:runtime:2.0.2")
-    implementation("app.cash.sqldelight:sqlite-driver:2.0.2")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.11.0")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-swing:1.11.0")
+    implementation("org.xerial:sqlite-jdbc:3.53.4.0")
+    implementation("app.cash.sqldelight:runtime:2.3.2")
+    implementation("app.cash.sqldelight:sqlite-driver:2.3.2")
     testImplementation(kotlin("test"))
 }
 

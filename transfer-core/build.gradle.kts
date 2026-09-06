@@ -2,6 +2,7 @@ import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 plugins {
     id("org.jetbrains.kotlin.jvm")
+    id("com.android.lint")
     id("dev.detekt")
 }
 
@@ -22,6 +23,11 @@ kotlin {
             kotlin.srcDir("src/test/kotlin")
         }
     }
+}
+
+lint {
+    // Android consumers require API 29; TrulyRandom only applies to Android 4.3 and older.
+    disable += "TrulyRandom"
 }
 
 dependencies {
