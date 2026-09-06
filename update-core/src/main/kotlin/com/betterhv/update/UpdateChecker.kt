@@ -5,7 +5,7 @@ import java.net.URI
 class UpdateChecker(private val source: ReleaseSource = GitHubReleaseSource()) {
   fun check(product: UpdateProduct, currentVersion: String): UpdateCheckState = runCatching {
     val current = AppVersion.parse(currentVersion)
-      ?: return UpdateCheckState.Failed("无法识别当前版本：$currentVersion")
+      ?: return UpdateCheckState.Failed("Unrecognized current version: $currentVersion")
     val latest = source.loadReleases()
       .asSequence()
       .filterNot { it.draft || it.preRelease }
@@ -27,7 +27,7 @@ class UpdateChecker(private val source: ReleaseSource = GitHubReleaseSource()) {
       UpdateCheckState.UpToDate(current, latest.first)
     }
   }.getOrElse { error ->
-    UpdateCheckState.Failed(error.message?.takeIf(String::isNotBlank) ?: "检查更新失败")
+    UpdateCheckState.Failed(error.message?.takeIf(String::isNotBlank) ?: "Update check failed")
   }
 
   companion object {

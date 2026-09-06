@@ -1,5 +1,6 @@
 package com.betterhv.note
 
+import android.annotation.SuppressLint
 import android.content.Context
 import android.view.MotionEvent
 import android.view.View
@@ -26,6 +27,7 @@ import android.view.View
  * forwards them to its active [com.betterhv.note.tool.EraserTool] internally,
  * so this view does not need to know about tool selection at all.
  */
+@SuppressLint("ClickableViewAccessibility", "ViewConstructor")
 class EraserOverlayView(context: Context, private val pen: PenDrawView) : View(context) {
 
   private var erasing = false

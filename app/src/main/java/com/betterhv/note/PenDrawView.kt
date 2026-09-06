@@ -1,5 +1,6 @@
 package com.betterhv.note
 
+import android.annotation.SuppressLint
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
@@ -139,6 +140,7 @@ data class PageUiInfo(val id: UUID, val pageNumber: Int, val bookmarked: Boolean
  * writing using ACTION_DOWN plus those batches. Lasso gestures are instead
  * driven by [LassoOverlayView], mirroring hvNote's MemoMarkView split.
  */
+@SuppressLint("ClickableViewAccessibility")
 class PenDrawView @JvmOverloads constructor(context: Context, attrs: AttributeSet? = null, defStyle: Int = 0) :
   View(context, attrs, defStyle),
   HvPenDrawListener,
@@ -431,7 +433,7 @@ class PenDrawView @JvmOverloads constructor(context: Context, attrs: AttributeSe
   ): Result<ImageObject> = runCatching {
     repository.findTransferReceipt(sourceDeviceId, itemId)?.let { existing ->
       return@runCatching (page.getObject(existing) as? ImageObject)
-        ?: error("传输项目已经提交到其他页面")
+        ?: error("Transfer item was already committed to another page")
     }
     val objectId = UUID.randomUUID()
     pendingTransferReceipt = TransferReceipt(sourceDeviceId, itemId, objectId)
@@ -441,7 +443,7 @@ class PenDrawView @JvmOverloads constructor(context: Context, attrs: AttributeSe
     if (pendingTransferPersisted != true) {
       commandStack.undo()
       imageAssets.resolve(placed.assetPath)?.delete()
-      error("接收图片保存失败")
+      error("Could not save received image")
     }
     pendingTransferPersisted = null
     placed
@@ -460,7 +462,7 @@ class PenDrawView @JvmOverloads constructor(context: Context, attrs: AttributeSe
     runCatching {
       repository.findTransferReceipt(sourceDeviceId, itemId)?.let { existing ->
         return@runCatching (page.getObject(existing) as? TextObject)
-          ?: error("传输项目已经提交到其他页面")
+          ?: error("Transfer item was already committed to another page")
       }
       val objectId = UUID.randomUUID()
       pendingTransferReceipt = TransferReceipt(sourceDeviceId, itemId, objectId)
@@ -469,7 +471,7 @@ class PenDrawView @JvmOverloads constructor(context: Context, attrs: AttributeSe
       val placed = placeTextWithId(text, point[0], point[1], objectId)
       if (pendingTransferPersisted != true) {
         commandStack.undo()
-        error("接收文字保存失败")
+        error("Could not save received text")
       }
       pendingTransferPersisted = null
       placed
@@ -910,7 +912,7 @@ class PenDrawView @JvmOverloads constructor(context: Context, attrs: AttributeSe
       return
     }
     runNotebookOperation(onComplete) {
-      val loaded = repository.loadNotebook(id) ?: error("找不到笔记本")
+      val loaded = repository.loadNotebook(id) ?: error("Notebook not found")
       repository.setActiveNotebook(id)
       loaded
     }
@@ -919,21 +921,21 @@ class PenDrawView @JvmOverloads constructor(context: Context, attrs: AttributeSe
   fun createBlankNotebook(title: String, templateId: String = DEFAULT_TEMPLATE_ID, onComplete: (Result<UUID>) -> Unit) {
     runNotebookOperation(onComplete) {
       val id = repository.createBlankNotebook(title, width.toFloat(), height.toFloat(), templateId)
-      repository.loadNotebook(id) ?: error("无法加载新笔记本")
+      repository.loadNotebook(id) ?: error("Could not load new notebook")
     }
   }
 
   fun importPdf(uri: Uri, onComplete: (Result<UUID>) -> Unit) {
     runNotebookOperation(onComplete) {
       val id = pdfImport.importLocalBlocking(uri)
-      repository.loadNotebook(id) ?: error("无法加载导入的 PDF")
+      repository.loadNotebook(id) ?: error("Could not load imported PDF")
     }
   }
 
   fun importPdfFile(file: File, displayName: String, onComplete: (Result<UUID>) -> Unit) {
     runNotebookOperation(onComplete) {
       val id = pdfImport.importFileBlocking(file, displayName)
-      repository.loadNotebook(id) ?: error("无法加载导入的 PDF")
+      repository.loadNotebook(id) ?: error("Could not load imported PDF")
     }
   }
 
@@ -941,7 +943,7 @@ class PenDrawView @JvmOverloads constructor(context: Context, attrs: AttributeSe
     val sourceNotebookId = notebook.id
     runNotebookOperation(onComplete) {
       val transfer = repository.transferPagesToNewNotebook(sourceNotebookId, selectedPageIds, title)
-      repository.loadNotebook(transfer.targetNotebookId) ?: error("无法加载新笔记本")
+      repository.loadNotebook(transfer.targetNotebookId) ?: error("Could not load new notebook")
     }
   }
 
@@ -951,7 +953,7 @@ class PenDrawView @JvmOverloads constructor(context: Context, attrs: AttributeSe
       val deletion = repository.deleteNotebook(id)
       deletion.deletedPageIds.forEach(thumbnails::delete)
       pdf?.let { record -> pdfAssets.resolve(record.assetPath)?.delete() }
-      repository.loadNotebook(deletion.activeNotebookId) ?: error("无法加载删除后的笔记本")
+      repository.loadNotebook(deletion.activeNotebookId) ?: error("Could not load notebook after deletion")
     }
   }
 
@@ -960,13 +962,13 @@ class PenDrawView @JvmOverloads constructor(context: Context, attrs: AttributeSe
     scheduleSave(DocumentChange.fullPage(notebook, page, "notebook:before-switch"))
     notebookOperations.execute {
       val result = runCatching {
-        check(persistenceAvailable && autosave.flush()) { "保存当前笔记本失败" }
+        check(persistenceAvailable && autosave.flush()) { "Could not save current notebook" }
         operation()
       }
       post {
         result.onSuccess(::installNotebook)
         result.exceptionOrNull()?.let { error ->
-          emitNotice("笔记本操作失败：${error.message ?: error.javaClass.simpleName}")
+          emitNotice("Notebook operation failed: ${error.message ?: error.javaClass.simpleName}")
         }
         onComplete(result.map(Notebook::id))
       }
@@ -975,9 +977,9 @@ class PenDrawView @JvmOverloads constructor(context: Context, attrs: AttributeSe
 
   private fun installNotebook(target: Notebook) {
     val initialId = repository.lastOpenedPageId(target.id) ?: target.pageOrder.firstOrNull()
-      ?: error("笔记本没有页面")
+      ?: error("Notebook has no pages")
     val initial = target.getPage(initialId) ?: repository.loadPage(initialId)
-      ?: error("无法加载上次停留页面")
+      ?: error("Could not load the last viewed page")
     target.attachPage(initial)
     val notebookChanged = notebook.id != target.id
     notebook = target
@@ -1263,7 +1265,7 @@ class PenDrawView @JvmOverloads constructor(context: Context, attrs: AttributeSe
     }
     val newTemplateId = inheritedTemplateId(afterMetadata)
     val newPage = if (notebook.kind == NotebookKind.PDF) {
-      requireNotNull(parentPdfPageId) { "PDF 笔记本只能在源页后添加夹纸" }
+      requireNotNull(parentPdfPageId) { "Notes can only be added after a source page in a PDF notebook" }
       Page(
         width = width.toFloat(),
         height = height.toFloat(),
@@ -1290,7 +1292,7 @@ class PenDrawView @JvmOverloads constructor(context: Context, attrs: AttributeSe
   fun deletePage(pageId: UUID): Boolean {
     if (!canDeletePage() || pageId !in notebook.pageOrder) return false
     if (notebook.metadata(pageId)?.kind == PageKind.PDF_SOURCE) {
-      emitNotice("PDF 源页不能删除")
+      emitNotice("PDF source pages cannot be deleted")
       return false
     }
     val deletingCurrent = page.id == pageId
@@ -1319,7 +1321,7 @@ class PenDrawView @JvmOverloads constructor(context: Context, attrs: AttributeSe
 
   fun movePage(pageId: UUID, targetIndex: Int): Boolean {
     if (notebook.kind == NotebookKind.PDF) {
-      emitNotice("PDF 源页与夹纸的顺序由关联关系维护")
+      emitNotice("The order of PDF source pages and notes is maintained by their links")
       return false
     }
     val from = notebook.pageOrder.indexOf(pageId)
@@ -1468,7 +1470,7 @@ class PenDrawView @JvmOverloads constructor(context: Context, attrs: AttributeSe
           val currentMetadata = if (notebook.id == notebookId) notebook.metadata(id) else null
           if (!pagePreRenderClosed && desiredWarmNotebookId == notebookId &&
             currentMetadata?.contentRevision == key.contentRevision &&
-            currentMetadata?.let(::backgroundRevision) == key.backgroundRevision &&
+            currentMetadata.let(::backgroundRevision) == key.backgroundRevision &&
             id in desiredWarmPageIds
           ) {
             if (loaded != null && notebook.getPage(id) == null) {
@@ -2669,7 +2671,7 @@ class PenDrawView @JvmOverloads constructor(context: Context, attrs: AttributeSe
     )
     val minSize = currentViewport().screenDistanceToPage(24f)
     if (bounds.width < minSize || bounds.height < minSize) {
-      emitNotice("选区太小")
+      emitNotice("Selection is too small")
       return
     }
     val selected = selectionTool.selectRectangle(bounds)
@@ -2721,12 +2723,12 @@ class PenDrawView @JvmOverloads constructor(context: Context, attrs: AttributeSe
     onComplete: (Result<UUID>) -> Unit,
   ) {
     if (page.kind != PageKind.PDF_SOURCE) {
-      onComplete(Result.failure(IllegalStateException("当前页不是 PDF 源页")))
+      onComplete(Result.failure(IllegalStateException("Current page is not a PDF source page")))
       return
     }
     val sourcePageId = page.id
     val sourceIndex = page.pdfSource?.sourcePageIndex
-      ?: return onComplete(Result.failure(IllegalStateException("PDF 页面信息缺失")))
+      ?: return onComplete(Result.failure(IllegalStateException("PDF page information is missing")))
     val sourceNotebookId = notebook.id
     val noteWidth = width.toFloat().coerceAtLeast(1f)
     val noteHeight = height.toFloat().coerceAtLeast(1f)
@@ -2738,9 +2740,9 @@ class PenDrawView @JvmOverloads constructor(context: Context, attrs: AttributeSe
       var createdNotePage = false
       var importedImage: ImportedImage? = null
       val result = runCatching {
-        check(persistenceAvailable && autosave.flush()) { "保存当前 PDF 批注失败" }
-        val record = repository.pdfDocument(sourceNotebookId) ?: error("PDF 资源记录缺失")
-        val file = pdfAssets.resolve(record.assetPath) ?: error("PDF 资源文件缺失")
+        check(persistenceAvailable && autosave.flush()) { "Could not save current PDF annotations" }
+        val record = repository.pdfDocument(sourceNotebookId) ?: error("PDF asset record is missing")
+        val file = pdfAssets.resolve(record.assetPath) ?: error("PDF asset file is missing")
         val selectedText: String?
         val preparedImage: ImportedImage?
         when (content) {
@@ -2762,7 +2764,8 @@ class PenDrawView @JvmOverloads constructor(context: Context, attrs: AttributeSe
 
           LinkedNoteContent.REGION_TEXT -> {
             selectedText = pdfEngine.extractText(file, sourceIndex, normalizedBounds)
-              .takeIf(String::isNotBlank) ?: error("选区中没有可提取文字；公式或图片请使用截图")
+              .takeIf(String::isNotBlank)
+              ?: error("No extractable text in selection; use a screenshot for formulas or images")
             preparedImage = null
           }
         }
@@ -2775,10 +2778,10 @@ class PenDrawView @JvmOverloads constructor(context: Context, attrs: AttributeSe
           createdNotePage = true
         }
         linkedPageId = notePageId
-        val loaded = repository.loadNotebook(sourceNotebookId) ?: error("无法重载 PDF 笔记本")
-        val notePage = repository.loadPage(notePageId) ?: error("无法加载夹纸页")
+        val loaded = repository.loadNotebook(sourceNotebookId) ?: error("Could not reload PDF notebook")
+        val notePage = repository.loadPage(notePageId) ?: error("Could not load note page")
         check(notePage.kind == PageKind.LINKED_NOTE && notePage.parentPdfPageId == sourcePageId) {
-          "所选夹纸不属于当前 PDF 页面"
+          "Selected note does not belong to the current PDF page"
         }
         loaded.attachPage(notePage)
         Pair(
@@ -2809,7 +2812,7 @@ class PenDrawView @JvmOverloads constructor(context: Context, attrs: AttributeSe
           installNotebook(loaded)
           switchToPage(pending.notePageId)
           onDocChanged?.invoke()
-        }.exceptionOrNull()?.let { emitNotice("准备夹纸失败：${it.message}") }
+        }.exceptionOrNull()?.let { emitNotice("Could not prepare note: ${it.message}") }
         onComplete(result.map { it.second.notePageId })
       }
     }
@@ -2845,9 +2848,9 @@ class PenDrawView @JvmOverloads constructor(context: Context, attrs: AttributeSe
 
   fun placePendingLinkedNote(screenX: Float, screenY: Float, onComplete: (Result<UUID>) -> Unit) {
     val pending = pendingLinkedNotePlacement
-      ?: return onComplete(Result.failure(IllegalStateException("没有待放置的夹纸内容")))
+      ?: return onComplete(Result.failure(IllegalStateException("No note content is ready to place")))
     if (page.id != pending.notePageId) {
-      onComplete(Result.failure(IllegalStateException("请先回到目标夹纸页")))
+      onComplete(Result.failure(IllegalStateException("Return to the target note page first")))
       return
     }
     val point = screenToPage(screenX, screenY)
@@ -2856,13 +2859,13 @@ class PenDrawView @JvmOverloads constructor(context: Context, attrs: AttributeSe
     val targetPageId = page.id
     notebookOperations.execute {
       val result = runCatching {
-        check(persistenceAvailable && autosave.flush()) { "保存夹纸失败" }
-        val loaded = repository.loadNotebook(pending.sourceNotebookId) ?: error("无法重载 PDF 笔记本")
-        val notePage = repository.loadPage(targetPageId) ?: error("无法加载目标夹纸")
+        check(persistenceAvailable && autosave.flush()) { "Could not save note page" }
+        val loaded = repository.loadNotebook(pending.sourceNotebookId) ?: error("Could not reload PDF notebook")
+        val notePage = repository.loadPage(targetPageId) ?: error("Could not load target note page")
         check(
           notePage.kind == PageKind.LINKED_NOTE &&
             notePage.parentPdfPageId == pending.sourcePageId,
-        ) { "目标夹纸与 PDF 锚点不匹配" }
+        ) { "Target note does not match the PDF anchor" }
         loaded.attachPage(notePage)
         val now = System.currentTimeMillis()
         val zIndex = (notePage.scene.all().maxOfOrNull(PageObject::zIndex) ?: -1) + 1
@@ -2931,7 +2934,7 @@ class PenDrawView @JvmOverloads constructor(context: Context, attrs: AttributeSe
           switchToPage(notePageId)
           selectedRichObjectId = null
           onDocChanged?.invoke()
-        }.exceptionOrNull()?.let { emitNotice("放置夹纸内容失败：${it.message}") }
+        }.exceptionOrNull()?.let { emitNotice("Could not place note content: ${it.message}") }
         onComplete(result.map { it.third })
       }
     }

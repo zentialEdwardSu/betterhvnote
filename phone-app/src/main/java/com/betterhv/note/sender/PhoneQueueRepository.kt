@@ -42,7 +42,7 @@ class PhoneQueueRepository(context: Context) :
   fun enqueueImage(uri: Uri, destinationDeviceId: String?): QueueItem {
     val resolver = appContext.contentResolver
     val mime = resolver.getType(uri)?.takeIf { it.startsWith("image/") }
-      ?: throw IllegalArgumentException("只支持图片")
+      ?: throw IllegalArgumentException("Only images are supported")
     val displayName = resolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
       ?.use { if (it.moveToFirst()) it.getString(0) else null }
     val id = UUID.randomUUID()
@@ -50,7 +50,7 @@ class PhoneQueueRepository(context: Context) :
     val target = File(outboxDir, "$id.bin")
     try {
       resolver.openInputStream(uri).use { input ->
-        requireNotNull(input) { "无法读取图片" }
+        requireNotNull(input) { "Could not read image" }
         temp.outputStream().buffered().use { output ->
           val buffer = ByteArray(64 * 1024)
           var total = 0L
@@ -60,18 +60,18 @@ class PhoneQueueRepository(context: Context) :
               break
             }
             total += count
-            require(total <= TransferLimits.MAX_IMAGE_BYTES) { "图片不能超过 64 MiB" }
+            require(total <= TransferLimits.MAX_IMAGE_BYTES) { "Image cannot exceed 64 MiB" }
             output.write(buffer, 0, count)
           }
         }
       }
       val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
       BitmapFactory.decodeFile(temp.absolutePath, bounds)
-      require(bounds.outWidth > 0 && bounds.outHeight > 0) { "无法解码图片" }
+      require(bounds.outWidth > 0 && bounds.outHeight > 0) { "Could not decode image" }
       require(bounds.outWidth.toLong() * bounds.outHeight <= TransferLimits.MAX_IMAGE_PIXELS) {
-        "图片像素不能超过 1 亿"
+        "Image cannot exceed 100 million pixels"
       }
-      check(temp.renameTo(target)) { "无法保存队列图片" }
+      check(temp.renameTo(target)) { "Could not save queued image" }
       val now = System.currentTimeMillis()
       val item = QueueItem(
         id, destinationDeviceId, ContentKind.IMAGE, mime, target.length(), sha256(target),
@@ -88,9 +88,9 @@ class PhoneQueueRepository(context: Context) :
 
   fun enqueueText(text: String, destinationDeviceId: String?): QueueItem {
     val normalized = text.trim()
-    require(normalized.isNotEmpty()) { "文字为空" }
+    require(normalized.isNotEmpty()) { "Text is empty" }
     val bytes = normalized.encodeToByteArray()
-    require(bytes.size <= TransferLimits.MAX_TEXT_BYTES) { "文字不能超过 256 KiB" }
+    require(bytes.size <= TransferLimits.MAX_TEXT_BYTES) { "Text cannot exceed 256 KiB" }
     val now = System.currentTimeMillis()
     val item = QueueItem(
       UUID.randomUUID(), destinationDeviceId, ContentKind.TEXT, "text/plain; charset=utf-8",
@@ -104,7 +104,7 @@ class PhoneQueueRepository(context: Context) :
   fun enqueuePdf(uri: Uri, destinationDeviceId: String?): QueueItem {
     val resolver = appContext.contentResolver
     val mime = resolver.getType(uri)
-    require(mime == "application/pdf") { "只支持 PDF" }
+    require(mime == "application/pdf") { "Only PDF files are supported" }
     val displayName = resolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
       ?.use { if (it.moveToFirst()) it.getString(0) else null }
     val id = UUID.randomUUID()
@@ -112,7 +112,7 @@ class PhoneQueueRepository(context: Context) :
     val target = File(outboxDir, "$id.pdf")
     try {
       resolver.openInputStream(uri).use { input ->
-        requireNotNull(input) { "无法读取 PDF" }
+        requireNotNull(input) { "Could not read PDF" }
         temp.outputStream().buffered().use { output ->
           val buffer = ByteArray(64 * 1024)
           var total = 0L
@@ -122,7 +122,7 @@ class PhoneQueueRepository(context: Context) :
               break
             }
             total += count
-            require(total <= TransferLimits.MAX_PDF_BYTES) { "PDF 不能超过 512 MiB" }
+            require(total <= TransferLimits.MAX_PDF_BYTES) { "PDF cannot exceed 512 MiB" }
             output.write(buffer, 0, count)
           }
         }
@@ -131,8 +131,8 @@ class PhoneQueueRepository(context: Context) :
         temp.inputStream().use { input ->
           ByteArray(5).also(input::read).contentEquals("%PDF-".encodeToByteArray())
         },
-      ) { "文件不是有效的 PDF" }
-      check(temp.renameTo(target)) { "无法保存队列 PDF" }
+      ) { "File is not a valid PDF" }
+      check(temp.renameTo(target)) { "Could not save queued PDF" }
       val now = System.currentTimeMillis()
       val item = QueueItem(
         id, destinationDeviceId, ContentKind.PDF, "application/pdf", target.length(), sha256(target),

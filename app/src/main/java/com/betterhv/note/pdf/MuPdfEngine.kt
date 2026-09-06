@@ -13,24 +13,25 @@ import java.io.File
 
 data class PdfInspection(val pages: List<PdfImportedPage>)
 
-class EncryptedPdfUnsupportedException : IllegalArgumentException("暂不支持加密或受密码保护的 PDF")
+class EncryptedPdfUnsupportedException :
+  IllegalArgumentException("Encrypted or password-protected PDFs are not supported")
 
 /** Narrow MuPDF boundary. Every native handle is destroyed in the same call that creates it. */
 class MuPdfEngine {
   fun inspect(file: File): PdfInspection = withDocument(file) { document ->
-    require(document.isPDF) { "所选文件不是 PDF" }
+    require(document.isPDF) { "Selected file is not a PDF" }
     if (document.needsPassword()) throw EncryptedPdfUnsupportedException()
     val count = document.countPages()
-    require(count > 0) { "PDF 没有可读取的页面" }
+    require(count > 0) { "PDF has no readable pages" }
     PdfInspection(
       List(count) { index ->
-        val page = document.loadPage(index) as? PDFPage ?: error("无法读取 PDF 第 ${index + 1} 页")
+        val page = document.loadPage(index) as? PDFPage ?: error("Could not read PDF page ${index + 1}")
         try {
           val bounds = page.bounds
-          require(bounds.isValid && !bounds.isEmpty) { "PDF 第 ${index + 1} 页尺寸无效" }
+          require(bounds.isValid && !bounds.isEmpty) { "Invalid dimensions for PDF page ${index + 1}" }
           val width = (bounds.x1 - bounds.x0) * LOGICAL_UNITS_PER_POINT
           val height = (bounds.y1 - bounds.y0) * LOGICAL_UNITS_PER_POINT
-          require(width > 0f && height > 0f) { "PDF 第 ${index + 1} 页尺寸无效" }
+          require(width > 0f && height > 0f) { "Invalid dimensions for PDF page ${index + 1}" }
           val matrix = page.transform
           PdfImportedPage(
             width = width,
@@ -82,11 +83,11 @@ class MuPdfEngine {
   /** Opens any single-page format supported by MuPDF, including SVG. */
   fun renderFirstPage(file: File, targetWidth: Int, maxPixels: Long = 24_000_000L): Bitmap =
     withAnyDocument(file) { document ->
-      require(document.countPages() > 0) { "模板没有可渲染页面" }
+      require(document.countPages() > 0) { "Template has no renderable pages" }
       val page = document.loadPage(0)
       try {
         val bounds = page.bounds
-        require(bounds.isValid && !bounds.isEmpty) { "模板尺寸无效" }
+        require(bounds.isValid && !bounds.isEmpty) { "Invalid template dimensions" }
         var scale = targetWidth.coerceAtLeast(1) / (bounds.x1 - bounds.x0)
         val estimatedHeight = (bounds.y1 - bounds.y0) * scale
         val pixels = targetWidth.coerceAtLeast(1).toLong() * estimatedHeight.toLong().coerceAtLeast(1L)
@@ -158,13 +159,13 @@ class MuPdfEngine {
   }
 
   private fun checkReadable(document: Document, pageIndex: Int) {
-    require(document.isPDF) { "资源不是 PDF" }
+    require(document.isPDF) { "Asset is not a PDF" }
     if (document.needsPassword()) throw EncryptedPdfUnsupportedException()
-    require(pageIndex in 0 until document.countPages()) { "PDF 页码越界" }
+    require(pageIndex in 0 until document.countPages()) { "PDF page index is out of bounds" }
   }
 
   private fun <T> withDocument(file: File, block: (Document) -> T): T {
-    require(file.isFile) { "PDF 资源不存在" }
+    require(file.isFile) { "PDF asset does not exist" }
     val document = Document.openDocument(file.absolutePath)
     return try {
       block(document)
@@ -174,7 +175,7 @@ class MuPdfEngine {
   }
 
   private fun <T> withAnyDocument(file: File, block: (Document) -> T): T {
-    require(file.isFile) { "模板资源不存在" }
+    require(file.isFile) { "Template asset does not exist" }
     val document = Document.openDocument(file.absolutePath)
     return try {
       block(document)
@@ -188,7 +189,7 @@ class MuPdfEngine {
       bounds.left in 0f..1f && bounds.top in 0f..1f &&
         bounds.right in 0f..1f && bounds.bottom in 0f..1f &&
         bounds.right > bounds.left && bounds.bottom > bounds.top
-    ) { "区域必须位于 PDF 页面内" }
+    ) { "Region must be within the PDF page" }
   }
 
   private fun intersects(a: Bounds, b: Bounds): Boolean =

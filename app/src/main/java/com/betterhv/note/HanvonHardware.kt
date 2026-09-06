@@ -1,6 +1,9 @@
 package com.betterhv.note
 
+import android.annotation.SuppressLint
+
 /** Accesses Hanvon's protected hardware-version API without packaging a ROM framework class. */
+@SuppressLint("PrivateApi")
 object HanvonHardware {
   val isColorDevice: Boolean by lazy {
     try {

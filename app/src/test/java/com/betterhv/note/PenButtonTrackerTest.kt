@@ -1,9 +1,12 @@
 package com.betterhv.note
 
+import android.annotation.SuppressLint
+
 import android.view.KeyEvent
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
+@SuppressLint("InlinedApi")
 class PenButtonTrackerTest {
   @Test
   fun actionButtonPressSurvivesOrdinaryStylusDownUntilRelease() {

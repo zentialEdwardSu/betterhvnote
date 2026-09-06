@@ -31,7 +31,7 @@ class PageRenderer(private val documentsDir: File, private val templates: Templa
   private val imageRoot = File(documentsDir, "assets").canonicalFile.toPath()
 
   fun renderToBitmap(snapshot: PageSnapshot, widthPx: Int, heightPx: Int, backgroundColor: Int = Color.WHITE): Bitmap {
-    require(widthPx > 0 && heightPx > 0) { "导出尺寸无效" }
+    require(widthPx > 0 && heightPx > 0) { "Invalid export dimensions" }
     val bitmap = createBitmap(widthPx, heightPx)
     Canvas(bitmap).apply {
       drawColor(backgroundColor)

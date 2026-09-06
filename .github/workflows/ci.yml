@@ -38,7 +38,7 @@ jobs:
         with:
           accept-android-sdk-licenses: true
           log-accepted-android-sdk-licenses: false
-          packages: 'platform-tools build-tools;34.0.0 ndk;30.0.15729638 cmake;4.1.2'
+          packages: 'platform-tools platforms;android-37.0 build-tools;36.0.0 ndk;30.0.15729638 cmake;4.1.2'
 
       - name: Make Gradle wrapper executable
         shell: bash

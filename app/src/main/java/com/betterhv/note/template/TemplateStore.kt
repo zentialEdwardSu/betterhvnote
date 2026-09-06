@@ -1,5 +1,6 @@
 package com.betterhv.note.template
 
+import android.annotation.SuppressLint
 import android.content.Context
 import android.content.Intent
 import android.graphics.BitmapFactory
@@ -14,7 +15,8 @@ import java.nio.file.Files
 import java.nio.file.StandardCopyOption
 import java.security.MessageDigest
 
-class TemplateStore private constructor(private val context: Context) : TemplateResolver {
+class TemplateStore private constructor(context: Context) : TemplateResolver {
+  private val context = context.applicationContext
   private val settings = AppSettingsStore(context)
   private val root = File(context.filesDir, "templates").also(File::mkdirs)
   private val builtinRoot = File(root, "builtin").also(File::mkdirs)
@@ -73,13 +75,13 @@ class TemplateStore private constructor(private val context: Context) : Template
       if (tree?.isDirectory == true && tree.canRead()) {
         val manifestText = tree.findFile(MANIFEST_NAME)?.let(::readDocument)
         if (manifestText == null) {
-          errors += "模板目录缺少 $MANIFEST_NAME"
+          errors += "Template directory is missing $MANIFEST_NAME"
           loadLastManifest(errors)
         } else {
           val parsed = TemplateManifestCodec.parse(manifestText)
           if (parsed.entries.isEmpty() && parsed.errors.isNotEmpty()) {
             errors += parsed.errors
-            errors += "manifest.json 无效，正在使用最后有效版本"
+            errors += "Invalid manifest.json; using the last valid version"
             loadLastManifest(errors)
           } else {
             val loaded = loadManifest(manifestText, tree, errors)
@@ -88,7 +90,7 @@ class TemplateStore private constructor(private val context: Context) : Template
           }
         }
       } else {
-        errors += "模板目录暂时不可访问，正在使用最后可用缓存"
+        errors += "Template directory is temporarily inaccessible; using the last available cache"
         loadLastManifest(errors)
       }
     } else {
@@ -127,7 +129,7 @@ class TemplateStore private constructor(private val context: Context) : Template
     )
     val text = runCatching { context.assets.open(ASSET_MANIFEST).bufferedReader().use { it.readText() } }
       .getOrElse {
-        errors += "无法读取内置模板清单：${it.message}"
+        errors += "Could not read built-in template manifest: ${it.message}"
         return listOf(blank)
       }
     val parsed = TemplateManifestCodec.parse(text)
@@ -142,14 +144,14 @@ class TemplateStore private constructor(private val context: Context) : Template
         if (!target.isFile || sha256(target) != sha256(staged)) {
           Files.move(staged.toPath(), target.toPath(), StandardCopyOption.REPLACE_EXISTING)
         }
-      }.onFailure { errors += "无法更新内置模板 ${entry.name}：${it.message}" }
+      }.onFailure { errors += "Could not update built-in template ${entry.name}: ${it.message}" }
         .also { staged.delete() }
       target.takeIf(File::isFile)?.let {
         runCatching {
           validateAsset(it, entry)
           TemplateDefinition(entry, it, sha256(it), TemplateAvailability.AVAILABLE)
         }.getOrElse { failure ->
-          errors += "内置模板 ${entry.name} 无效：${failure.message}"
+          errors += "Built-in template ${entry.name} is invalid: ${failure.message}"
           null
         }
       }
@@ -175,14 +177,14 @@ class TemplateStore private constructor(private val context: Context) : Template
       val cached = findCached(entry.id)
       if (cached != null) {
         runCatching { validateAsset(cached, entry) }.onFailure {
-          errors += "${entry.name} 的缓存已损坏：${it.message}"
+          errors += "Cache for ${entry.name} is corrupt: ${it.message}"
         }.getOrNull()?.let {
           TemplateDefinition(
             entry,
             cached,
             sha256(cached),
             TemplateAvailability.CACHED,
-            "外部来源不可用，正在使用最后可用版本",
+            "External source is unavailable; using the last available version",
           )
         }
       } else {
@@ -191,7 +193,7 @@ class TemplateStore private constructor(private val context: Context) : Template
           null,
           "unavailable:${entry.id}",
           TemplateAvailability.INVALID,
-          "模板文件缺失或损坏",
+          "Template file is missing or corrupt",
         )
       }
     }
@@ -204,21 +206,21 @@ class TemplateStore private constructor(private val context: Context) : Template
     var total = 0L
     try {
       context.contentResolver.openInputStream(document.uri).use { input ->
-        requireNotNull(input) { "无法打开 ${entry.file}" }
+        requireNotNull(input) { "Could not open ${entry.file}" }
         FileOutputStream(temporary).use { output ->
           val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
           while (true) {
             val read = input.read(buffer)
             if (read < 0) break
             total += read
-            require(total <= MAX_TEMPLATE_BYTES) { "模板文件超过 32 MiB" }
+            require(total <= MAX_TEMPLATE_BYTES) { "Template file exceeds 32 MiB" }
             digest.update(buffer, 0, read)
             output.write(buffer, 0, read)
           }
           output.fd.sync()
         }
       }
-      require(total > 0) { "模板文件为空" }
+      require(total > 0) { "Template file is empty" }
       validateAsset(temporary, entry)
       val fingerprint = digest.digest().toHex()
       val target = File(cacheRoot, "${entry.id}-$fingerprint.$extension")
@@ -242,22 +244,22 @@ class TemplateStore private constructor(private val context: Context) : Template
     val actual = if (file.extension.equals("png", true)) {
       val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
       BitmapFactory.decodeFile(file.absolutePath, options)
-      require(options.outWidth > 0 && options.outHeight > 0) { "PNG 无法解码" }
+      require(options.outWidth > 0 && options.outHeight > 0) { "Could not decode PNG" }
       options.outWidth.toDouble() to options.outHeight.toDouble()
     } else {
       val head = file.inputStream().bufferedReader().use { it.readText().take(MAX_SVG_TEXT) }
-      val match = VIEW_BOX.find(head) ?: error("SVG 缺少有效 viewBox")
+      val match = VIEW_BOX.find(head) ?: error("SVG is missing a valid viewBox")
       val values = match.groupValues[1].trim().split(Regex("[ ,]+"))
-      require(values.size == 4) { "SVG viewBox 无效" }
-      val width = values[2].toDoubleOrNull() ?: error("SVG viewBox 无效")
-      val height = values[3].toDoubleOrNull() ?: error("SVG viewBox 无效")
-      require(width > 0 && height > 0) { "SVG viewBox 尺寸无效" }
+      require(values.size == 4) { "Invalid SVG viewBox" }
+      val width = values[2].toDoubleOrNull() ?: error("Invalid SVG viewBox")
+      val height = values[3].toDoubleOrNull() ?: error("Invalid SVG viewBox")
+      require(width > 0 && height > 0) { "Invalid SVG viewBox dimensions" }
       width to height
     }
     val declared = entry.width.toDouble() / entry.height
     val detected = actual.first / actual.second
     require(kotlin.math.abs(declared / detected - 1.0) <= TemplateDefinition.ASPECT_RATIO_TOLERANCE) {
-      "文件宽高比与 manifest 不一致"
+      "File aspect ratio does not match the manifest"
     }
   }
 
@@ -267,18 +269,18 @@ class TemplateStore private constructor(private val context: Context) : Template
   }?.maxByOrNull(File::lastModified)
 
   private fun seedBuiltins(uri: Uri) {
-    val tree = DocumentFile.fromTreeUri(context, uri) ?: error("无法打开模板目录")
-    require(tree.isDirectory && tree.canWrite()) { "模板目录不可写" }
+    val tree = DocumentFile.fromTreeUri(context, uri) ?: error("Could not open template directory")
+    require(tree.isDirectory && tree.canWrite()) { "Template directory is not writable" }
     val builtinText = context.assets.open(ASSET_MANIFEST).bufferedReader().use { it.readText() }
     val builtinJson = JsonParser.parseString(builtinText).asJsonObject
     val manifestDoc = tree.findFile(MANIFEST_NAME)
     val targetJson = if (manifestDoc == null) {
       builtinJson
     } else {
-      val existingText = readDocument(manifestDoc) ?: error("无法读取现有 manifest.json")
+      val existingText = readDocument(manifestDoc) ?: error("Could not read existing manifest.json")
       val existing = JsonParser.parseString(existingText).asJsonObject
-      require(existing.get("schemaVersion")?.asInt == 1) { "现有 manifest.json 版本不受支持" }
-      val array = existing.getAsJsonArray("templates") ?: error("现有 manifest.json 缺少 templates")
+      require(existing.get("schemaVersion")?.asInt == 1) { "Existing manifest.json version is not supported" }
+      val array = existing.getAsJsonArray("templates") ?: error("Existing manifest.json is missing templates")
       val ids = array.mapNotNull { runCatching { it.asJsonObject.get("id").asString }.getOrNull() }.toSet()
       builtinJson.getAsJsonArray("templates").forEach { item ->
         if (item.asJsonObject.get("id").asString !in ids) array.add(item.deepCopy())
@@ -291,19 +293,19 @@ class TemplateStore private constructor(private val context: Context) : Template
     builtinJson.getAsJsonArray("templates").forEach { item ->
       val name = item.asJsonObject.get("file").asString
       if (tree.findFile(name) == null) {
-        val document = tree.createFile(mimeFor(name), name) ?: error("无法创建 $name")
+        val document = tree.createFile(mimeFor(name), name) ?: error("Could not create $name")
         context.assets.open("templates/$name").use { input ->
           context.contentResolver.openOutputStream(document.uri, "w").use { output ->
-            requireNotNull(output) { "无法写入 $name" }
+            requireNotNull(output) { "Could not write $name" }
             input.copyTo(output)
           }
         }
       }
     }
     val target = manifestDoc ?: tree.createFile("application/json", MANIFEST_NAME)
-      ?: error("无法创建 $MANIFEST_NAME")
+      ?: error("Could not create $MANIFEST_NAME")
     requireNotNull(context.contentResolver.openOutputStream(target.uri, "wt")) {
-      "无法写入 $MANIFEST_NAME"
+      "Could not write $MANIFEST_NAME"
     }.bufferedWriter().use {
       it.write(targetJson.toString())
     }
@@ -337,6 +339,7 @@ class TemplateStore private constructor(private val context: Context) : Template
     private const val MAX_SVG_TEXT = 4 * 1024 * 1024
     private val VIEW_BOX = Regex("""viewBox\s*=\s*[\"']([^\"']+)[\"']""", RegexOption.IGNORE_CASE)
 
+    @SuppressLint("StaticFieldLeak")
     @Volatile private var instance: TemplateStore? = null
     fun get(context: Context): TemplateStore = instance ?: synchronized(this) {
       instance ?: TemplateStore(context.applicationContext).also { instance = it }

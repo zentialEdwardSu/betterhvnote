@@ -180,7 +180,7 @@ class PhoneTransferClient(context: Context) :
             val identity = session.readIdentity()
             val hash = AndroidPairingController.identityHash(identity.deviceId)
             require(sender.identityHash.isBlank() || hash.equals(sender.identityHash, ignoreCase = true)) {
-              "NoteLink 广播身份与完整身份不一致"
+              "NoteLink advertised identity does not match its full identity"
             }
             PairingCandidate(identity.deviceId, identity.deviceName, hash, sender.bluetoothAddress)
           }
@@ -198,16 +198,16 @@ class PhoneTransferClient(context: Context) :
     try {
       withBleSession(candidate.bluetoothAddress) { session ->
         val identity = session.readIdentity()
-        require(identity.deviceId == candidate.deviceId) { "NoteLink 身份在配对期间发生变化" }
+        require(identity.deviceId == candidate.deviceId) { "NoteLink identity changed during pairing" }
         require(
           AndroidPairingController.identityHash(identity.deviceId)
             .equals(candidate.identityHash, ignoreCase = true),
-        ) { "NoteLink 广播身份与完整身份不一致" }
-        val key = requireNotNull(pairing.sharedKey(paired.id)) { "配对密钥不可用" }
+        ) { "NoteLink advertised identity does not match its full identity" }
+        val key = requireNotNull(pairing.sharedKey(paired.id)) { "Pairing key is unavailable" }
         require(
           exchange(session, paired.id, BleCommand.Capabilities(localCapabilities(key))) is BleResponse.Capabilities,
         ) {
-          "NoteLink 未确认配对"
+          "NoteLink did not confirm pairing"
         }
       }
       pairing.markLastUsed(paired.id)
@@ -216,7 +216,7 @@ class PhoneTransferClient(context: Context) :
       throw cancelled
     } catch (t: Throwable) {
       pairing.unpair(paired.id)
-      throw IllegalStateException("配对握手失败：${t.message ?: t.javaClass.simpleName}", t)
+      throw IllegalStateException("Pairing handshake failed: ${t.message ?: t.javaClass.simpleName}", t)
     }
   }
 
@@ -227,31 +227,31 @@ class PhoneTransferClient(context: Context) :
   }
 
   suspend fun requestNext(kind: ContentKind): ReceivedLease? {
-    val paired = pairing.pairedDevice ?: error("请先在设置中配对 NoteLink")
+    val paired = pairing.pairedDevice ?: error("Pair with NoteLink in Settings first")
     return requestNext(paired.id, kind)
   }
 
   /** Authenticates a paired NoteLink and performs a v2 capability round trip without leasing queue content. */
   suspend fun verifyConnection(clientId: String): CapabilityNegotiation = withContext(Dispatchers.IO) {
-    val paired = pairing.pairedClient(clientId) ?: error("配对的 NoteLink 不存在")
+    val paired = pairing.pairedClient(clientId) ?: error("Paired NoteLink does not exist")
     val sender = findSender(paired, null, 8_000L)
-      ?: error("未发现 ${paired.name}；请确认 NoteLink 正在运行")
+      ?: error("Could not find ${paired.name}; make sure NoteLink is running")
     withBleSession(sender.bluetoothAddress) { session ->
       val identity = verifyIdentity(session, sender, paired)
       var authenticatedId = paired.id
       if (paired.legacy) authenticatedId = pairing.resolveLegacyIdentity(paired.id, identity).id
-      val key = requireNotNull(pairing.sharedKey(authenticatedId)) { "配对密钥不可用" }
+      val key = requireNotNull(pairing.sharedKey(authenticatedId)) { "Pairing key is unavailable" }
       negotiate(session, authenticatedId, key).also { pairing.markLastUsed(authenticatedId) }
     }
   }
 
   suspend fun requestNext(clientId: String, kind: ContentKind): ReceivedLease? = withContext(Dispatchers.IO) {
-    check(operationActive.compareAndSet(false, true)) { "已有 NoteLink 传输正在进行" }
+    check(operationActive.compareAndSet(false, true)) { "A NoteLink transfer is already in progress" }
     activeOperationJob = currentCoroutineContext()[Job]
     var keepActive = false
     val paired = pairing.pairedClient(clientId) ?: run {
       operationActive.set(false)
-      error("配对的 NoteLink 不存在")
+      error("Paired NoteLink does not exist")
     }
     mutableState.value = TransferState.Scanning
     startOperation(UUID.randomUUID(), null, paired.id, 0, TransferPhase.DISCOVERING)
@@ -273,7 +273,7 @@ class PhoneTransferClient(context: Context) :
       if (paired.legacy) {
         authenticatedId = pairing.resolveLegacyIdentity(paired.id, identity).id
       }
-      val key = requireNotNull(pairing.sharedKey(authenticatedId)) { "配对密钥不可用" }
+      val key = requireNotNull(pairing.sharedKey(authenticatedId)) { "Pairing key is unavailable" }
       val negotiation = if (kind == ContentKind.TEXT || prefersLan(authenticatedId)) {
         null
       } else {
@@ -288,7 +288,7 @@ class PhoneTransferClient(context: Context) :
           mutableState.value = TransferState.Idle
           return@withContext null
         } else {
-          error("手机返回了无效队列响应")
+          error("Phone returned an invalid queue response")
         }
       leasedItemId = offer.id
       mutableSnapshot.value = mutableSnapshot.value.copy(itemId = offer.id, totalBytes = offer.byteLength)
@@ -324,7 +324,7 @@ class PhoneTransferClient(context: Context) :
         }
       }
       failedSession?.let(::closeBleSession)
-      mutableState.value = TransferState.Error(t.message ?: "手机传输失败")
+      mutableState.value = TransferState.Error(t.message ?: "Phone transfer failed")
       fail(t)
       throw t
     } finally {
@@ -336,39 +336,39 @@ class PhoneTransferClient(context: Context) :
   }
 
   suspend fun sendExport(artifact: ExportArtifact, progress: (Long, Long) -> Unit = { _, _ -> }) {
-    val paired = pairing.pairedDevice ?: error("请先在设置中配对 NoteLink")
+    val paired = pairing.pairedDevice ?: error("Pair with NoteLink in Settings first")
     sendExport(paired.id, artifact, progress)
   }
 
   suspend fun sendExport(clientId: String, artifact: ExportArtifact, progress: (Long, Long) -> Unit = { _, _ -> }) =
     withContext(Dispatchers.IO) {
-      check(operationActive.compareAndSet(false, true)) { "已有 NoteLink 传输正在进行" }
+      check(operationActive.compareAndSet(false, true)) { "A NoteLink transfer is already in progress" }
       activeOperationJob = currentCoroutineContext()[Job]
       val paired = pairing.pairedClient(clientId) ?: run {
         operationActive.set(false)
-        error("配对的 NoteLink 不存在")
+        error("Paired NoteLink does not exist")
       }
       require(artifact.byteLength <= com.betterhv.transfer.core.TransferLimits.MAX_EXPORT_BYTES) {
-        "导出文件超过 512 MiB"
+        "Export file exceeds 512 MiB"
       }
       mutableState.value = TransferState.Scanning
       startOperation(artifact.id, artifact.id, paired.id, artifact.byteLength, TransferPhase.DISCOVERING)
       try {
         val sender = findSender(paired, null, 8_000L)
-          ?: error("未发现 ${paired.name}；请确认 NoteLink 正在运行")
+          ?: error("Could not find ${paired.name}; make sure NoteLink is running")
         withBleSession(sender.bluetoothAddress) { session ->
           phase(TransferPhase.AUTHENTICATING)
           val identity = verifyIdentity(session, sender, paired)
           var authenticatedId = paired.id
           if (paired.legacy) authenticatedId = pairing.resolveLegacyIdentity(paired.id, identity).id
-          val key = requireNotNull(pairing.sharedKey(authenticatedId)) { "配对密钥不可用" }
+          val key = requireNotNull(pairing.sharedKey(authenticatedId)) { "Pairing key is unavailable" }
           val fastLanEndpoint = rememberedRemoteLanEndpoint(authenticatedId)
-          val negotiation = fastLanEndpoint?.let { null } ?: negotiate(session, authenticatedId, key)
+          val negotiation = if (fastLanEndpoint == null) negotiate(session, authenticatedId, key) else null
           pairing.markLastUsed(authenticatedId)
           rememberAuthenticatedSenderName(authenticatedId, identity.deviceName)
           negotiation?.let {
             require(it.remote.extensions and BleQueueProtocol.CAPABILITY_EXPORT_PUSH != 0) {
-              "NoteLink 版本不支持接收导出"
+              "This NoteLink version does not support receiving exports"
             }
           }
           val offer = ExportTransferOffer(
@@ -386,7 +386,7 @@ class PhoneTransferClient(context: Context) :
             BleResponse.Ok -> Unit
             is BleResponse.Failure -> throw TransferChannelException(response.failure)
             is BleResponse.Error -> error(response.message)
-            else -> error("NoteLink 未接受导出文件")
+            else -> error("NoteLink did not accept the exported file")
           }
           try {
             sendExportWithSelection(
@@ -400,7 +400,7 @@ class PhoneTransferClient(context: Context) :
                   BleResponse.Pending -> delay(250L)
                   is BleResponse.Failure -> throw TransferChannelException(response.failure)
                   is BleResponse.Error -> error(response.message)
-                  else -> error("NoteLink 未确认导出文件")
+                  else -> error("NoteLink did not confirm the exported file")
                 }
               }
             }
@@ -413,7 +413,7 @@ class PhoneTransferClient(context: Context) :
         }
       } catch (error: Throwable) {
         fail(error)
-        mutableState.value = TransferState.Error(error.message ?: "发送导出失败")
+        mutableState.value = TransferState.Error(error.message ?: "Could not send export")
         throw error
       } finally {
         activeOperationJob = null
@@ -430,13 +430,15 @@ class PhoneTransferClient(context: Context) :
     var offset = 0
     while (offset < item.byteLength) {
       val chunk = exchange(session, clientId, BleCommand.TextChunk(item.id, offset)) as? BleResponse.TextChunk
-        ?: error("手机文字分片响应无效")
+        ?: error("Invalid phone text chunk response")
       require(chunk.itemId == item.id && chunk.offset == offset && chunk.total.toLong() == item.byteLength)
       output.write(chunk.bytes);
       offset += chunk.bytes.size
     }
     val bytes = output.toByteArray()
-    require(MessageDigest.getInstance("SHA-256").digest(bytes).contentEquals(item.sha256)) { "文字校验失败" }
+    require(MessageDigest.getInstance("SHA-256").digest(bytes).contentEquals(item.sha256)) {
+      "Text verification failed"
+    }
     return RemotePayload.Text(item, bytes.decodeToString())
   }
 
@@ -496,7 +498,7 @@ class PhoneTransferClient(context: Context) :
       )
       val receiverEndpoint = NetworkEndpoint(
         requireNotNull(joined.localIpAddress) {
-          "无法读取 Note 的 Wi-Fi Direct 地址"
+          "Could not read the Note device's Wi-Fi Direct address"
         }
       )
       forgetLanSuccess(pairedPhoneId)
@@ -513,7 +515,7 @@ class PhoneTransferClient(context: Context) :
     throw firstFailure ?: TransferChannelException(
       TransferFailure(
         TransferErrorCode.UNSUPPORTED_MODE,
-        "没有可用的大文件通道",
+        "No large-file channel is available",
         false,
       )
     )
@@ -562,13 +564,13 @@ class PhoneTransferClient(context: Context) :
       activeListeningSocket?.close()
       receiver.cancelAndJoin()
       if (response is BleResponse.Failure) throw TransferChannelException(response.failure)
-      error((response as? BleResponse.Error)?.message ?: "NoteLink 未准备文件传输")
+      error((response as? BleResponse.Error)?.message ?: "NoteLink did not prepare the file transfer")
     }
     val received = receiver.await()
     activeListeningSocket = null
     phase(TransferPhase.VERIFYING)
     require(received.byteLength == item.byteLength && received.sha256.contentEquals(item.sha256)) {
-      "图片长度或校验值不一致"
+      "Image length or checksum does not match"
     }
     return RemotePayload.Image(item, incoming)
   }
@@ -623,7 +625,7 @@ class PhoneTransferClient(context: Context) :
       throw firstFailure ?: TransferChannelException(
         TransferFailure(
           TransferErrorCode.UNSUPPORTED_MODE,
-          "没有可用的大文件通道",
+          "No large-file channel is available",
           false,
         )
       )
@@ -653,7 +655,7 @@ class PhoneTransferClient(context: Context) :
       is BleResponse.Prepared -> Unit
       is BleResponse.Failure -> throw TransferChannelException(response.failure)
       is BleResponse.Error -> error(response.message)
-      else -> error("NoteLink 未准备接收文件")
+      else -> error("NoteLink is not ready to receive the file")
     }
     if (mode == TransferMode.LAN) {
       phase(TransferPhase.PROBING_LAN)
@@ -667,7 +669,7 @@ class PhoneTransferClient(context: Context) :
   }
 
   private suspend fun exchange(session: BleGattSession, clientId: String, command: BleCommand): BleResponse {
-    val key = requireNotNull(pairing.sharedKey(clientId)) { "配对密钥不可用" }
+    val key = requireNotNull(pairing.sharedKey(clientId)) { "Pairing key is unavailable" }
     val sealed = BleSecureEnvelope.seal(key, pairing.localDeviceId, BleQueueProtocol.encode(command))
     val response = session.exchange(sealed)
     return BleQueueProtocol.decodeResponse(BleSecureEnvelope.open(key, response, inboundReplay))
@@ -686,7 +688,7 @@ class PhoneTransferClient(context: Context) :
       ?: if (response is BleResponse.Failure) {
         throw TransferChannelException(response.failure)
       } else {
-        error("NoteLink 版本过旧，请升级后重试")
+        error("NoteLink is outdated; update it and try again")
       }
     mutableSnapshot.value = mutableSnapshot.value.copy(
       localModes = local.modes,
@@ -758,7 +760,7 @@ class PhoneTransferClient(context: Context) :
   private fun fallback(itemId: UUID, error: Throwable) {
     val reason = (error as? TransferChannelException)?.failure ?: TransferFailure(
       TransferErrorCode.INTERNAL,
-      error.message ?: "LAN 失败",
+      error.message ?: "LAN transfer failed",
       true,
       TransferMode.LAN,
     )
@@ -783,14 +785,14 @@ class PhoneTransferClient(context: Context) :
 
       is TimeoutCancellationException -> TransferFailure(
         TransferErrorCode.CONNECTION_TIMEOUT,
-        error.message ?: "连接超时",
+        error.message ?: "Connection timed out",
         true,
         mutableSnapshot.value.mode,
       )
 
       else -> TransferFailure(
         TransferErrorCode.INTERNAL,
-        error.message ?: "传输失败",
+        error.message ?: "Transfer failed",
         true,
         mutableSnapshot.value.mode,
       )
@@ -851,10 +853,10 @@ class PhoneTransferClient(context: Context) :
     val identity = session.readIdentity()
     val actualHash = AndroidPairingController.identityHash(identity.deviceId)
     require(sender.identityHash.isBlank() || actualHash.equals(sender.identityHash, ignoreCase = true)) {
-      "NoteLink 广播身份与完整身份不一致"
+      "NoteLink advertised identity does not match its full identity"
     }
     if (!paired.legacy) {
-      require(identity.deviceId == paired.id) { "连接到的 NoteLink 与所选客户端不一致" }
+      require(identity.deviceId == paired.id) { "Connected NoteLink does not match the selected client" }
     }
     return identity
   }
@@ -956,7 +958,7 @@ class PhoneTransferClient(context: Context) :
     activeOperationJob = null
     wifiDirect.requestCloseGroup()
     operationActive.set(false)
-    val failure = TransferFailure(TransferErrorCode.CANCELLED, "传输已取消", true, mutableSnapshot.value.mode)
+    val failure = TransferFailure(TransferErrorCode.CANCELLED, "Transfer cancelled", true, mutableSnapshot.value.mode)
     mutableSnapshot.value = mutableSnapshot.value.copy(
       phase = TransferPhase.FAILED,
       lastFailure = failure,
@@ -1009,7 +1011,9 @@ class PhoneTransferClient(context: Context) :
     override suspend fun releaseAndAwait() = finishWithAwait(BleCommand.Release(offer.item.id))
     private suspend fun exchangeAndRequireOk(command: BleCommand) {
       val response = exchange(session, clientId, command)
-      require(response == BleResponse.Ok) { (response as? BleResponse.Error)?.message ?: "手机拒绝操作" }
+      require(response == BleResponse.Ok) {
+        (response as? BleResponse.Error)?.message ?: "Phone rejected the operation"
+      }
     }
     private fun blockingExchange(command: BleCommand) {
       requireWorkerThread()

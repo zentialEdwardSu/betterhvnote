@@ -359,10 +359,10 @@ class WifiDirectController(context: Context) : AutoCloseable {
   private class WifiP2pOperationException(val reason: Int) :
     IllegalStateException(
       when (reason) {
-        WifiP2pManager.P2P_UNSUPPORTED -> "系统报告不支持 Wi-Fi Direct"
-        WifiP2pManager.BUSY -> "Wi-Fi Direct 服务忙或被系统禁用，请打开 WLAN 后重试"
-        WifiP2pManager.ERROR -> "Wi-Fi Direct 固件暂时拒绝操作"
-        else -> "Wi-Fi Direct 操作失败：$reason"
+        WifiP2pManager.P2P_UNSUPPORTED -> "System reports that Wi-Fi Direct is unsupported"
+        WifiP2pManager.BUSY -> "Wi-Fi Direct is busy or disabled; enable WLAN and try again"
+        WifiP2pManager.ERROR -> "Wi-Fi Direct firmware temporarily rejected the operation"
+        else -> "Wi-Fi Direct operation failed: $reason"
       },
     )
 

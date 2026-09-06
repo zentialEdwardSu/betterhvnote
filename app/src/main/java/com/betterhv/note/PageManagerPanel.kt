@@ -29,6 +29,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -109,10 +110,10 @@ fun PageManagerPanel(state: PageManagerPanelState, actions: PageManagerPanelActi
   var panelWidth by remember { mutableFloatStateOf(1f) }
   var panelHeight by remember { mutableFloatStateOf(1f) }
   var side1Armed by remember { mutableStateOf(false) }
-  var side1Delta by remember { mutableStateOf(0) }
+  var side1Delta by remember { mutableIntStateOf(0) }
   var draggingId by remember { mutableStateOf<UUID?>(null) }
   var dragTargetIndex by remember { mutableStateOf<Int?>(null) }
-  var edgeDirection by remember { mutableStateOf(0) }
+  var edgeDirection by remember { mutableIntStateOf(0) }
   var edgeSince by remember { mutableLongStateOf(0L) }
   val vertical = dockEdge == DockEdge.START || dockEdge == DockEdge.END
   val scrollState = rememberScrollState()

@@ -1,11 +1,13 @@
 package com.betterhv.note
 
+import android.annotation.SuppressLint
 import android.content.Context
 import android.view.MotionEvent
 import android.view.View
 import kotlin.math.hypot
 
 /** Transparent page-object input layer above the ink/lasso views. */
+@SuppressLint("ClickableViewAccessibility", "ViewConstructor")
 class ObjectEditOverlayView(context: Context, private val pen: PenDrawView) : View(context) {
   var onPlacementTap: ((Float, Float) -> Unit)? = null
 

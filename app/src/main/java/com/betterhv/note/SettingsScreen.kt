@@ -581,9 +581,9 @@ private fun UpdateSettingsSection(
           )
 
         is UpdateCheckState.Failed -> if (state.manualErrorVisible) {
-          noteText("检查失败：${checkState.message}", "Check failed: ${checkState.message}")
+          "Check failed: ${checkState.message}"
         } else {
-          noteText("自动检查暂时不可用", "Automatic check is temporarily unavailable")
+          "Automatic check is temporarily unavailable"
         }
       },
       color = if (checkState is UpdateCheckState.Failed && state.manualErrorVisible) {

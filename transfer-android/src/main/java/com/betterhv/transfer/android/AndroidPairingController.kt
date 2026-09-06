@@ -122,15 +122,15 @@ class AndroidPairingController(context: Context) : PairingController {
 
   override fun rename(deviceId: String, name: String): PairedDevice {
     val normalized = name.trim()
-    require(normalized.isNotBlank()) { "设备名称不能为空" }
-    val current = requireNotNull(pairedClient(deviceId)) { "配对设备不存在" }
+    require(normalized.isNotBlank()) { "Device name cannot be empty" }
+    val current = requireNotNull(pairedClient(deviceId)) { "Paired device does not exist" }
     val values = ContentValues().apply { put("device_name", normalized) }
     check(database.writableDatabase.update(TABLE, values, "device_id=?", arrayOf(deviceId)) == 1)
     return current.copy(name = normalized)
   }
 
   override fun markLastUsed(deviceId: String): PairedDevice {
-    val current = requireNotNull(pairedClient(deviceId)) { "配对设备不存在" }
+    val current = requireNotNull(pairedClient(deviceId)) { "Paired device does not exist" }
     val now = System.currentTimeMillis()
     val values = ContentValues().apply { put("last_used_at", now) }
     check(database.writableDatabase.update(TABLE, values, "device_id=?", arrayOf(deviceId)) == 1)
@@ -156,7 +156,7 @@ class AndroidPairingController(context: Context) : PairingController {
 
   /** Numeric fallback for devices whose vendor BLE stack cannot complete GATT pairing. */
   fun confirmManual(remoteDeviceId: String, remoteDeviceName: String, sixDigitCode: String): PairedDevice {
-    require(sixDigitCode.length == 6 && sixDigitCode.all(Char::isDigit)) { "配对码必须是六位数字" }
+    require(sixDigitCode.length == 6 && sixDigitCode.all(Char::isDigit)) { "Pairing code must contain six digits" }
     val key = TransferCrypto.hkdfSha256(
       sixDigitCode.encodeToByteArray(),
       "BetterHv-manual-v1".encodeToByteArray(),
@@ -168,20 +168,20 @@ class AndroidPairingController(context: Context) : PairingController {
 
   /** Replaces a migrated legacy alias after the old key authenticates the sender's full GATT identity. */
   fun resolveLegacyIdentity(oldDeviceId: String, identity: BleIdentity): PairedDevice {
-    val old = requireNotNull(pairedClient(oldDeviceId)) { "旧配对设备不存在" }
-    require(old.legacy) { "配对设备不需要身份迁移" }
+    val old = requireNotNull(pairedClient(oldDeviceId)) { "Previous paired device does not exist" }
+    require(old.legacy) { "Paired device does not require identity migration" }
     return replaceIdentity(old, identity.deviceId, identity.deviceName)
   }
 
   /** Binds a manual-code pairing placeholder to the authenticated peer identity. */
   fun resolveIdentity(oldDeviceId: String, deviceId: String, deviceName: String? = null): PairedDevice {
-    val old = requireNotNull(pairedClient(oldDeviceId)) { "配对设备不存在" }
+    val old = requireNotNull(pairedClient(oldDeviceId)) { "Paired device does not exist" }
     if (old.id == deviceId) return markLastUsed(deviceId)
     return replaceIdentity(old, deviceId, deviceName ?: old.name)
   }
 
   private fun replaceIdentity(old: PairedDevice, deviceId: String, deviceName: String): PairedDevice {
-    require(pairedClient(deviceId) == null) { "该设备身份已存在" }
+    require(pairedClient(deviceId) == null) { "This device identity already exists" }
     val secret = database.readableDatabase.query(
       TABLE,
       arrayOf("encrypted_secret"),

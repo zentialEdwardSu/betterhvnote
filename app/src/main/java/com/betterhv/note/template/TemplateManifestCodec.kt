@@ -10,13 +10,13 @@ object TemplateManifestCodec {
 
   fun parse(json: String): TemplateManifestResult {
     val root = runCatching { gson.fromJson(json, JsonObject::class.java) }.getOrNull()
-      ?: return TemplateManifestResult(emptyList(), listOf("manifest.json 不是有效 JSON"))
+      ?: return TemplateManifestResult(emptyList(), listOf("manifest.json is not valid JSON"))
     val schemaVersion = runCatching { root.get("schemaVersion")?.asInt }.getOrNull()
     if (schemaVersion != 1) {
-      return TemplateManifestResult(emptyList(), listOf("仅支持 schemaVersion 1"))
+      return TemplateManifestResult(emptyList(), listOf("Only schemaVersion 1 is supported"))
     }
     val array = runCatching { root.getAsJsonArray("templates") }.getOrNull()
-      ?: return TemplateManifestResult(emptyList(), listOf("manifest.json 缺少 templates 数组"))
+      ?: return TemplateManifestResult(emptyList(), listOf("manifest.json is missing the templates array"))
     val entries = ArrayList<TemplateManifestEntry>()
     val errors = ArrayList<String>()
     val seen = HashSet<String>()
@@ -24,7 +24,7 @@ object TemplateManifestCodec {
       val obj = element.takeIf { it.isJsonObject }?.asJsonObject
       val prefix = "templates[$index]"
       if (obj == null) {
-        errors += "$prefix 必须是对象"
+        errors += "$prefix must be an object"
         return@forEachIndexed
       }
       val id = obj.string("id")
@@ -34,13 +34,14 @@ object TemplateManifestCodec {
       val width = obj.int("width")
       val height = obj.int("height")
       val problem = when {
-        id == null || !idPattern.matches(id) -> "$prefix.id 无效"
-        !seen.add(id) -> "模板 ID $id 重复"
-        name.isNullOrBlank() -> "$prefix.name 不能为空"
-        description == null -> "$prefix.description 缺失"
-        file == null || file != FileNamePolicy.baseName(file) -> "$prefix.file 必须是根目录中的文件名"
-        !file.endsWith(".svg", true) && !file.endsWith(".png", true) -> "$prefix.file 仅支持 SVG/PNG"
-        width == null || width <= 0 || height == null || height <= 0 -> "$prefix.width/height 必须为正整数"
+        id == null || !idPattern.matches(id) -> "$prefix.id is invalid"
+        !seen.add(id) -> "Duplicate template ID: $id"
+        name.isNullOrBlank() -> "$prefix.name cannot be empty"
+        description == null -> "$prefix.description is missing"
+        file == null || file != FileNamePolicy.baseName(file) ->
+          "$prefix.file must be a file name in the root directory"
+        !file.endsWith(".svg", true) && !file.endsWith(".png", true) -> "$prefix.file only supports SVG/PNG"
+        width == null || width <= 0 || height == null || height <= 0 -> "$prefix.width/height must be positive integers"
         else -> null
       }
       if (problem != null) {

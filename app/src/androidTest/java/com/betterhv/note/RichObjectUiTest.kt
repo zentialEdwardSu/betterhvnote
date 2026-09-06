@@ -1,5 +1,7 @@
 package com.betterhv.note
 
+import android.annotation.SuppressLint
+
 import androidx.core.graphics.createBitmap
 
 import android.graphics.Bitmap
@@ -29,6 +31,7 @@ import org.junit.runner.RunWith
 import java.io.File
 
 @RunWith(AndroidJUnit4::class)
+@SuppressLint("DiscouragedApi")
 class RichObjectUiTest {
     @get:Rule
     val rule = ActivityScenarioRule<MainActivity>(

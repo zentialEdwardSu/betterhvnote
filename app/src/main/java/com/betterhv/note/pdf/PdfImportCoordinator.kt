@@ -32,7 +32,7 @@ class PdfImportCoordinator(
   private fun importStaged(staged: StagedPdf): UUID {
     var durable: StagedPdf? = null
     return try {
-      val stagedFile = assets.resolveStaged(staged.relativePath) ?: error("暂存 PDF 已丢失")
+      val stagedFile = assets.resolveStaged(staged.relativePath) ?: error("Staged PDF is missing")
       val inspection = engine.inspect(stagedFile)
       durable = assets.commit(staged)
       repository.createPdfNotebook(

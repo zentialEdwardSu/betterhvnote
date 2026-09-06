@@ -21,7 +21,7 @@ class TemplateManifestCodecTest {
             ]}""",
     )
     assertEquals(1, result.entries.size)
-    assertTrue(result.errors.any { "重复" in it })
+    assertTrue(result.errors.any { "Duplicate" in it })
   }
 
   @Test fun rejectsUnsupportedVersionAndExtension() {

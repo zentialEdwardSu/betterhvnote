@@ -446,8 +446,8 @@ class NotebookRepository(context: Context) : AutoCloseable {
   fun deleteNotebook(notebookId: UUID): NotebookDeletionResult {
     val db = store.writableDatabase
     val workingId = ensureWorkingCopy(db)
-    require(notebookId != workingId) { "Working Copy 不能删除" }
-    require(notebookExists(db, notebookId)) { "笔记本不存在" }
+    require(notebookId != workingId) { "Working Copy cannot be deleted" }
+    require(notebookExists(db, notebookId)) { "Notebook does not exist" }
     val deletedPageIds = loadPageIds(db, notebookId)
     val recordedActive = readMetadata(db, ACTIVE_NOTEBOOK_KEY)?.let(::uuidOrNull)
     val nextActive = if (recordedActive == notebookId ||
@@ -461,7 +461,7 @@ class NotebookRepository(context: Context) : AutoCloseable {
     db.transaction {
       try {
         val deleted = delete("notebooks", "id=?", arrayOf(notebookId.toString()))
-        check(deleted == 1) { "删除笔记本失败" }
+        check(deleted == 1) { "Could not delete notebook" }
         delete("metadata", "key=?", arrayOf(lastPageKey(notebookId)))
         writeMetadata(this, ACTIVE_NOTEBOOK_KEY, nextActive.toString())
         insertJournal(this, workingId, "delete:notebook:$notebookId")

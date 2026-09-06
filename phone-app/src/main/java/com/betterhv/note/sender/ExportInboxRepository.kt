@@ -89,9 +89,9 @@ class ExportInboxRepository(context: Context) : AutoCloseable {
 
   @Synchronized
   fun complete(artifactId: UUID, partial: File) {
-    val item = requireNotNull(find(artifactId)) { "收件记录不存在" }
-    require(partial.length() == item.byteLength) { "文件长度不一致" }
-    require(sha256(partial).contentEquals(item.sha256)) { "文件校验失败" }
+    val item = requireNotNull(find(artifactId)) { "Inbox record does not exist" }
+    require(partial.length() == item.byteLength) { "File length does not match" }
+    require(sha256(partial).contentEquals(item.sha256)) { "File verification failed" }
     val target = File(item.filePath)
     target.parentFile?.mkdirs()
     runCatching {
@@ -188,11 +188,11 @@ class ExportInboxRepository(context: Context) : AutoCloseable {
       put(MediaStore.MediaColumns.IS_PENDING, 1)
     }
     val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
-      ?: error("无法创建 Downloads 文件")
+      ?: error("Could not create Downloads file")
     try {
       resolver.openOutputStream(uri, "w")?.use { output ->
         FileInputStream(source).use { it.copyTo(output, 64 * 1024) }
-      } ?: error("无法写入 Downloads 文件")
+      } ?: error("Could not write Downloads file")
       resolver.update(uri, ContentValues().apply { put(MediaStore.MediaColumns.IS_PENDING, 0) }, null, null)
     } catch (t: Throwable) {
       resolver.delete(uri, null, null)

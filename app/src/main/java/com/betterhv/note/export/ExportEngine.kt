@@ -29,13 +29,13 @@ class ExportEngine(
   suspend fun generate(taskId: UUID, onProgress: (ExportProgress) -> Unit = {}): ExportResult =
     withContext(Dispatchers.IO) {
       val task = taskRepository.loadTask(taskId)
-        ?: return@withContext ExportResult.Failure("导出任务不存在")
+        ?: return@withContext ExportResult.Failure("Export task does not exist")
       try {
         onProgress(ExportProgress(0, 1, null, ExportProgress.Stage.PREPARING))
         val sources = taskRepository.resolveSources(task)
-        if (sources.isEmpty()) return@withContext ExportResult.Failure("笔记本没有可导出的页面")
+        if (sources.isEmpty()) return@withContext ExportResult.Failure("Notebook has no pages to export")
         if (task.scope != ExportScope.ALL_PAGES && sources.size != task.pageIds.size) {
-          return@withContext ExportResult.Failure("导出任务包含已删除的页面")
+          return@withContext ExportResult.Failure("Export task contains deleted pages")
         }
         taskRepository.currentArtifact(task, sources)?.let { return@withContext ExportResult.Success(it) }
 
@@ -95,11 +95,11 @@ class ExportEngine(
   ) {
     coroutineContext.ensureActive()
     onProgress(ExportProgress(0, 1, source.id))
-    val page = notebookRepository.loadPage(source.id) ?: error("页面已删除")
+    val page = notebookRepository.loadPage(source.id) ?: error("Page has been deleted")
     val snapshot = PageSnapshot.capture(page)
     val bitmap = if (page.kind == PageKind.PDF_SOURCE) {
-      val record = notebookRepository.pdfDocument(notebookId) ?: error("PDF 资源记录缺失")
-      val file = notebookRepository.resolveDocumentAsset(record.assetPath) ?: error("PDF 资源文件缺失")
+      val record = notebookRepository.pdfDocument(notebookId) ?: error("PDF asset record is missing")
+      val file = notebookRepository.resolveDocumentAsset(record.assetPath) ?: error("PDF asset file is missing")
       val base = File(output.parentFile, "${output.name}.base.tmp.pdf")
       val annotated = File(output.parentFile, "${output.name}.annotated.tmp.pdf")
       try {
@@ -119,7 +119,7 @@ class ExportEngine(
     }
     try {
       FileOutputStream(output).use { stream ->
-        check(bitmap.compress(Bitmap.CompressFormat.PNG, 100, stream)) { "PNG 编码失败" }
+        check(bitmap.compress(Bitmap.CompressFormat.PNG, 100, stream)) { "PNG encoding failed" }
         stream.fd.sync()
       }
     } finally {
@@ -143,7 +143,7 @@ class ExportEngine(
       if (cached != null) {
         pageFiles += cached
       } else {
-        val page = notebookRepository.loadPage(source.id) ?: error("页面已删除")
+        val page = notebookRepository.loadPage(source.id) ?: error("Page has been deleted")
         val finalPage = File(pageDir, ExportTaskRepository.pageCacheFileName(source))
         val basePage = File(pageDir, "${source.id}-r${source.contentRevision}-base.tmp.pdf")
         val tempPage = File(pageDir, "${finalPage.name}.tmp")
@@ -151,9 +151,9 @@ class ExportEngine(
           val snapshot = PageSnapshot.capture(page)
           if (page.kind == PageKind.PDF_SOURCE) {
             val record = notebookRepository.pdfDocument(task.notebookId)
-              ?: error("PDF 资源记录缺失")
+              ?: error("PDF asset record is missing")
             val original = notebookRepository.resolveDocumentAsset(record.assetPath)
-              ?: error("PDF 资源文件缺失")
+              ?: error("PDF asset file is missing")
             pdfWriter.copySourcePage(
               original,
               requireNotNull(page.pdfSource).sourcePageIndex,

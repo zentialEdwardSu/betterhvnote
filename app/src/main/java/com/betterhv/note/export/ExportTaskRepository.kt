@@ -18,13 +18,13 @@ class ExportTaskRepository(context: Context) : AutoCloseable {
   @Synchronized
   fun createTask(notebookId: UUID, scope: ExportScope, format: ExportFormat, pageIds: List<UUID>): ExportTask {
     validate(scope, format, pageIds)
-    require(notebookExists(notebookId)) { "笔记本不存在" }
+    require(notebookExists(notebookId)) { "Notebook does not exist" }
     val normalizedPages = when (scope) {
       ExportScope.ALL_PAGES -> emptyList()
       else -> orderedExistingPages(notebookId).filter(pageIds.toSet()::contains)
     }
     if (scope != ExportScope.ALL_PAGES) {
-      require(normalizedPages.size == pageIds.toSet().size) { "选择中包含已删除的页面" }
+      require(normalizedPages.size == pageIds.toSet().size) { "Selection contains deleted pages" }
     }
     listTasksRaw().firstOrNull {
       it.notebookId == notebookId && it.scope == scope && it.format == format &&
@@ -145,7 +145,7 @@ class ExportTaskRepository(context: Context) : AutoCloseable {
     if (!file.isFile || record.id == null || record.sha256 == null || record.createdAt == null) return null
     return ExportArtifact(
       record.id, task.id, file, displayName(task), task.format.mimeType,
-      file.length(), record.sha256, record.fingerprint ?: return null, record.createdAt,
+      file.length(), record.sha256, record.fingerprint, record.createdAt,
     )
   }
 
@@ -302,10 +302,12 @@ class ExportTaskRepository(context: Context) : AutoCloseable {
     ExportFileNames.displayName(notebookTitle(task.notebookId), task.id, task.format)
 
   private fun validate(scope: ExportScope, format: ExportFormat, pageIds: List<UUID>) {
-    require(scope == ExportScope.SINGLE_PAGE || format == ExportFormat.PDF) { "多页任务只支持 PDF" }
-    require(scope != ExportScope.SINGLE_PAGE || pageIds.distinct().size == 1) { "单页任务必须选择一页" }
-    require(scope != ExportScope.SELECTED_PAGES || pageIds.isNotEmpty()) { "请选择至少一页" }
-    require(scope != ExportScope.ALL_PAGES || pageIds.isEmpty()) { "全部页面任务不保存固定页面" }
+    require(scope == ExportScope.SINGLE_PAGE || format == ExportFormat.PDF) { "Multi-page tasks only support PDF" }
+    require(scope != ExportScope.SINGLE_PAGE || pageIds.distinct().size == 1) {
+      "Single-page task must select one page"
+    }
+    require(scope != ExportScope.SELECTED_PAGES || pageIds.isNotEmpty()) { "Select at least one page" }
+    require(scope != ExportScope.ALL_PAGES || pageIds.isEmpty()) { "All-pages task cannot store fixed pages" }
   }
 
   private fun listTasksRaw(): List<ExportTask> {

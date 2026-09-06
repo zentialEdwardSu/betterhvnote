@@ -1,5 +1,6 @@
 package com.betterhv.note
 
+import android.annotation.SuppressLint
 import android.bluetooth.BluetoothManager
 import android.content.Context
 import android.content.Intent
@@ -55,7 +56,9 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -67,10 +70,10 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.RectangleShape
-import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.IntOffset
@@ -143,6 +146,7 @@ class MainActivity : ComponentActivity() {
     return handled
   }
 
+  @SuppressLint("RestrictedApi")
   override fun dispatchKeyEvent(event: KeyEvent): Boolean {
     PenButtonTracker.observeKey(event)
     if (N10ProHardwareKeys.dispatch(event) { hardwareKeyHandler?.invoke(it) }) return true
@@ -192,12 +196,12 @@ private fun contentKindLabel(kind: ContentKind): String = when (kind) {
 @Composable
 private fun PdfRegionActionPopup(selection: PdfRegionSelection, onEdit: () -> Unit, onMoveToInbox: () -> Unit) {
   val density = LocalDensity.current
-  val configuration = LocalConfiguration.current
+  val windowSize = LocalWindowInfo.current.containerSize
   val popupWidth = with(density) { 104.dp.toPx() }
   val popupHeight = with(density) { 52.dp.toPx() }
   val margin = with(density) { 8.dp.toPx() }
-  val screenWidth = with(density) { configuration.screenWidthDp.dp.toPx() }
-  val screenHeight = with(density) { configuration.screenHeightDp.dp.toPx() }
+  val screenWidth = windowSize.width.toFloat()
+  val screenHeight = windowSize.height.toFloat()
   val x = ((selection.screenBounds.left + selection.screenBounds.right - popupWidth) / 2f)
     .coerceIn(margin, (screenWidth - popupWidth - margin).coerceAtLeast(margin))
   val preferredTop = selection.screenBounds.top - popupHeight - margin
@@ -236,15 +240,15 @@ private fun AppRoot(
 ) {
   val context = LocalContext.current
   val exportViewModel: ExportViewModel = viewModel()
-  val configuration = LocalConfiguration.current
   val density = LocalDensity.current
+  val windowSize = LocalWindowInfo.current.containerSize
   val thumbnailSize = DpSize(
-    width = configuration.screenWidthDp.dp / THUMBNAIL_SCREEN_SCALE,
-    height = configuration.screenHeightDp.dp / THUMBNAIL_SCREEN_SCALE,
+    width = with(density) { windowSize.width.toDp() } / THUMBNAIL_SCREEN_SCALE,
+    height = with(density) { windowSize.height.toDp() } / THUMBNAIL_SCREEN_SCALE,
   )
   val notebookThumbnailSize = DpSize(
-    width = configuration.screenWidthDp.dp / NOTEBOOK_THUMBNAIL_SCREEN_SCALE,
-    height = configuration.screenHeightDp.dp / NOTEBOOK_THUMBNAIL_SCREEN_SCALE,
+    width = with(density) { windowSize.width.toDp() } / NOTEBOOK_THUMBNAIL_SCREEN_SCALE,
+    height = with(density) { windowSize.height.toDp() } / NOTEBOOK_THUMBNAIL_SCREEN_SCALE,
   )
   val penSettingsStore = remember(context) { PenSettingsStore(context) }
   val appSettingsStore = remember(context) { AppSettingsStore(context) }
@@ -272,10 +276,10 @@ private fun AppRoot(
   var updateUiState by remember { mutableStateOf(UpdateUiState()) }
   val openRelease: (String) -> Unit = { url ->
     if (!UpdateChecker.isTrustedReleaseUrl(url)) {
-      showNotice(noteText("Release 地址无效", "Invalid release URL"))
+      showNotice("Invalid release URL")
     } else {
       runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, url.toUri())) }
-        .onFailure { showNotice(noteText("无法打开 Release 页面：${it.message}", "Cannot open release page: ${it.message}")) }
+        .onFailure { showNotice("Cannot open release page: ${it.message}") }
     }
   }
   val checkForUpdates: (Boolean) -> Unit = { manual ->
@@ -319,7 +323,7 @@ private fun AppRoot(
     var eraserMode by remember { mutableStateOf(EraserMode.WHOLE_STROKE) }
     var debugMode by remember { mutableStateOf(false) }
     var dockEdge by rememberSaveable { mutableStateOf(appSettingsStore.toolbarDockEdge) }
-    var dockFraction by rememberSaveable { mutableStateOf(appSettingsStore.toolbarDockFraction) }
+    var dockFraction by rememberSaveable { mutableFloatStateOf(appSettingsStore.toolbarDockFraction) }
     var toolbarHidden by rememberSaveable { mutableStateOf(appSettingsStore.toolbarHidden) }
     var visibleToolbarItems by remember { mutableStateOf(appSettingsStore.visibleToolbarItems) }
     var shortcutBindings by remember { mutableStateOf(appSettingsStore.loadHardwareShortcuts()) }
@@ -335,7 +339,7 @@ private fun AppRoot(
     var notebookManagerOpen by rememberSaveable { mutableStateOf(false) }
     var exportPanelOpen by rememberSaveable { mutableStateOf(false) }
     var exportInitialNotebookId by remember { mutableStateOf<UUID?>(null) }
-    var exportCreationRequest by rememberSaveable { mutableStateOf(0L) }
+    var exportCreationRequest by rememberSaveable { mutableLongStateOf(0L) }
     var notebookBusy by remember { mutableStateOf(false) }
     var pendingNotebookCreation by remember { mutableStateOf<NotebookCreationRequest?>(null) }
     var textEditorRequest by remember { mutableStateOf<TextEditorRequest?>(null) }
@@ -455,7 +459,7 @@ private fun AppRoot(
         }
       } else if (kind != null) {
         showNotice(
-          noteText("需要附近设备权限才能从手机获取", "Nearby devices permission is required to receive from a phone"),
+          "Nearby devices permission is required to receive from a phone",
         )
       }
     }
@@ -533,7 +537,7 @@ private fun AppRoot(
                         noteText("图片已插入；使用 Side1 点击可编辑", "Image inserted. Use Side1 and tap it to edit."),
                       )
                     }
-                    .onFailure { showNotice(noteText("图片插入失败：${it.message}", "Image insertion failed: ${it.message}")) }
+                    .onFailure { showNotice("Image insertion failed: ${it.message}") }
 
                   is InsertionState.TextReady ->
                     textEditorRequest = TextEditorRequest.New(x, y, request.initialText)
@@ -571,7 +575,7 @@ private fun AppRoot(
                         noteText("图片已插入；使用 Side1 点击可编辑", "Image inserted. Use Side1 and tap it to edit."),
                       )
                     }
-                    .onFailure { showNotice(noteText("图片插入失败：${it.message}", "Image insertion failed: ${it.message}")) }
+                    .onFailure { showNotice("Image insertion failed: ${it.message}") }
 
                   is InsertionState.TextReady ->
                     textEditorRequest = TextEditorRequest.New(x, y, request.initialText)
@@ -611,7 +615,7 @@ private fun AppRoot(
           showNotice(noteText("模板目录已连接", "Template folder connected"))
         }.onFailure {
           showNotice(
-            noteText("模板目录连接失败：${it.message}", "Could not connect template folder: ${it.message}"),
+            "Could not connect template folder: ${it.message}",
           )
         }
       }
@@ -723,7 +727,7 @@ private fun AppRoot(
     var requestedToolbarItem by remember { mutableStateOf<ToolbarItem?>(null) }
     var pendingFlyoutShortcutAction by remember { mutableStateOf<ShortcutAction?>(null) }
     var shortcutDeletePageId by remember { mutableStateOf<UUID?>(null) }
-    var shortcutDeleteAt by remember { mutableStateOf(0L) }
+    var shortcutDeleteAt by remember { mutableLongStateOf(0L) }
 
     val invokeToolbarItem: (ToolbarItem) -> Unit = { item ->
       when (item) {
@@ -1249,7 +1253,7 @@ private fun AppRoot(
     selectedRichObject?.let { selectedObject ->
       val objectCenterY =
         (selectedObject.pageBounds.top + selectedObject.pageBounds.bottom) / 2f
-      val screenHeightPx = with(density) { configuration.screenHeightDp.dp.toPx() }
+      val screenHeightPx = windowSize.height.toFloat()
       val toolbarPosition = if (objectCenterY < screenHeightPx / 2f) {
         Modifier.align(Alignment.BottomCenter).padding(bottom = 72.dp)
       } else {
@@ -1291,7 +1295,7 @@ private fun AppRoot(
         onConfirm = { content ->
           when (request) {
             is TextEditorRequest.New -> insertion.placeText(content, request.x, request.y)
-              .onFailure { showNotice(noteText("文字插入失败：${it.message}", "Text insertion failed: ${it.message}")) }
+              .onFailure { showNotice("Text insertion failed: ${it.message}") }
 
             is TextEditorRequest.Existing ->
               penView?.updateTextObject(request.objectId, text = content)
@@ -1584,7 +1588,7 @@ private fun AppRoot(
                 startupBehavior = behavior
                 showNotice(noteText("启动行为已保存", "Startup behavior saved"))
               }
-              .onFailure { showNotice(noteText("保存设置失败：${it.message}", "Could not save setting: ${it.message}")) }
+              .onFailure { showNotice("Could not save setting: ${it.message}") }
           },
           onSkipSourceSelectionChange = {
             skipSourceSelectionWhenQueueAvailable = it
@@ -1623,13 +1627,13 @@ private fun AppRoot(
           },
           onScanClients = {
             if (missingTransferPermissions.isNotEmpty()) {
-              showNotice(noteText("请先授予附近设备权限", "Grant Nearby devices permission first"))
+              showNotice("Grant Nearby devices permission first")
             } else if (!pairingScanActive) {
               pairingScanActive = true
               snackbarScope.launch {
                 runCatching { phoneTransfer.discoverPairingCandidates() }
                   .onSuccess { pairingCandidates = it }
-                  .onFailure { showNotice(noteText("扫描失败：${it.message}", "Scan failed: ${it.message}")) }
+                  .onFailure { showNotice("Scan failed: ${it.message}") }
                 onlineNoteLinks = runCatching {
                   phoneTransfer.discoverAvailable(timeoutMillis = 2_000L) { onlineNoteLinks = it }
                 }.getOrDefault(emptyList())
@@ -1656,7 +1660,7 @@ private fun AppRoot(
                 }
                 .onFailure {
                   EventLog.log("NoteLinkPairing", "failed device=${candidate.deviceId} error=${it.message}")
-                  showNotice(noteText("配对失败：${it.message}", "Pairing failed: ${it.message}"))
+                  showNotice("Pairing failed: ${it.message}")
                 }
               pairingInProgress = false
             }
@@ -1667,7 +1671,7 @@ private fun AppRoot(
                 pairedClients = phoneTransfer.pairing.pairedClients
                 showNotice(noteText("名称已保存", "Name saved"))
               }
-              .onFailure { showNotice(noteText("重命名失败：${it.message}", "Rename failed: ${it.message}")) }
+              .onFailure { showNotice("Rename failed: ${it.message}") }
           },
           onUnpairClient = { id ->
             phoneTransfer.pairing.unpair(id)
@@ -1905,26 +1909,26 @@ private fun noteTransferStatus(context: Context, isPaired: Boolean, permissionsG
       PackageManager.FEATURE_BLUETOOTH_LE,
     )
   ) {
-    return noteText("设备不支持 BLE", "This device does not support BLE")
+    return "This device does not support BLE"
   }
   if (!context.packageManager.hasSystemFeature(
       PackageManager.FEATURE_WIFI_DIRECT,
     )
   ) {
-    return noteText("设备不支持 Wi-Fi Direct", "This device does not support Wi-Fi Direct")
+    return "This device does not support Wi-Fi Direct"
   }
-  if (!permissionsGranted) return noteText("需要附近设备权限", "Nearby devices permission required")
+  if (!permissionsGranted) return "Nearby devices permission required"
   if (context.getSystemService(
       BluetoothManager::class.java,
     )?.adapter?.isEnabled != true
   ) {
-    return noteText("蓝牙已关闭", "Bluetooth is off")
+    return "Bluetooth is off"
   }
   if (context.getSystemService(
       WifiManager::class.java,
     )?.isWifiEnabled != true
   ) {
-    return noteText("WLAN 已关闭", "Wi-Fi is off")
+    return "Wi-Fi is off"
   }
   return if (isPaired) {
     noteText(
@@ -1932,7 +1936,7 @@ private fun noteTransferStatus(context: Context, isPaired: Boolean, permissionsG
       "Ready; connects to the phone when needed",
     )
   } else {
-    noteText("请先与手机配对", "Pair with a phone first")
+    "Pair with a phone first"
   }
 }
 

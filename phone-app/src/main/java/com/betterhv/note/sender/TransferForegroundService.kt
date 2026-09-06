@@ -150,14 +150,14 @@ class TransferForegroundService : Service() {
 
       TransferPhase.FAILED -> transfer.lastFailure?.let {
         "${it.code}: ${it.message}"
-      } ?: noteLinkText("传输失败", "Transfer failed")
+      } ?: "Transfer failed"
 
       else -> transfer.phase.name.replace('_', ' ')
     }
     val groupText = when (group) {
       is HostedGroupState.Ready -> noteLinkText("Wi-Fi Direct 已准备", "Wi-Fi Direct ready")
       is HostedGroupState.Preparing -> noteLinkText("正在准备 Wi-Fi Direct", "Preparing Wi-Fi Direct")
-      is HostedGroupState.Unavailable -> noteLinkText("Wi-Fi Direct 暂不可用", "Wi-Fi Direct unavailable")
+      is HostedGroupState.Unavailable -> "Wi-Fi Direct unavailable"
       HostedGroupState.Stopped -> noteLinkText("Wi-Fi Direct 已停止", "Wi-Fi Direct stopped")
     }
     val diagnostic = buildList {

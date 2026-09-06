@@ -88,7 +88,7 @@ class InsertionCoordinator(private val phone: PhoneTransferClient) : AutoCloseab
       .onFailure {
         if (generation == requestGeneration) {
           mutableState.value = InsertionState.Error(
-            it.message ?: noteText("图片导入失败", "Image import failed"),
+            it.message ?: "Image import failed",
           )
         }
       }
@@ -163,14 +163,14 @@ class InsertionCoordinator(private val phone: PhoneTransferClient) : AutoCloseab
           lease?.let { finishLease(it, commit = false) }
           if (error is CancellationException) throw error
           if (generation == requestGeneration) {
-            mutableState.value = InsertionState.Error(error.message ?: noteText("手机传输失败", "Phone transfer failed"))
+            mutableState.value = InsertionState.Error(error.message ?: "Phone transfer failed")
           }
         }
       }
       .onFailure {
         if (generation == requestGeneration) {
           mutableState.value = InsertionState.Error(
-            it.message ?: noteText("手机传输失败", "Phone transfer failed"),
+            it.message ?: "Phone transfer failed",
           )
         }
       }
@@ -178,7 +178,7 @@ class InsertionCoordinator(private val phone: PhoneTransferClient) : AutoCloseab
 
   fun placeImage(x: Float, y: Float): Result<Unit> {
     val ready = mutableState.value as? InsertionState.ImageReady
-      ?: return Result.failure(IllegalStateException(noteText("没有待插入图片", "No image is ready to insert")))
+      ?: return Result.failure(IllegalStateException("No image is ready to insert"))
     val view = requireNotNull(penView)
     val result = if (ready.lease == null) {
       runCatching { view.placeImage(ready.image, x, y) }
@@ -193,7 +193,7 @@ class InsertionCoordinator(private val phone: PhoneTransferClient) : AutoCloseab
 
   fun placeText(text: String, x: Float, y: Float): Result<Unit> {
     val ready = mutableState.value as? InsertionState.TextReady
-      ?: return Result.failure(IllegalStateException(noteText("没有待插入文字", "No text is ready to insert")))
+      ?: return Result.failure(IllegalStateException("No text is ready to insert"))
     val view = requireNotNull(penView)
     val result = if (ready.lease == null) {
       runCatching { view.placeText(text, x, y) }

@@ -39,6 +39,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -394,7 +395,7 @@ private fun ExportTaskRow(state: ExportTaskRowState, actions: ExportTaskRowActio
               "Send ${summary.notebookTitle} to NoteLink",
             )
           } else {
-            noteText("NoteLink 未配对或不可用", "NoteLink is not paired or unavailable")
+            "NoteLink is not paired or unavailable"
           },
         )
       }
@@ -428,7 +429,7 @@ private fun ExportTaskCreator(
   var format by remember { mutableStateOf(ExportFormat.PDF) }
   var selected by remember(notebookId, scope) { mutableStateOf(emptySet<UUID>()) }
   var notebookMenu by remember { mutableStateOf(false) }
-  var notebookMenuWidth by remember { mutableStateOf(0) }
+  var notebookMenuWidth by remember { mutableIntStateOf(0) }
   val notebook = state.notebooks.firstOrNull { it.id == notebookId }
   val pages = notebook?.pages.orEmpty().mapIndexed { index, source ->
     PageUiInfo(source.id, index + 1, false, source.contentRevision)
@@ -597,10 +598,10 @@ private fun taskStatus(summary: ExportTaskSummary): String = when (summary.state
     noteText("${summary.stalePageCount} 页待更新", "${summary.stalePageCount} pages need updating")
   }
 
-  ExportTaskState.SOURCE_MISSING -> noteText("源页面已删除", "Source page deleted")
+  ExportTaskState.SOURCE_MISSING -> "Source page deleted"
 
-  ExportTaskState.FAILED -> summary.lastError?.let { noteText("失败 · $it", "Failed · $it") }
-    ?: noteText("生成失败", "Generation failed")
+  ExportTaskState.FAILED -> summary.lastError?.let { "Failed - $it" }
+    ?: "Generation failed"
 }
 
 private fun stateColor(state: ExportTaskState): Color = when (state) {

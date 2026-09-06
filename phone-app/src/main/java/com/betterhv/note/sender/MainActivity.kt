@@ -217,14 +217,14 @@ class MainActivity : ComponentActivity() {
         startWaiting()
         ShareUndoNotifier.show(this@MainActivity, added)
         notice.value = "已加入发送队列"
-      }.onFailure { notice.value = "加入队列失败：${it.message}" }
+      }.onFailure { notice.value = "Could not add to queue: ${it.message}" }
     }
     intent.action = null
   }
 
   private fun startWaiting() {
     runCatching { TransferForegroundService.sync(this, queue.items().isNotEmpty()) }
-      .onFailure { notice.value = "内容已保存；授予附近设备权限后可等待发送" }
+      .onFailure { notice.value = "Content was saved; grant Nearby devices permission to wait for sending" }
   }
 }
 
@@ -261,12 +261,12 @@ private fun BetterHvSendApp(
   var updateUiState by remember { mutableStateOf(UpdateUiState()) }
   val openRelease: (String) -> Unit = { url ->
     if (!UpdateChecker.isTrustedReleaseUrl(url)) {
-      showNotice(noteLinkText("Release 地址无效", "Invalid release URL"))
+      showNotice("Invalid release URL")
     } else {
       runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, url.toUri())) }
         .onFailure {
           showNotice(
-            noteLinkText("无法打开 Release 页面：${it.message}", "Cannot open release page: ${it.message}"),
+            "Cannot open release page: ${it.message}",
           )
         }
     }
@@ -320,7 +320,7 @@ private fun BetterHvSendApp(
     } else {
       showNotice(
         noteLinkText(
-          "没有附近设备权限时仍可排队，但 Note 无法连接",
+          "Items can still be queued without Nearby devices permission, but Note cannot connect",
           "Items can still be queued, but Note cannot connect without Nearby devices permission",
         ),
       )
@@ -330,7 +330,7 @@ private fun BetterHvSendApp(
     scope.launch {
       runCatching { withContext(Dispatchers.IO) { uris.forEach { queue.enqueueImage(it, selectedDevice?.id) } } }
         .onSuccess { TransferForegroundService.sync(queueContext(queue), queue.items().isNotEmpty()) }
-        .onFailure { showNotice(noteLinkText("图片加入失败：${it.message}", "Could not add image: ${it.message}")) }
+        .onFailure { showNotice("Could not add image: ${it.message}") }
     }
   }
   val pdfPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
@@ -341,7 +341,7 @@ private fun BetterHvSendApp(
         }
       }
         .onSuccess { TransferForegroundService.sync(queueContext(queue), queue.items().isNotEmpty()) }
-        .onFailure { showNotice(noteLinkText("PDF 加入失败：${it.message}", "Could not add PDF: ${it.message}")) }
+        .onFailure { showNotice("Could not add PDF: ${it.message}") }
     }
   }
   val camera = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { ok ->
@@ -352,7 +352,7 @@ private fun BetterHvSendApp(
           .onSuccess { TransferForegroundService.sync(queueContext(queue), true) }
           .onFailure {
             showNotice(
-              noteLinkText("照片加入失败：${it.message}", "Could not add photo: ${it.message}"),
+              "Could not add photo: ${it.message}",
             )
           }
         cameraFile?.delete()
@@ -393,7 +393,7 @@ private fun BetterHvSendApp(
           }.onSuccess {
             settingsMessage = noteLinkText("显示名称已保存", "Display name saved")
           }.onFailure {
-            settingsMessage = it.message ?: noteLinkText("保存失败", "Save failed")
+            settingsMessage = it.message ?: "Save failed"
           }
         },
         onShowRecentTransferEventsChange = {
@@ -416,7 +416,7 @@ private fun BetterHvSendApp(
                 noteLinkText("已清理 $removed 项发送缓存", "Cleared $removed send-cache items")
               }
             }.onFailure {
-              settingsMessage = noteLinkText("发送缓存清理失败：${it.message}", "Could not clear send cache: ${it.message}")
+              settingsMessage = "Could not clear send cache: ${it.message}"
             }
           }
         },
@@ -431,7 +431,7 @@ private fun BetterHvSendApp(
                 noteLinkText("已清理 $removed 项接收缓存", "Cleared $removed receive-cache items")
               }
             }.onFailure {
-              settingsMessage = noteLinkText("接收缓存清理失败：${it.message}", "Could not clear receive cache: ${it.message}")
+              settingsMessage = "Could not clear receive cache: ${it.message}"
             }
           }
         },
@@ -477,7 +477,7 @@ private fun BetterHvSendApp(
               )?.coerceToText(context)?.toString().orEmpty()
               if (value.isBlank()) {
                 showNotice(
-                  noteLinkText("剪贴板没有文字", "Clipboard contains no text"),
+                  "Clipboard contains no text",
                 )
               } else {
                 textDialog = value
@@ -534,7 +534,7 @@ private fun BetterHvSendApp(
                     }
                     .onFailure {
                       showNotice(
-                        noteLinkText("取消配对失败：${it.message}", "Could not unpair: ${it.message}"),
+                        "Could not unpair: ${it.message}",
                       )
                     }
                 }
@@ -553,7 +553,7 @@ private fun BetterHvSendApp(
                     }
                     .onFailure {
                       showNotice(
-                        noteLinkText("刷新失败：${it.message}", "Refresh failed: ${it.message}"),
+                        "Refresh failed: ${it.message}",
                       )
                     }
                 }
@@ -634,7 +634,7 @@ private fun BetterHvSendApp(
                 }.onFailure {
                   showNotice(
                     noteLinkText(
-                      "无法打开文件：${it.message ?: "没有兼容的应用"}",
+                      "Cannot open file: ${it.message ?: "no compatible app"}",
                       "Cannot open file: ${it.message ?: "no compatible app"}",
                     ),
                   )
@@ -647,7 +647,7 @@ private fun BetterHvSendApp(
                 }.onFailure {
                   showNotice(
                     noteLinkText(
-                      "无法分享文件：${it.message ?: "没有兼容的应用"}",
+                      "Cannot share file: ${it.message ?: "no compatible app"}",
                       "Cannot share file: ${it.message ?: "no compatible app"}",
                     ),
                   )
@@ -663,7 +663,7 @@ private fun BetterHvSendApp(
                     }
                     .onFailure {
                       showNotice(
-                        noteLinkText("保存失败：${it.message}", "Save failed: ${it.message}"),
+                        "Save failed: ${it.message}",
                       )
                     }
                 }
@@ -690,7 +690,7 @@ private fun BetterHvSendApp(
                   TransferForegroundService.sync(queueContext(queue), true)
                   textDialog = null
                 }
-                .onFailure { showNotice(it.message ?: noteLinkText("文字加入失败", "Could not add text")) }
+                .onFailure { showNotice(it.message ?: "Could not add text") }
             }) { Text(noteLinkText("加入队列", "Add to queue")) }
           },
           dismissButton = {
@@ -1104,9 +1104,9 @@ private fun UpdateSettingsCard(
           )
 
         is UpdateCheckState.Failed -> if (state.manualErrorVisible) {
-          noteLinkText("检查失败：${checkState.message}", "Check failed: ${checkState.message}")
+          "Check failed: ${checkState.message}"
         } else {
-          noteLinkText("自动检查暂时不可用", "Automatic check is temporarily unavailable")
+          "Automatic check is temporarily unavailable"
         }
       },
       color = if (checkState is UpdateCheckState.Failed && state.manualErrorVisible) {
@@ -1346,10 +1346,7 @@ private fun InboxCard(
             "Received · ${formatSize(item.byteLength)}",
           )
 
-          InboxExportState.FAILED -> noteLinkText(
-            "接收失败 · ${item.error.orEmpty()}",
-            "Receive failed · ${item.error.orEmpty()}",
-          )
+          InboxExportState.FAILED -> "Receive failed - ${item.error.orEmpty()}"
         },
         style = MaterialTheme.typography.bodySmall,
       )
@@ -1380,24 +1377,24 @@ private fun phoneConnectionStatus(
       PackageManager.FEATURE_BLUETOOTH_LE,
     )
   ) {
-    return noteLinkText("此手机不支持 BLE", "This phone does not support BLE")
+    return "This phone does not support BLE"
   }
   if (!context.packageManager.hasSystemFeature(
       PackageManager.FEATURE_WIFI_DIRECT,
     )
   ) {
-    return noteLinkText("此手机不支持 Wi-Fi Direct", "This phone does not support Wi-Fi Direct")
+    return "This phone does not support Wi-Fi Direct"
   }
-  if (!permissionsGranted) return noteLinkText("需要附近设备权限", "Nearby devices permission required")
+  if (!permissionsGranted) return "Nearby devices permission required"
   if (context.getSystemService(BluetoothManager::class.java)?.adapter?.isEnabled != true) {
     return noteLinkText(
-      "蓝牙已关闭",
+      "Bluetooth is turned off",
       "Bluetooth is off",
     )
   }
   if (context.getSystemService(WifiManager::class.java)?.isWifiEnabled != true) {
     return noteLinkText(
-      "WLAN 已关闭",
+      "WLAN is turned off",
       "Wi-Fi is off",
     )
   }

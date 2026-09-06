@@ -1,5 +1,6 @@
 package com.betterhv.note
 
+import android.annotation.SuppressLint
 import android.content.Context
 import android.view.MotionEvent
 import android.view.View
@@ -15,6 +16,7 @@ import com.betterhv.note.ink.InkPoint
  * the complete Android DOWN/MOVE/UP stream and forwards it in PenDrawView's
  * client coordinate space.
  */
+@SuppressLint("ClickableViewAccessibility", "ViewConstructor")
 class LassoOverlayView(context: Context, private val pen: PenDrawView) : View(context) {
 
   private var lassoing = false

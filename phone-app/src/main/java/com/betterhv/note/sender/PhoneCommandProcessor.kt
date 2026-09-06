@@ -95,7 +95,7 @@ class PhoneCommandProcessor(
 
         is TransferChannelException -> error.failure
 
-        else -> TransferFailure(TransferErrorCode.INTERNAL, error.message ?: "命令失败", true)
+        else -> TransferFailure(TransferErrorCode.INTERNAL, error.message ?: "Command failed", true)
       }
       mutableSnapshot.value = mutableSnapshot.value.copy(
         phase = TransferPhase.FAILED,
@@ -116,7 +116,7 @@ class PhoneCommandProcessor(
 
   private fun authenticate(envelope: ByteArray, senderId: String?): AuthenticatedCommand {
     val devices = pairing.pairedClients
-    require(devices.isNotEmpty()) { "尚未配对" }
+    require(devices.isNotEmpty()) { "No paired device" }
     val identified = senderId?.let { id -> devices.firstOrNull { it.id == id } }
     val candidates = if (senderId == null) {
       devices
@@ -130,7 +130,7 @@ class PhoneCommandProcessor(
       runCatching { BleSecureEnvelope.open(key, envelope, inboundReplay) }
         .getOrNull()?.let { return AuthenticatedCommand(device, key, it) }
     }
-    error("无法验证已配对设备")
+    error("Could not authenticate paired device")
   }
 
   private fun dispatch(command: BleCommand, peerId: String, key: ByteArray): BleResponse = when (command) {
@@ -144,7 +144,7 @@ class PhoneCommandProcessor(
 
     is BleCommand.TextChunk -> {
       val lease = requireLease(command.itemId, peerId)
-      val content = requireNotNull(lease.text) { "不是文字项目" }.encodeToByteArray()
+      val content = requireNotNull(lease.text) { "Item is not text" }.encodeToByteArray()
       require(command.offset in 0..content.size)
       val end = (command.offset + BleQueueProtocol.TEXT_CHUNK_BYTES).coerceAtMost(content.size)
       lease.heartbeat()
@@ -217,7 +217,7 @@ class PhoneCommandProcessor(
         it.sourceDeviceId == peerId && it.state == InboxExportState.COMPLETE
       }
         ?.let { BleResponse.AlreadyReceived(command.artifactId) }
-        ?: BleResponse.Failure(TransferFailure(TransferErrorCode.INTERNAL, "接收任务不存在", false))
+        ?: BleResponse.Failure(TransferFailure(TransferErrorCode.INTERNAL, "Receive task does not exist", false))
 
       is PushState.Waiting, is PushState.Receiving -> {
         requirePushOwner(command.artifactId, peerId)
@@ -256,7 +256,7 @@ class PhoneCommandProcessor(
       return BleResponse.Failure(
         TransferFailure(
           TransferErrorCode.UNSUPPORTED_MODE,
-          "双方不支持 ${command.selectedMode}",
+          "Selected mode ${command.selectedMode} is not supported by both devices",
           false,
           command.selectedMode,
         ),
@@ -285,7 +285,7 @@ class PhoneCommandProcessor(
         prepareReceive(command, peerId, endpoint, fileKey, probeKey)
       }
 
-      else -> BleResponse.Failure(TransferFailure(TransferErrorCode.INTERNAL, "传输项目不存在", false))
+      else -> BleResponse.Failure(TransferFailure(TransferErrorCode.INTERNAL, "Transfer item does not exist", false))
     }
   }
 
@@ -297,7 +297,7 @@ class PhoneCommandProcessor(
     probeKey: ByteArray,
   ): BleResponse {
     val lease = requireLease(command.itemId, peerId)
-    val source = requireNotNull(lease.payloadFile) { "不是文件项目" }
+    val source = requireNotNull(lease.payloadFile) { "Item is not a file" }
     if (command.selectedMode == TransferMode.LAN) {
       phase(command.itemId, TransferPhase.PROBING_LAN)
       runCatching { EncryptedFileTransfer.probe(endpoint.host, command.itemId, probeKey) }
@@ -360,7 +360,7 @@ class PhoneCommandProcessor(
         require(
           received.byteLength == waiting.offer.byteLength && received.sha256.contentEquals(waiting.offer.sha256),
         ) {
-          "导出文件长度或校验值不一致"
+          "Export file length or checksum does not match"
         }
         inbox.complete(command.itemId, waiting.partial)
         pushedExports[command.itemId] = PushState.Complete
@@ -393,7 +393,7 @@ class PhoneCommandProcessor(
       return BleResponse.Failure(
         TransferFailure(
           TransferErrorCode.CONNECTION_TIMEOUT,
-          "接收端口未能及时启动",
+          "Receive port did not start in time",
           true,
           command.selectedMode,
         ),
@@ -468,30 +468,30 @@ class PhoneCommandProcessor(
   private fun failure(error: Throwable, mode: TransferMode?): TransferFailure =
     (error as? TransferChannelException)?.failure ?: TransferFailure(
       TransferErrorCode.INTERNAL,
-      error.message ?: "传输失败",
+      error.message ?: "Transfer failed",
       true,
       mode,
     )
 
   private fun requireLease(id: UUID, peerId: String): SenderLease {
-    require(leaseOwners[id] == peerId) { "租约不属于当前设备" }
-    return requireNotNull(leases[id]) { "租约不存在" }
+    require(leaseOwners[id] == peerId) { "Lease does not belong to the current device" }
+    return requireNotNull(leases[id]) { "Lease does not exist" }
   }
 
   private fun beginPush(peerId: String, command: BleCommand.PushOffer): InboxBeginResult {
     val id = command.offer.artifactId
     val storedOwner = inbox.find(id)?.sourceDeviceId
-    require(storedOwner == null || storedOwner == peerId) { "导出任务不属于当前设备" }
+    require(storedOwner == null || storedOwner == peerId) { "Export task does not belong to the current device" }
     val result = inbox.begin(peerId, command.offer)
     if (result is InboxBeginResult.Receive) {
       val activeOwner = pushedExportOwners.putIfAbsent(id, peerId)
-      require(activeOwner == null || activeOwner == peerId) { "导出任务不属于当前设备" }
+      require(activeOwner == null || activeOwner == peerId) { "Export task does not belong to the current device" }
     }
     return result
   }
 
   private fun requirePushOwner(id: UUID, peerId: String) {
-    require(pushedExportOwners[id] == peerId) { "导出任务不属于当前设备" }
+    require(pushedExportOwners[id] == peerId) { "Export task does not belong to the current device" }
   }
 
   override fun cancel() {

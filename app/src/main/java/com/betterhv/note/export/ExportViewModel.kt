@@ -65,7 +65,7 @@ class ExportViewModel(application: Application) : AndroidViewModel(application) 
             )
           }
         }
-        .onFailure { failure(it.message ?: noteText("创建导出任务失败", "Could not create export task")) }
+        .onFailure { failure(it.message ?: "Could not create export task") }
     }
   }
 
@@ -140,7 +140,7 @@ class ExportViewModel(application: Application) : AndroidViewModel(application) 
         message = null,
       )
       try {
-        check(beforeExport(task.notebookId)) { noteText("保存当前笔记本失败", "Could not save the current notebook") }
+        check(beforeExport(task.notebookId)) { "Could not save the current notebook" }
         when (
           val result = engine.generate(taskId) { progress ->
             mutableState.value = mutableState.value.copy(progress = progress)
@@ -152,7 +152,7 @@ class ExportViewModel(application: Application) : AndroidViewModel(application) 
           }
 
           is ExportResult.Failure -> mutableState.value = mutableState.value.copy(
-            message = noteText("导出失败：${result.error}", "Export failed: ${result.error}"),
+            message = "Export failed: ${result.error}",
           )
 
           ExportResult.Cancelled -> mutableState.value = mutableState.value.copy(
@@ -164,7 +164,7 @@ class ExportViewModel(application: Application) : AndroidViewModel(application) 
       } catch (t: Throwable) {
         mutableState.value = mutableState.value.copy(
           message = noteText(
-            "导出失败：${t.message ?: t.javaClass.simpleName}",
+            "Export failed: ${t.message ?: t.javaClass.simpleName}",
             "Export failed: ${t.message ?: t.javaClass.simpleName}",
           ),
         )

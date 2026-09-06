@@ -25,7 +25,7 @@ extensions.configure<ApplicationExtension> {
     defaultConfig {
         applicationId = "com.betterhv.note.sender"
         minSdk = 29
-        targetSdk = 34
+        targetSdk = 37
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         versionCode = providers.gradleProperty("noteLinkVersionCode").get().toInt()
         versionName = providers.gradleProperty("noteLinkVersion").get()

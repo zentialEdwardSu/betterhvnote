@@ -77,7 +77,7 @@ fun TemplateSelectionRow(
     TemplatePreview(definition, preview, Modifier.width(48.dp).height(64.dp))
     Column(Modifier.weight(1f).padding(start = 12.dp)) {
       Text("Template", color = Color(0xFF666666), fontSize = 12.sp)
-      Text(definition?.name ?: noteText("不可用", "Unavailable"), fontWeight = FontWeight.Medium, fontSize = 17.sp)
+      Text(definition?.name ?: "Unavailable", fontWeight = FontWeight.Medium, fontSize = 17.sp)
       Text(
         definition?.description.orEmpty(),
         color = Color(0xFF666666),
@@ -141,14 +141,14 @@ fun TemplateChooserOverlay(state: TemplateChooserState, actions: TemplateChooser
             Text(definition.description, color = Color(0xFF666666), fontSize = 12.sp, maxLines = 2)
             when {
               !compatible -> Text(
-                noteText("宽高比与当前页面不一致", "Aspect ratio does not match this page"),
+                "Aspect ratio does not match this page",
                 color = Color(0xFF8B0000),
                 fontSize = 11.sp,
               )
 
               definition.availability == TemplateAvailability.CACHED ->
                 Text(
-                  noteText("外部来源不可用 · 使用缓存", "External source unavailable · using cache"),
+                  "External source unavailable - using cache",
                   color = Color(0xFF8B5A00),
                   fontSize = 11.sp,
                 )

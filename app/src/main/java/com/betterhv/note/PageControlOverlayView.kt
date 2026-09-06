@@ -1,5 +1,6 @@
 package com.betterhv.note
 
+import android.annotation.SuppressLint
 import android.content.Context
 import android.view.MotionEvent
 import android.view.View
@@ -9,6 +10,7 @@ import android.view.View
  * and continues to the ink/lasso/eraser layers. The page counter owns Side1
  * bookmark clicks directly so its visual and hit target cannot drift apart.
  */
+@SuppressLint("ClickableViewAccessibility", "ViewConstructor")
 class PageControlOverlayView(context: Context, private val pen: PenDrawView, private val onNotice: (String) -> Unit) :
   View(context) {
   private var armed = PenSideButton.NONE

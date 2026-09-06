@@ -27,7 +27,7 @@ class PdfAssetStore(private val context: Context) {
       null,
       null,
     )?.use { c -> if (c.moveToFirst() && !c.isNull(0)) c.getLong(0) else null }
-    require(declaredSize == null || declaredSize in 1..MAX_BYTES) { "PDF 不能超过 512 MiB" }
+    require(declaredSize == null || declaredSize in 1..MAX_BYTES) { "PDF cannot exceed 512 MiB" }
     val displayName = resolver.query(
       uri,
       arrayOf(OpenableColumns.DISPLAY_NAME),
@@ -41,20 +41,20 @@ class PdfAssetStore(private val context: Context) {
       val digest = MessageDigest.getInstance("SHA-256")
       var total = 0L
       resolver.openInputStream(uri).use { input ->
-        requireNotNull(input) { "无法读取所选 PDF" }
+        requireNotNull(input) { "Could not read selected PDF" }
         temp.outputStream().buffered().use { output ->
           val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
           while (true) {
             val count = input.read(buffer)
             if (count < 0) break
             total += count
-            require(total <= MAX_BYTES) { "PDF 不能超过 512 MiB" }
+            require(total <= MAX_BYTES) { "PDF cannot exceed 512 MiB" }
             digest.update(buffer, 0, count)
             output.write(buffer, 0, count)
           }
         }
       }
-      require(total > 0L) { "PDF 文件为空" }
+      require(total > 0L) { "PDF file is empty" }
       StagedPdf(
         relativePath = "pdf-incoming/${temp.name}",
         displayName = sanitizeDisplayName(displayName),
@@ -68,7 +68,7 @@ class PdfAssetStore(private val context: Context) {
   }
 
   fun stageFile(source: File, displayName: String): StagedPdf {
-    require(source.isFile && source.length() in 1..MAX_BYTES) { "PDF 不能超过 512 MiB" }
+    require(source.isFile && source.length() in 1..MAX_BYTES) { "PDF cannot exceed 512 MiB" }
     val temp = File(incomingDir, "${UUID.randomUUID()}.pdf.tmp")
     return try {
       val digest = MessageDigest.getInstance("SHA-256")
@@ -80,7 +80,7 @@ class PdfAssetStore(private val context: Context) {
             val count = input.read(buffer)
             if (count < 0) break
             total += count
-            require(total <= MAX_BYTES) { "PDF 不能超过 512 MiB" }
+            require(total <= MAX_BYTES) { "PDF cannot exceed 512 MiB" }
             digest.update(buffer, 0, count)
             output.write(buffer, 0, count)
           }
@@ -100,10 +100,10 @@ class PdfAssetStore(private val context: Context) {
 
   fun commit(staged: StagedPdf): StagedPdf {
     if (staged.relativePath.startsWith("pdfs/")) return staged
-    val source = resolveIncoming(staged.relativePath) ?: error("暂存 PDF 已丢失")
+    val source = resolveIncoming(staged.relativePath) ?: error("Staged PDF is missing")
     val targetName = source.name.removeSuffix(".tmp")
     val target = File(assetDir, targetName)
-    check(source.renameTo(target)) { "无法提交 PDF 资源" }
+    check(source.renameTo(target)) { "Could not commit PDF asset" }
     return staged.copy(relativePath = "pdfs/$targetName")
   }
 

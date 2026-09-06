@@ -26,11 +26,11 @@ class ExportDownloads(private val context: Context) {
     val created = existing == null
     val uri = existing?.also { resolver.update(it, values, null, null) }
       ?: resolver.insert(collection, values)
-      ?: error("无法创建 Downloads 文件")
+      ?: error("Could not create Downloads file")
     try {
       resolver.openOutputStream(uri, "rwt")?.use { output ->
         FileInputStream(artifact.file).use { it.copyTo(output, 64 * 1024) }
-      } ?: error("无法写入 Downloads 文件")
+      } ?: error("Could not write Downloads file")
       resolver.update(uri, ContentValues().apply { put(MediaStore.MediaColumns.IS_PENDING, 0) }, null, null)
       return artifact.displayName
     } catch (t: Throwable) {

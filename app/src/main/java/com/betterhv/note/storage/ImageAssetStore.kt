@@ -37,7 +37,7 @@ class ImageAssetStore(private val context: Context) {
     val temp = File(incomingDir, "$name.tmp")
     try {
       context.contentResolver.openInputStream(uri).use { input ->
-        requireNotNull(input) { "无法读取所选图片" }
+        requireNotNull(input) { "Could not read selected image" }
         temp.outputStream().buffered().use(input::copyTo)
       }
       return inspect(temp, if (mime == "image/*") null else mime)
@@ -48,8 +48,8 @@ class ImageAssetStore(private val context: Context) {
   }
 
   fun stageFile(source: File, mimeType: String): ImportedImage {
-    require(source.isFile) { "接收图片不存在" }
-    require(source.length() <= 64L * 1024L * 1024L) { "图片不能超过 64 MiB" }
+    require(source.isFile) { "Received image does not exist" }
+    require(source.length() <= 64L * 1024L * 1024L) { "Image cannot exceed 64 MiB" }
     val temp = File(incomingDir, "${UUID.randomUUID()}.bin.tmp")
     try {
       FileInputStream(source).use { input -> temp.outputStream().buffered().use(input::copyTo) }
@@ -61,12 +61,12 @@ class ImageAssetStore(private val context: Context) {
   }
 
   fun importPng(bitmap: Bitmap): ImportedImage {
-    require(bitmap.width > 0 && bitmap.height > 0) { "截图尺寸无效" }
-    require(bitmap.width.toLong() * bitmap.height <= 100_000_000L) { "截图像素不能超过 1 亿" }
+    require(bitmap.width > 0 && bitmap.height > 0) { "Invalid screenshot dimensions" }
+    require(bitmap.width.toLong() * bitmap.height <= 100_000_000L) { "Screenshot cannot exceed 100 million pixels" }
     val temp = File(incomingDir, "${UUID.randomUUID()}.png.tmp")
     try {
       temp.outputStream().buffered().use { output ->
-        check(bitmap.compress(Bitmap.CompressFormat.PNG, 100, output)) { "无法保存 PDF 截图" }
+        check(bitmap.compress(Bitmap.CompressFormat.PNG, 100, output)) { "Could not save PDF screenshot" }
       }
       return ImportedImage(
         relativePath = "incoming/${temp.name}",
@@ -83,8 +83,8 @@ class ImageAssetStore(private val context: Context) {
   private fun inspect(temp: File, declaredMime: String?): ImportedImage {
     val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
     BitmapFactory.decodeFile(temp.absolutePath, options)
-    require(options.outWidth > 0 && options.outHeight > 0) { "不支持的图片格式" }
-    require(options.outWidth.toLong() * options.outHeight <= 100_000_000L) { "图片像素不能超过 1 亿" }
+    require(options.outWidth > 0 && options.outHeight > 0) { "Unsupported image format" }
+    require(options.outWidth.toLong() * options.outHeight <= 100_000_000L) { "Image cannot exceed 100 million pixels" }
     return ImportedImage(
       relativePath = "incoming/${temp.name}",
       mimeType = declaredMime?.takeIf { it.startsWith("image/") } ?: options.outMimeType ?: "image/*",
@@ -103,7 +103,7 @@ class ImageAssetStore(private val context: Context) {
     val staged = resolveIncoming(image.relativePath) ?: error("Staged image is missing")
     val original = staged.name.removeSuffix(".tmp")
     val target = File(assetDir, original)
-    check(staged.renameTo(target)) { "无法提交图片资源" }
+    check(staged.renameTo(target)) { "Could not commit image asset" }
     return image.copy(relativePath = "assets/$original")
   }
 

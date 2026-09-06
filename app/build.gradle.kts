@@ -23,7 +23,7 @@ extensions.configure<ApplicationExtension> {
     defaultConfig {
         applicationId = "com.betterhv.note"
         minSdk = 29
-        targetSdk = 34
+        targetSdk = 37
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         versionCode = providers.gradleProperty("noteVersionCode").get().toInt()
         versionName = providers.gradleProperty("noteVersion").get()
@@ -88,6 +88,10 @@ extensions.configure<ApplicationExtension> {
                 "**/libHwGraphUtil.so"
             )
         }
+    }
+    lint {
+        // BetterHvNote is built for the ARM64-only Hanvon N10Pro, not ChromeOS.
+        disable += "ChromeOsAbiSupport"
     }
 }
 

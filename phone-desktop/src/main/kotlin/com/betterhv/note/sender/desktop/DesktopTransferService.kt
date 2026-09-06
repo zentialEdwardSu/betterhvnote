@@ -98,7 +98,7 @@ class DesktopTransferService(
     if (!version.supported) {
       DesktopLog.info("transfer.readiness.unsupported-os", version.message)
       mutableStatus.value = DesktopTransferStatus(
-        summary = noteLinkText("不支持此 Windows 版本", "Unsupported Windows version"),
+        summary = "Unsupported Windows version",
         detail = version.message,
         transferLog = eventLog.entries.value,
       )
@@ -107,7 +107,7 @@ class DesktopTransferService(
     val capabilities = runCatching { native.capabilities() }.getOrElse {
       DesktopLog.error("transfer.readiness.capabilities", it)
       mutableStatus.value = DesktopTransferStatus(
-        summary = noteLinkText("无线服务不可用", "Wireless services unavailable"),
+        summary = "Wireless services unavailable",
         detail = it.message.orEmpty(),
         transferLog = eventLog.entries.value,
       )
@@ -115,14 +115,14 @@ class DesktopTransferService(
     }
     if (!capabilities.ready) {
       val missing = buildList {
-        if (!capabilities.blePeripheral) add(noteLinkText("BLE 外设模式", "BLE peripheral mode"))
-        if (!capabilities.lan) add(noteLinkText("活动 WLAN", "Active Wi-Fi"))
-        if (!capabilities.dataProtection) add(noteLinkText("Windows 数据保护", "Windows data protection"))
+        if (!capabilities.blePeripheral) add("BLE peripheral mode")
+        if (!capabilities.lan) add("Active Wi-Fi")
+        if (!capabilities.dataProtection) add("Windows data protection")
       }
       mutableStatus.value = DesktopTransferStatus(
         running = false,
         capabilities = capabilities,
-        summary = noteLinkText("设备能力不足", "Missing device capabilities"),
+        summary = "Missing device capabilities",
         detail = missing.joinToString("、"),
         transferLog = eventLog.entries.value,
       )
@@ -138,7 +138,7 @@ class DesktopTransferService(
         mutableStatus.value = DesktopTransferStatus(
           running = false,
           capabilities = capabilities,
-          summary = noteLinkText("BLE 启动失败", "BLE failed to start"),
+          summary = "BLE failed to start",
           detail = it.message.orEmpty(),
           transferLog = eventLog.entries.value,
         )
@@ -166,7 +166,7 @@ class DesktopTransferService(
             if (isActive) {
               DesktopLog.error("transfer.ble.poll", it)
               mutableStatus.value = mutableStatus.value.copy(
-                summary = noteLinkText("BLE 通信错误", "BLE communication error"),
+                summary = "BLE communication error",
                 detail = it.message.orEmpty(),
               )
               delay(500)
@@ -235,7 +235,7 @@ class DesktopTransferService(
 
         is TransferChannelException -> error.failure
 
-        else -> TransferFailure(TransferErrorCode.INTERNAL, error.message ?: "命令失败", true)
+        else -> TransferFailure(TransferErrorCode.INTERNAL, error.message ?: "Command failed", true)
       }
       mutableSnapshot.value = mutableSnapshot.value.copy(
         phase = TransferPhase.FAILED,
@@ -283,7 +283,7 @@ class DesktopTransferService(
       runCatching { WindowsSecureEnvelope.open(pairing.sharedKey, envelope, replay) }
         .getOrNull()?.let { return AuthenticatedDesktopCommand(pairing, it) }
     }
-    error("无法验证已配对设备")
+    error("Could not authenticate paired device")
   }
 
   private fun handle(command: BleCommand, peerId: String, key: ByteArray): BleResponse = when (command) {
@@ -297,7 +297,7 @@ class DesktopTransferService(
 
     is BleCommand.TextChunk -> {
       val lease = requireLease(command.itemId, peerId)
-      val content = requireNotNull(lease.text) { "不是文字项目" }.encodeToByteArray()
+      val content = requireNotNull(lease.text) { "Item is not text" }.encodeToByteArray()
       require(command.offset in 0..content.size)
       val end = (command.offset + BleQueueProtocol.TEXT_CHUNK_BYTES).coerceAtMost(content.size)
       lease.heartbeat()
@@ -364,7 +364,7 @@ class DesktopTransferService(
       it.sourceDeviceId == peerId && it.state == DesktopInboxState.COMPLETE
     }
       ?.let { BleResponse.AlreadyReceived(artifactId) }
-      ?: BleResponse.Failure(TransferFailure(TransferErrorCode.INTERNAL, "接收任务不存在", false))
+      ?: BleResponse.Failure(TransferFailure(TransferErrorCode.INTERNAL, "Receive task does not exist", false))
 
     is PushState.Waiting, is PushState.Receiving -> {
       requirePushOwner(artifactId, peerId)
@@ -400,7 +400,7 @@ class DesktopTransferService(
       return BleResponse.Failure(
         TransferFailure(
           TransferErrorCode.UNSUPPORTED_MODE,
-          "Windows NoteLink 仅支持 LAN",
+          "Windows NoteLink only supports LAN",
           false,
           command.selectedMode,
         )
@@ -430,7 +430,7 @@ class DesktopTransferService(
         prepareReceive(command.itemId, peerId, endpoint, fileKey, probeKey)
       }
 
-      else -> BleResponse.Failure(TransferFailure(TransferErrorCode.INTERNAL, "传输项目不存在", false))
+      else -> BleResponse.Failure(TransferFailure(TransferErrorCode.INTERNAL, "Transfer item does not exist", false))
     }
   }
 
@@ -442,7 +442,7 @@ class DesktopTransferService(
     probeKey: ByteArray,
   ): BleResponse {
     val lease = requireLease(id, peerId)
-    val file = requireNotNull(lease.file) { "不是文件项目" }
+    val file = requireNotNull(lease.file) { "Item is not a file" }
     begin(id, peerId, file.length(), endpoint)
     runCatching { WindowsFileTransfer.probe(endpoint.host, id, probeKey) }.getOrElse {
       val failure = failure(it)
@@ -523,7 +523,9 @@ class DesktopTransferService(
     }
     if (!listening.await(2, TimeUnit.SECONDS)) {
       transferJobs.remove(id)?.cancel()
-      return BleResponse.Failure(TransferFailure(TransferErrorCode.CONNECTION_TIMEOUT, "接收端口未能及时启动", true))
+      return BleResponse.Failure(
+        TransferFailure(TransferErrorCode.CONNECTION_TIMEOUT, "Receive port did not start in time", true),
+      )
     }
     return BleResponse.Prepared(id, TransferMode.LAN, endpoint)
   }
@@ -575,7 +577,7 @@ class DesktopTransferService(
   }
 
   private fun failure(error: Throwable): TransferFailure = (error as? TransferChannelException)?.failure
-    ?: TransferFailure(TransferErrorCode.INTERNAL, error.message ?: "LAN 传输失败", true, TransferMode.LAN)
+    ?: TransferFailure(TransferErrorCode.INTERNAL, error.message ?: "LAN transfer failed", true, TransferMode.LAN)
 
   private fun fail(id: UUID, failure: TransferFailure) {
     mutableSnapshot.value = mutableSnapshot.value.copy(
@@ -585,7 +587,7 @@ class DesktopTransferService(
       canCancel = false,
     )
     emitEvent(TransferEvent.Failed(id, failure))
-    mutableStatus.value = mutableStatus.value.copy(summary = "LAN 传输失败", detail = failure.message)
+    mutableStatus.value = mutableStatus.value.copy(summary = "LAN transfer failed", detail = failure.message)
   }
 
   private fun emitEvent(event: TransferEvent) {
@@ -604,24 +606,24 @@ class DesktopTransferService(
   }
 
   private fun requireLease(id: UUID, peerId: String): DesktopSenderLease {
-    require(leaseOwners[id] == peerId) { "租约不属于当前设备" }
-    return requireNotNull(leases[id]) { "租约不存在" }
+    require(leaseOwners[id] == peerId) { "Lease does not belong to the current device" }
+    return requireNotNull(leases[id]) { "Lease does not exist" }
   }
 
   private fun beginPush(peerId: String, command: BleCommand.PushOffer): DesktopInboxBegin {
     val id = command.offer.artifactId
     val storedOwner = inbox.find(id)?.sourceDeviceId
-    require(storedOwner == null || storedOwner == peerId) { "导出任务不属于当前设备" }
+    require(storedOwner == null || storedOwner == peerId) { "Export task does not belong to the current device" }
     val result = inbox.begin(peerId, command.offer)
     if (result is DesktopInboxBegin.Receive) {
       val activeOwner = pushedOwners.putIfAbsent(id, peerId)
-      require(activeOwner == null || activeOwner == peerId) { "导出任务不属于当前设备" }
+      require(activeOwner == null || activeOwner == peerId) { "Export task does not belong to the current device" }
     }
     return result
   }
 
   private fun requirePushOwner(id: UUID, peerId: String) {
-    require(pushedOwners[id] == peerId) { "导出任务不属于当前设备" }
+    require(pushedOwners[id] == peerId) { "Export task does not belong to the current device" }
   }
 
   @Synchronized override fun cancel() {
@@ -632,7 +634,7 @@ class DesktopTransferService(
     val current = snapshot.value
     val operationId = current.operationId
     if (operationId != null && current.canCancel) {
-      val failure = TransferFailure(TransferErrorCode.CANCELLED, "传输已取消", true, current.mode)
+      val failure = TransferFailure(TransferErrorCode.CANCELLED, "Transfer cancelled", true, current.mode)
       fail(operationId, failure)
     }
   }
@@ -655,13 +657,13 @@ class DesktopTransferService(
   private data class WindowsVersion(val supported: Boolean, val message: String)
   private fun windowsVersion(): WindowsVersion {
     if (!System.getProperty("os.name").startsWith("Windows", ignoreCase = true)) {
-      return WindowsVersion(false, "仅支持 Windows 10 1903+ 和 Windows 11 x64")
+      return WindowsVersion(false, "Only Windows 10 1903+ and Windows 11 x64 are supported")
     }
     val architecture = System.getProperty("os.arch")
-    if (architecture != "amd64" && architecture != "x86_64") return WindowsVersion(false, "仅支持 x64")
+    if (architecture != "amd64" && architecture != "x86_64") return WindowsVersion(false, "Only x64 is supported")
     val version = System.getProperty("os.version").split('.').mapNotNull(String::toIntOrNull)
     return if ((version.firstOrNull() ?: 0) < 10) {
-      WindowsVersion(false, "需要 Windows 10 1903 或更高版本")
+      WindowsVersion(false, "Windows 10 1903 or later is required")
     } else {
       WindowsVersion(true, "")
     }

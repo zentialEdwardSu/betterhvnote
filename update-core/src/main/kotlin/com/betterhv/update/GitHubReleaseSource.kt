@@ -20,7 +20,7 @@ class GitHubReleaseSource(
 ) : ReleaseSource {
   override fun loadReleases(): List<ReleaseRecord> {
     val connection = connectionFactory.open(endpoint) as? HttpURLConnection
-      ?: throw IOException("GitHub 地址不是 HTTP 连接")
+      ?: throw IOException("GitHub URL is not an HTTP connection")
     return try {
       connection.connectTimeout = CONNECT_TIMEOUT_MILLIS
       connection.readTimeout = READ_TIMEOUT_MILLIS
@@ -29,7 +29,7 @@ class GitHubReleaseSource(
       connection.setRequestProperty("X-GitHub-Api-Version", "2022-11-28")
       connection.setRequestProperty("User-Agent", "BetterHvNote-UpdateChecker")
       val status = connection.responseCode
-      if (status !in HTTP_SUCCESS_MIN..HTTP_SUCCESS_MAX) throw IOException("GitHub 返回 HTTP $status")
+      if (status !in HTTP_SUCCESS_MIN..HTTP_SUCCESS_MAX) throw IOException("GitHub returned HTTP $status")
       val body = connection.inputStream.use { input ->
         input.readLimitedText()
       }
@@ -41,9 +41,9 @@ class GitHubReleaseSource(
           draft = release.draft,
           preRelease = release.preRelease,
         )
-      } ?: throw IOException("GitHub 响应格式无效")
+      } ?: throw IOException("Invalid GitHub response format")
     } catch (error: JsonParseException) {
-      throw IOException("无法解析 GitHub 响应", error)
+      throw IOException("Could not parse GitHub response", error)
     } finally {
       connection.disconnect()
     }
@@ -55,7 +55,7 @@ class GitHubReleaseSource(
     while (true) {
       val count = read(buffer)
       if (count < 0) break
-      if (output.size() + count > MAX_RESPONSE_BYTES) throw IOException("GitHub 响应过大")
+      if (output.size() + count > MAX_RESPONSE_BYTES) throw IOException("GitHub response is too large")
       output.write(buffer, 0, count)
     }
     return output.toByteArray().decodeToString()

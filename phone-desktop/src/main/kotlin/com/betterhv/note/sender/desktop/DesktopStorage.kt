@@ -79,7 +79,7 @@ class DesktopSettings(private val paths: DesktopPaths, private val native: Windo
     set(value) = synchronized(lock) {
       val normalized = value.trim()
       require(normalized.isNotBlank() && normalized.encodeToByteArray().size <= 48) {
-        noteLinkText("显示名称不能为空且不能超过 48 字节", "Display name cannot be empty or exceed 48 UTF-8 bytes")
+        "Display name cannot be empty or exceed 48 UTF-8 bytes"
       }
       values.setProperty(KEY_DISPLAY_NAME, normalized)
       persist()
@@ -134,7 +134,7 @@ class DesktopSettings(private val paths: DesktopPaths, private val native: Windo
   fun pairWithCode(code: String, deviceId: String = "betterhv-note", deviceName: String = "N10Pro") {
     require(
       code.length == 6 && code.all(Char::isDigit),
-    ) { noteLinkText("配对码必须是六位数字", "Pairing code must contain six digits") }
+    ) { "Pairing code must contain six digits" }
     val key = TransferCrypto.hkdfSha256(
       code.encodeToByteArray(),
       "BetterHv-manual-v1".encodeToByteArray(),
@@ -177,7 +177,7 @@ class DesktopSettings(private val paths: DesktopPaths, private val native: Windo
       markLastUsed(deviceId)
       return@synchronized requireNotNull(pairing)
     }
-    require(pairingsLocked().none { it.deviceId == deviceId }) { "该设备身份已存在" }
+    require(pairingsLocked().none { it.deviceId == deviceId }) { "This device identity already exists" }
     removePairingLocked(oldDeviceId)
     old.copy(deviceId = deviceId, lastUsedAt = nextLastUsedLocked()).also {
       savePairingLocked(it, native.protect(it.sharedKey))
@@ -342,11 +342,11 @@ class DesktopQueueRepository(private val paths: DesktopPaths) :
   @Synchronized fun enqueueFiles(files: List<File>, destinationDeviceId: String?): List<QueueItem> = files.map {
       source,
     ->
-    require(source.isFile) { "文件不存在：${source.name}" }
+    require(source.isFile) { "File does not exist: ${source.name}" }
     val isPdf = source.extension.equals("pdf", ignoreCase = true) ||
       Files.probeContentType(source.toPath()) == "application/pdf"
     val limit = if (isPdf) TransferLimits.MAX_PDF_BYTES else TransferLimits.MAX_IMAGE_BYTES
-    require(source.length() <= limit) { if (isPdf) "PDF 不能超过 512 MiB" else "图片不能超过 64 MiB" }
+    require(source.length() <= limit) { if (isPdf) "PDF cannot exceed 512 MiB" else "Image cannot exceed 64 MiB" }
     val mime = if (isPdf) {
       "application/pdf"
     } else {
@@ -354,7 +354,7 @@ class DesktopQueueRepository(private val paths: DesktopPaths) :
         ?: when (source.extension.lowercase()) {
           "png" -> "image/png";
           "jpg", "jpeg" -> "image/jpeg";
-          else -> error("只支持图片或 PDF")
+          else -> error("Only images and PDF files are supported")
         }
     }
     val id = UUID.randomUUID()
@@ -371,9 +371,9 @@ class DesktopQueueRepository(private val paths: DesktopPaths) :
 
   @Synchronized fun enqueueText(text: String, destinationDeviceId: String?): QueueItem {
     val value = text.trim()
-    require(value.isNotBlank()) { "文字不能为空" }
+    require(value.isNotBlank()) { "Text cannot be empty" }
     val bytes = value.encodeToByteArray()
-    require(bytes.size <= TransferLimits.MAX_TEXT_BYTES) { "文字不能超过 256 KiB" }
+    require(bytes.size <= TransferLimits.MAX_TEXT_BYTES) { "Text cannot exceed 256 KiB" }
     return QueueItem(
       UUID.randomUUID(), destinationDeviceId, ContentKind.TEXT, "text/plain; charset=utf-8",
       bytes.size.toLong(),
@@ -573,7 +573,9 @@ class DesktopInboxRepository(private val paths: DesktopPaths) : AutoCloseable {
 
   @Synchronized fun complete(id: UUID, partial: File) {
     val item = requireNotNull(find(id))
-    require(partial.length() == item.byteLength && sha256(partial).contentEquals(item.sha256)) { "文件长度或校验值不一致" }
+    require(partial.length() == item.byteLength && sha256(partial).contentEquals(item.sha256)) {
+      "File length or checksum does not match"
+    }
     Files.move(partial.toPath(), item.file.toPath(), StandardCopyOption.REPLACE_EXISTING)
     updateState(id, DesktopInboxState.COMPLETE, null, System.currentTimeMillis())
   }
