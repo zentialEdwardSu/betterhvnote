@@ -141,7 +141,10 @@ fun TemplateChooserOverlay(state: TemplateChooserState, actions: TemplateChooser
             Text(definition.description, color = Color(0xFF666666), fontSize = 12.sp, maxLines = 2)
             when {
               !compatible -> Text(
-                "Aspect ratio does not match this page",
+                noteText(
+                  "尺寸不匹配：模板 ${definition.entry.width} × ${definition.entry.height}，页面 ${state.pageWidth.toInt()} × ${state.pageHeight.toInt()}",
+                  "Size mismatch: template ${definition.entry.width} x ${definition.entry.height}, page ${state.pageWidth.toInt()} x ${state.pageHeight.toInt()}",
+                ),
                 color = Color(0xFF8B0000),
                 fontSize = 11.sp,
               )

@@ -13,7 +13,7 @@ internal data class UiInputBlockState(
   val richObjectSelected: Boolean = false,
   val toolbarInteraction: Boolean = false,
   val pageControlInteraction: Boolean = false,
-  val snackbarInteraction: Boolean = false,
+  val notificationInteraction: Boolean = false,
   val debugInteraction: Boolean = false,
   val pdfRegionDialogOpen: Boolean = false,
   val linkedNotePlacementOpen: Boolean = false,
@@ -21,6 +21,6 @@ internal data class UiInputBlockState(
   val blocked: Boolean
     get() = pageManagerOpen || toolbarPopupOpen || settingsOpen || notebookManagerOpen ||
       notebookNameOpen || insertionOpen || textEditorOpen || notebookBusy || exportPanelOpen ||
-      richObjectSelected || toolbarInteraction || pageControlInteraction || snackbarInteraction ||
+      richObjectSelected || toolbarInteraction || pageControlInteraction || notificationInteraction ||
       debugInteraction || pdfRegionDialogOpen || linkedNotePlacementOpen
 }

@@ -45,9 +45,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.SnackbarDuration
-import androidx.compose.material3.SnackbarHost
-import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -193,6 +190,17 @@ private fun contentKindLabel(kind: ContentKind): String = when (kind) {
   ContentKind.PDF -> "PDF"
 }
 
+internal enum class InsertionStartDecision { CHOOSE_SOURCE, DISCOVER_REMOTE, REQUEST_PERMISSIONS }
+
+internal fun insertionStartDecision(
+  directWhenAvailable: Boolean,
+  permissionsAvailable: Boolean,
+): InsertionStartDecision = when {
+  !directWhenAvailable -> InsertionStartDecision.CHOOSE_SOURCE
+  permissionsAvailable -> InsertionStartDecision.DISCOVER_REMOTE
+  else -> InsertionStartDecision.REQUEST_PERMISSIONS
+}
+
 @Composable
 private fun PdfRegionActionPopup(selection: PdfRegionSelection, onEdit: () -> Unit, onMoveToInbox: () -> Unit) {
   val density = LocalDensity.current
@@ -253,24 +261,17 @@ private fun AppRoot(
   val penSettingsStore = remember(context) { PenSettingsStore(context) }
   val appSettingsStore = remember(context) { AppSettingsStore(context) }
   var language by remember { mutableStateOf(appSettingsStore.language) }
-  val snackbarHostState = remember { SnackbarHostState() }
-  val snackbarScope = rememberCoroutineScope()
+  val notificationState = rememberInAppNotificationState()
+  val updateNotificationState = rememberInAppNotificationState()
+  val appScope = rememberCoroutineScope()
   val phoneTransfer = remember(context) { PhoneTransferClient(context) }
   val transferSnapshot by phoneTransfer.snapshot.collectAsState()
   val transferEvents by phoneTransfer.eventHistory.collectAsState()
   val insertion = remember(phoneTransfer) { InsertionCoordinator(phoneTransfer) }
   val insertionState by insertion.state.collectAsState()
   DisposableEffect(insertion) { onDispose { insertion.close() } }
-  val showNotice: (String) -> Unit = remember(snackbarHostState, snackbarScope) {
-    { message ->
-      snackbarScope.launch {
-        snackbarHostState.showSnackbar(
-          message = message,
-          withDismissAction = true,
-          duration = SnackbarDuration.Short,
-        )
-      }
-    }
+  val showNotice: (String) -> Unit = remember(notificationState, appScope) {
+    { message -> appScope.launch { notificationState.show(title = message) } }
   }
   val updateChecker = remember { UpdateChecker() }
   var updateUiState by remember { mutableStateOf(UpdateUiState()) }
@@ -285,7 +286,7 @@ private fun AppRoot(
   val checkForUpdates: (Boolean) -> Unit = { manual ->
     if (updateUiState.checkState !is UpdateCheckState.Checking) {
       updateUiState = updateUiState.checking(manual)
-      snackbarScope.launch {
+      appScope.launch {
         val result = withContext(Dispatchers.IO) {
           updateChecker.check(UpdateProduct.NOTE, BuildConfig.VERSION_NAME)
         }
@@ -348,13 +349,13 @@ private fun AppRoot(
     var templateCatalog by remember { mutableStateOf(TemplateStore.get(context).snapshot()) }
     var toolbarInteractionBlocked by remember { mutableStateOf(false) }
     var pageControlInteractionBlocked by remember { mutableStateOf(false) }
-    var snackbarInteractionBlocked by remember { mutableStateOf(false) }
+    var notificationInteractionBlocked by remember { mutableStateOf(false) }
     var debugInteractionBlocked by remember { mutableStateOf(false) }
     DisposableEffect(Unit) {
       onTransientInputGuardReleaseReady {
         toolbarInteractionBlocked = false
         pageControlInteractionBlocked = false
-        snackbarInteractionBlocked = false
+        notificationInteractionBlocked = false
         debugInteractionBlocked = false
       }
       onDispose { onTransientInputGuardReleaseReady(null) }
@@ -394,7 +395,7 @@ private fun AppRoot(
           Lifecycle.Event.ON_RESUME -> {
             if (stopped) {
               stopped = false
-              snackbarScope.launch {
+              appScope.launch {
                 phoneTransfer.recoverAfterWake()
                 penView?.recoverAfterWake()
                 templateCatalog = penView?.refreshTemplates() ?: templateCatalog
@@ -436,7 +437,7 @@ private fun AppRoot(
 
     val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
       if (uri == null) return@rememberLauncherForActivityResult
-      snackbarScope.launch {
+      appScope.launch {
         insertion.localImage(uri)
         if (insertion.state.value is InsertionState.ImageReady) {
           showNotice(
@@ -454,7 +455,7 @@ private fun AppRoot(
       val kind = permissionRemoteKind.also { permissionRemoteKind = null }
       val auto = permissionRemoteAuto.also { permissionRemoteAuto = false }
       if (kind != null && TransferPermissions.hasAllNotePermissions(context)) {
-        snackbarScope.launch {
+        appScope.launch {
           if (auto) insertion.remoteIfAvailableOrChoose(kind) else insertion.remote(kind)
         }
       } else if (kind != null) {
@@ -465,13 +466,13 @@ private fun AppRoot(
     }
 
     val beginInsertion: (ContentKind) -> Unit = { kind ->
-      if (!skipSourceSelectionWhenQueueAvailable) {
-        insertion.choose(kind)
-      } else {
-        val missing = TransferPermissions.missingNotePermissions(context)
-        if (missing.isEmpty()) {
-          snackbarScope.launch { insertion.remoteIfAvailableOrChoose(kind) }
-        } else {
+      val missing = TransferPermissions.missingNotePermissions(context)
+      when (insertionStartDecision(skipSourceSelectionWhenQueueAvailable, missing.isEmpty())) {
+        InsertionStartDecision.CHOOSE_SOURCE -> insertion.choose(kind)
+        InsertionStartDecision.DISCOVER_REMOTE -> {
+          appScope.launch { insertion.remoteIfAvailableOrChoose(kind) }
+        }
+        InsertionStartDecision.REQUEST_PERMISSIONS -> {
           permissionRemoteKind = kind
           permissionRemoteAuto = true
           transferPermissionLauncher.launch(missing)
@@ -606,7 +607,7 @@ private fun AppRoot(
       ActivityResultContracts.OpenDocumentTree(),
     ) { uri ->
       if (uri == null) return@rememberLauncherForActivityResult
-      snackbarScope.launch {
+      appScope.launch {
         runCatching {
           withContext(Dispatchers.IO) { TemplateStore.get(context).connect(uri) }
         }.onSuccess {
@@ -642,7 +643,7 @@ private fun AppRoot(
       richObjectSelected = penView?.selectedRichObject() != null,
       toolbarInteraction = toolbarInteractionBlocked,
       pageControlInteraction = pageControlInteractionBlocked,
-      snackbarInteraction = snackbarInteractionBlocked,
+      notificationInteraction = notificationInteractionBlocked,
       debugInteraction = debugInteractionBlocked,
       pdfRegionDialogOpen = pendingPdfRegion != null || pendingLinkedNoteRequest != null,
       linkedNotePlacementOpen = penView?.hasPendingLinkedNotePlacement() == true,
@@ -903,9 +904,9 @@ private fun AppRoot(
         ShortcutScene.INSERT -> {
           val handled = InsertShortcutContext { insertAction ->
             when (insertAction) {
-              ShortcutAction.INSERT_IMAGE -> insertion.choose(ContentKind.IMAGE)
+              ShortcutAction.INSERT_IMAGE -> beginInsertion(ContentKind.IMAGE)
 
-              ShortcutAction.INSERT_TEXT -> insertion.choose(ContentKind.TEXT)
+              ShortcutAction.INSERT_TEXT -> beginInsertion(ContentKind.TEXT)
 
               ShortcutAction.INSERT_LOCAL -> {
                 val choosing = insertion.state.value as? InsertionState.ChoosingSource
@@ -924,7 +925,7 @@ private fun AppRoot(
                   ?: return@InsertShortcutContext false
                 val missing = TransferPermissions.missingNotePermissions(context)
                 if (missing.isEmpty()) {
-                  snackbarScope.launch { insertion.remote(choosing.kind) }
+                  appScope.launch { insertion.remote(choosing.kind) }
                 } else {
                   permissionRemoteKind = choosing.kind
                   permissionRemoteAuto = false
@@ -1013,31 +1014,7 @@ private fun AppRoot(
         onUndo = { penView?.undo() },
         onRedo = { penView?.redo() },
         onDelete = { penView?.deleteSelection() },
-        onInsertImage = {
-          beginInsertion(ContentKind.IMAGE)
-        },
-        onInsertText = {
-          beginInsertion(ContentKind.TEXT)
-        },
-        onInsertLocal = { kind ->
-          if (kind == ContentKind.IMAGE) {
-            insertion.cancel()
-            imagePicker.launch(arrayOf("image/*"))
-          } else {
-            insertion.manualText()
-            showNotice(noteText("请点击页面确定文字位置", "Tap the page to place the text"))
-          }
-        },
-        onInsertNoteLink = { kind ->
-          val missing = TransferPermissions.missingNotePermissions(context)
-          if (missing.isEmpty()) {
-            snackbarScope.launch { insertion.remote(kind) }
-          } else {
-            permissionRemoteKind = kind
-            permissionRemoteAuto = false
-            transferPermissionLauncher.launch(missing)
-          }
-        },
+        onInsert = beginInsertion,
         onPageManagerToggle = {
           pageManagerOpen = !pageManagerOpen
           notebookManagerOpen = false
@@ -1139,7 +1116,7 @@ private fun AppRoot(
               val missing = TransferPermissions.missingNotePermissions(context)
               if (missing.isEmpty()) {
                 permissionRemoteAuto = false
-                snackbarScope.launch { insertion.remote(choosing.kind) }
+                appScope.launch { insertion.remote(choosing.kind) }
               } else {
                 permissionRemoteKind = choosing.kind
                 permissionRemoteAuto = false
@@ -1199,7 +1176,7 @@ private fun AppRoot(
             }
             Button(
               onClick = {
-                snackbarScope.launch {
+                appScope.launch {
                   insertion.remote(available.client.id, choosing.kind)
                 }
               },
@@ -1529,7 +1506,7 @@ private fun AppRoot(
             notebookManagerOpen = false
             val missing = TransferPermissions.missingNotePermissions(context)
             if (missing.isEmpty()) {
-              snackbarScope.launch { insertion.remote(ContentKind.PDF) }
+              appScope.launch { insertion.remote(ContentKind.PDF) }
             } else {
               permissionRemoteKind = ContentKind.PDF
               permissionRemoteAuto = false
@@ -1630,7 +1607,7 @@ private fun AppRoot(
               showNotice("Grant Nearby devices permission first")
             } else if (!pairingScanActive) {
               pairingScanActive = true
-              snackbarScope.launch {
+              appScope.launch {
                 runCatching { phoneTransfer.discoverPairingCandidates() }
                   .onSuccess { pairingCandidates = it }
                   .onFailure { showNotice("Scan failed: ${it.message}") }
@@ -1642,7 +1619,7 @@ private fun AppRoot(
             }
           },
           onPairClient = { candidate, code ->
-            snackbarScope.launch {
+            appScope.launch {
               pairingInProgress = true
               EventLog.log(
                 "NoteLinkPairing",
@@ -1780,7 +1757,14 @@ private fun AppRoot(
 
     pendingNotebookCreation?.let { request ->
       val pvForDialog = penView
-      val pageSize = pvForDialog?.currentPageSize() ?: (1860f to 2414f)
+      var pageSize by remember(pvForDialog) { mutableStateOf(pvForDialog?.newNotebookPageSize() ?: (0f to 0f)) }
+      DisposableEffect(pvForDialog) {
+        val listener = android.view.View.OnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
+          pageSize = pvForDialog?.newNotebookPageSize() ?: (0f to 0f)
+        }
+        pvForDialog?.addOnLayoutChangeListener(listener)
+        onDispose { pvForDialog?.removeOnLayoutChangeListener(listener) }
+      }
       NotebookNameDialog(
         state = NotebookNameDialogState(
           catalog = templateCatalog,
@@ -1806,10 +1790,12 @@ private fun AppRoot(
                 if (result.isSuccess) {
                   notebookManagerOpen = false
                   showNotice(noteText("已创建笔记本“$title”", "Created notebook \"$title\""))
+                } else {
+                  showNotice(result.exceptionOrNull()?.message ?: noteText("创建失败", "Creation failed"))
                 }
               }
               when (request) {
-                NotebookCreationRequest.Blank -> pv.createBlankNotebook(title, templateId, complete)
+                NotebookCreationRequest.Blank -> pv.createBlankNotebook(title, templateId, complete, pageSize)
 
                 is NotebookCreationRequest.Transfer ->
                   pv.transferPagesToNewNotebook(request.pageIds, title, complete)
@@ -1821,35 +1807,55 @@ private fun AppRoot(
       )
     }
 
-    if (
-      !settingsOpen &&
-      transferSnapshot.phase.isActiveTransferPhase &&
-      transferSnapshot.phase != TransferPhase.AWAITING_COMMIT
+    val visibleUpdate = updateUiState.visibleUpdate
+    LaunchedEffect(visibleUpdate) {
+      if (visibleUpdate == null) {
+        updateNotificationState.dismiss()
+      } else {
+        updateNotificationState.show(
+          title = noteText(
+            "发现新版本 ${visibleUpdate.latestVersion.display}",
+            "New version ${visibleUpdate.latestVersion.display}",
+          ),
+          message = visibleUpdate.releaseTitle,
+          duration = InAppNotificationDuration.LONG,
+          actionLabel = noteText("查看 Release", "View release"),
+          onAction = { openRelease(visibleUpdate.releaseUrl) },
+          onDismiss = { updateUiState = updateUiState.dismissBanner() },
+        )
+      }
+    }
+    Column(
+      modifier = Modifier.align(Alignment.TopCenter).padding(top = 72.dp).width(620.dp),
+      horizontalAlignment = Alignment.CenterHorizontally,
+      verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-      ActiveTransferOverlay(
-        snapshot = transferSnapshot,
-        endpointName = pairedClients.firstOrNull { it.id == transferSnapshot.deviceId }?.name,
-        onCancel = phoneTransfer::cancel,
-        modifier = Modifier.align(Alignment.TopCenter).padding(top = 72.dp).width(460.dp),
-      )
-    }
+      if (
+        !settingsOpen &&
+        transferSnapshot.phase.isActiveTransferPhase &&
+        transferSnapshot.phase != TransferPhase.AWAITING_COMMIT
+      ) {
+        ActiveTransferOverlay(
+          snapshot = transferSnapshot,
+          endpointName = pairedClients.firstOrNull { it.id == transferSnapshot.deviceId }?.name,
+          onCancel = phoneTransfer::cancel,
+          modifier = Modifier.width(460.dp),
+        )
+      }
 
-    updateUiState.visibleUpdate?.takeIf {
-      !settingsOpen && !transferSnapshot.phase.isActiveTransferPhase
-    }?.let { info ->
-      UpdateBanner(
-        info = info,
-        onOpenRelease = { openRelease(info.releaseUrl) },
-        onDismiss = { updateUiState = updateUiState.dismissBanner() },
-        modifier = Modifier.align(Alignment.TopCenter).padding(top = 72.dp).width(620.dp),
+      InAppNotificationHost(
+        state = notificationState,
+        modifier = Modifier.fillMaxWidth()
+          .penInputGuard { notificationInteractionBlocked = it },
       )
-    }
 
-    SnackbarHost(
-      hostState = snackbarHostState,
-      modifier = Modifier.align(Alignment.BottomCenter).padding(16.dp)
-        .penInputGuard { snackbarInteractionBlocked = it },
-    )
+      if (!settingsOpen && !transferSnapshot.phase.isActiveTransferPhase) {
+        InAppNotificationHost(
+          state = updateNotificationState,
+          modifier = Modifier.fillMaxWidth(),
+        )
+      }
+    }
   }
 }
 

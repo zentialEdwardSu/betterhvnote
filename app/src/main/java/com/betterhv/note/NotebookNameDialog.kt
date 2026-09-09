@@ -48,6 +48,11 @@ fun NotebookNameDialog(state: NotebookNameDialogState, actions: NotebookNameDial
   val focusRequester = remember { FocusRequester() }
   val keyboard = LocalSoftwareKeyboardController.current
   val normalized = title.trim()
+  val sizeReady = state.pageWidth > 0f && state.pageHeight > 0f
+  val selectedTemplate = state.catalog.templates.firstOrNull { it.id == selectedTemplateId }
+  val templateValid = !state.templateEnabled || (selectedTemplate != null &&
+    selectedTemplate.availability != com.betterhv.note.template.TemplateAvailability.INVALID &&
+    selectedTemplate.isCompatible(state.pageWidth, state.pageHeight))
   LaunchedEffect(Unit) {
     focusRequester.requestFocus()
     keyboard?.show()
@@ -64,6 +69,7 @@ fun NotebookNameDialog(state: NotebookNameDialogState, actions: NotebookNameDial
         shape = RectangleShape,
       )
       if (state.templateEnabled) {
+        if (!sizeReady) Text(noteText("正在等待画布尺寸", "Waiting for canvas size"))
         TemplateSelectionRow(
           definition = state.catalog.find(selectedTemplateId),
           preview = actions.preview,
@@ -80,7 +86,7 @@ fun NotebookNameDialog(state: NotebookNameDialogState, actions: NotebookNameDial
         EinkDialogAction(noteText("取消", "Cancel"), onClick = actions.onDismiss)
         EinkDialogAction(
           noteText("创建", "Create"),
-          enabled = normalized.isNotEmpty(),
+          enabled = normalized.isNotEmpty() && (!state.templateEnabled || sizeReady) && templateValid,
           onClick = { actions.onConfirm(normalized, selectedTemplateId) },
         )
       }

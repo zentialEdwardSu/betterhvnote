@@ -39,6 +39,14 @@ sealed interface InsertionState {
   data class Error(val message: String) : InsertionState
 }
 
+internal enum class AutomaticRemoteDecision { CHOOSE_SOURCE, PULL_SINGLE, CHOOSE_CLIENT }
+
+internal fun automaticRemoteDecision(availableCount: Int): AutomaticRemoteDecision = when (availableCount) {
+  0 -> AutomaticRemoteDecision.CHOOSE_SOURCE
+  1 -> AutomaticRemoteDecision.PULL_SINGLE
+  else -> AutomaticRemoteDecision.CHOOSE_CLIENT
+}
+
 /** Owns insertion resources so Compose recreation cannot leak a staged file or remote lease. */
 class InsertionCoordinator(private val phone: PhoneTransferClient) : AutoCloseable {
   private val mutableState = MutableStateFlow<InsertionState>(InsertionState.Idle)
@@ -64,12 +72,12 @@ class InsertionCoordinator(private val phone: PhoneTransferClient) : AutoCloseab
     cancel()
     val generation = requestGeneration
     mutableState.value = InsertionState.WaitingForPhone(kind)
-    val available = phone.discoverAvailable(kind)
+    val available = discover(kind, generation) ?: return
     if (generation != requestGeneration) return
-    when (available.size) {
-      0 -> mutableState.value = InsertionState.ChoosingSource(kind)
-      1 -> remote(available.single().client.id, kind)
-      else -> mutableState.value = InsertionState.ChoosingClient(kind, available)
+    when (automaticRemoteDecision(available.size)) {
+      AutomaticRemoteDecision.CHOOSE_SOURCE -> mutableState.value = InsertionState.ChoosingSource(kind)
+      AutomaticRemoteDecision.PULL_SINGLE -> remote(available.single().client.id, kind)
+      AutomaticRemoteDecision.CHOOSE_CLIENT -> mutableState.value = InsertionState.ChoosingClient(kind, available)
     }
   }
 
@@ -98,7 +106,7 @@ class InsertionCoordinator(private val phone: PhoneTransferClient) : AutoCloseab
     cancel()
     val generation = requestGeneration
     mutableState.value = InsertionState.WaitingForPhone(kind)
-    val available = phone.discoverAvailable(kind)
+    val available = discover(kind, generation) ?: return
     if (generation != requestGeneration) return
     when (available.size) {
       0 -> mutableState.value = InsertionState.Error(
@@ -110,6 +118,18 @@ class InsertionCoordinator(private val phone: PhoneTransferClient) : AutoCloseab
       else -> mutableState.value = InsertionState.ChoosingClient(kind, available)
     }
   }
+
+  private suspend fun discover(kind: ContentKind, generation: Long): List<PhoneTransferClient.AvailableNoteLink>? =
+    try {
+      phone.discoverAvailable(kind)
+    } catch (cancelled: CancellationException) {
+      throw cancelled
+    } catch (error: Exception) {
+      if (generation == requestGeneration) {
+        mutableState.value = InsertionState.Error(error.message ?: "NoteLink discovery failed")
+      }
+      null
+    }
 
   suspend fun remote(clientId: String, kind: ContentKind) {
     cancel()

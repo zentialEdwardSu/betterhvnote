@@ -77,6 +77,7 @@ import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupPositionProvider
 import androidx.compose.ui.window.PopupProperties
 import com.betterhv.note.ink.PenType
+import com.betterhv.transfer.core.ContentKind
 
 /** Which edge of the screen the toolbar is currently docked to. */
 enum class DockEdge { TOP, END, BOTTOM, START }
@@ -120,10 +121,7 @@ data class EditorToolbarActions(
   val onUndo: () -> Unit,
   val onRedo: () -> Unit,
   val onDelete: () -> Unit,
-  val onInsertImage: () -> Unit,
-  val onInsertText: () -> Unit,
-  val onInsertLocal: (com.betterhv.transfer.core.ContentKind) -> Unit,
-  val onInsertNoteLink: (com.betterhv.transfer.core.ContentKind) -> Unit,
+  val onInsert: (ContentKind) -> Unit,
   val onPageManagerToggle: () -> Unit,
   val onPageAdd: () -> Unit,
   val onPreviousPage: () -> Unit,
@@ -178,10 +176,7 @@ fun EditorToolbar(modifier: Modifier = Modifier, state: EditorToolbarState, acti
   val onUndo = actions.onUndo
   val onRedo = actions.onRedo
   val onDelete = actions.onDelete
-  val onInsertImage = actions.onInsertImage
-  val onInsertText = actions.onInsertText
-  val onInsertLocal = actions.onInsertLocal
-  val onInsertNoteLink = actions.onInsertNoteLink
+  val onInsert = actions.onInsert
   val onPageManagerToggle = actions.onPageManagerToggle
   val onPageAdd = actions.onPageAdd
   val onPreviousPage = actions.onPreviousPage
@@ -324,10 +319,7 @@ private fun ToolbarContent(
   val onUndo = actions.onUndo
   val onRedo = actions.onRedo
   val onDelete = actions.onDelete
-  val onInsertImage = actions.onInsertImage
-  val onInsertText = actions.onInsertText
-  val onInsertLocal = actions.onInsertLocal
-  val onInsertNoteLink = actions.onInsertNoteLink
+  val onInsert = actions.onInsert
   val onPageManagerToggle = actions.onPageManagerToggle
   val onPageAdd = actions.onPageAdd
   val onPreviousPage = actions.onPreviousPage
@@ -522,13 +514,9 @@ private fun ToolbarContent(
           expanded = insertExpanded,
           onDismiss = { insertExpanded = false },
           dockEdge = dockEdge,
-          onLocal = { kind ->
+          onSelect = { kind ->
             insertExpanded = false;
-            onInsertLocal(kind)
-          },
-          onNoteLink = { kind ->
-            insertExpanded = false;
-            onInsertNoteLink(kind)
+            onInsert(kind)
           },
         )
       }
@@ -737,41 +725,24 @@ private fun InsertTypeMenu(
   expanded: Boolean,
   onDismiss: () -> Unit,
   dockEdge: DockEdge,
-  onLocal: (com.betterhv.transfer.core.ContentKind) -> Unit,
-  onNoteLink: (com.betterhv.transfer.core.ContentKind) -> Unit,
+  onSelect: (ContentKind) -> Unit,
 ) {
   if (!expanded) return
-  var kind by remember { mutableStateOf<com.betterhv.transfer.core.ContentKind?>(null) }
   AttachedToolbarFlyout(title = noteText("插入内容", "Insert"), dockEdge = dockEdge, onDismiss = onDismiss) {
     Row(
       modifier = Modifier.padding(4.dp),
       horizontalArrangement = Arrangement.spacedBy(4.dp),
     ) {
-      if (kind == null) {
-        PopupIconButton(
-          icon = Icons.Filled.AddPhotoAlternate,
-          contentDescription = noteText("插入图片", "Insert image"),
-          onClick = { kind = com.betterhv.transfer.core.ContentKind.IMAGE },
-        )
-        PopupIconButton(
-          icon = Icons.Filled.TextFields,
-          contentDescription = noteText("插入文字", "Insert text"),
-          onClick = { kind = com.betterhv.transfer.core.ContentKind.TEXT },
-        )
-      } else {
-        PopupTextButton(
-          if (kind == com.betterhv.transfer.core.ContentKind.IMAGE) {
-            noteText(
-              "系统文件",
-              "System file",
-            )
-          } else {
-            noteText("手动输入", "Enter manually")
-          },
-          onClick = { onLocal(requireNotNull(kind)) },
-        )
-        PopupTextButton("NoteLink", onClick = { onNoteLink(requireNotNull(kind)) })
-      }
+      PopupIconButton(
+        icon = Icons.Filled.AddPhotoAlternate,
+        contentDescription = noteText("插入图片", "Insert image"),
+        onClick = { onSelect(ContentKind.IMAGE) },
+      )
+      PopupIconButton(
+        icon = Icons.Filled.TextFields,
+        contentDescription = noteText("插入文字", "Insert text"),
+        onClick = { onSelect(ContentKind.TEXT) },
+      )
     }
   }
 }

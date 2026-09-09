@@ -21,7 +21,7 @@ class UiInputBlockStateTest {
     assertTrue(UiInputBlockState(toolbarPopupOpen = true).blocked)
     assertTrue(UiInputBlockState(toolbarInteraction = true).blocked)
     assertTrue(UiInputBlockState(pageControlInteraction = true).blocked)
-    assertTrue(UiInputBlockState(snackbarInteraction = true).blocked)
+    assertTrue(UiInputBlockState(notificationInteraction = true).blocked)
     assertTrue(UiInputBlockState(debugInteraction = true).blocked)
   }
 }
