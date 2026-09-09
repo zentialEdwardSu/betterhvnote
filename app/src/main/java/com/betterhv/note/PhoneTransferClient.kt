@@ -142,8 +142,9 @@ class PhoneTransferClient(context: Context) :
         })
       } catch (cancelled: CancellationException) {
         throw cancelled
-      } catch (_: Throwable) {
-        return@withContext emptyList()
+      } catch (error: Exception) {
+        EventLog.log("NoteLink", "Discovery failed: ${error.stackTraceToString()}")
+        throw IllegalStateException("NoteLink discovery failed: ${error.message ?: error.javaClass.simpleName}", error)
       }
       ).mapNotNull { resolveAdvertisementIdentity(it) }
     matchAvailable(clients, senders, kind).also(onUpdate)

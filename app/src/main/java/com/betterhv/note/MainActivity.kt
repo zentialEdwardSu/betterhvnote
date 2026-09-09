@@ -448,10 +448,13 @@ private fun AppRoot(
     }
     var permissionRemoteKind by remember { mutableStateOf<ContentKind?>(null) }
     var permissionRemoteAuto by remember { mutableStateOf(false) }
+    var exportPermissionResult by remember { mutableStateOf<kotlinx.coroutines.CompletableDeferred<Boolean>?>(null) }
     val transferPermissionLauncher = rememberLauncherForActivityResult(
       ActivityResultContracts.RequestMultiplePermissions(),
     ) { grants ->
       transferStatusRevision++
+      exportPermissionResult?.complete(TransferPermissions.hasAllNotePermissions(context))
+      exportPermissionResult = null
       val kind = permissionRemoteKind.also { permissionRemoteKind = null }
       val auto = permissionRemoteAuto.also { permissionRemoteAuto = false }
       if (kind != null && TransferPermissions.hasAllNotePermissions(context)) {
@@ -1682,13 +1685,27 @@ private fun AppRoot(
           initialNotebookId = exportInitialNotebookId ?: currentNotebookId,
           creationRequest = exportCreationRequest,
           currentNotebookId = currentNotebookId,
-          pairedClients = if (missingTransferPermissions.isEmpty()) {
-            val onlineIds = onlineNoteLinks.map { it.client.id }.toSet()
-            pairedClients.filter { it.id in onlineIds }
-          } else {
-            emptyList()
-          },
+          pairedClients = pairedClients,
           callbacks = ExportManagerCallbacks(
+            discoverClients = {
+              if (pairedClients.isEmpty()) {
+                exportPanelOpen = false
+                settingsOpen = true
+                error(noteText("请先在设置中配对 NoteLink", "Pair NoteLink in Settings first"))
+              }
+              val missing = TransferPermissions.missingNotePermissions(context)
+              if (missing.isNotEmpty()) {
+                val result = kotlinx.coroutines.CompletableDeferred<Boolean>()
+                exportPermissionResult = result
+                transferPermissionLauncher.launch(missing)
+                try {
+                  check(result.await()) { noteText("需要附近设备权限", "Nearby devices permission is required") }
+                } finally {
+                  if (exportPermissionResult === result) exportPermissionResult = null
+                }
+              }
+              phoneTransfer.discoverAvailable().map { it.client }
+            },
             pageBitmap = { id -> pv.pageThumbnail(id) },
             requestThumbnails = { ids -> pv.requestThumbnails(ids) },
             beforeExport = { notebookId ->

@@ -28,6 +28,9 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -87,6 +90,7 @@ data class ExportManagerCallbacks(
   val pageBitmap: (UUID) -> Bitmap?,
   val requestThumbnails: (List<UUID>) -> Unit,
   val beforeExport: suspend (UUID) -> Boolean,
+  val discoverClients: suspend () -> List<PairedDevice>,
   val sendToNoteLink: suspend (String, ExportArtifact, (Long, Long) -> Unit) -> Unit,
   val onNotice: (String) -> Unit,
   val onClose: () -> Unit,
@@ -105,9 +109,15 @@ data class ExportTaskRowState(
   val busy: Boolean,
   val phoneTransferAvailable: Boolean,
   val progress: ExportProgress?,
+  val queued: Boolean = false,
+  val outcome: String? = null,
+  val errorDetails: String? = null,
 )
 
-data class ExportTaskRowActions(val onSave: () -> Unit, val onSend: () -> Unit, val onDelete: () -> Unit)
+data class ExportTaskRowActions(
+  val onSave: () -> Unit, val onSend: () -> Unit, val onDelete: () -> Unit,
+  val onGenerate: () -> Unit, val onCancel: () -> Unit,
+)
 
 data class ExportManagerSurfaceState(
   val exportState: ExportManagerState,
@@ -148,7 +158,6 @@ fun ExportManagerScreen(input: ExportManagerInput) {
   val state by viewModel.state.collectAsState()
   var creating by remember { mutableStateOf(false) }
   var deleteTask by remember { mutableStateOf<ExportTaskSummary?>(null) }
-  var sendTask by remember { mutableStateOf<ExportTaskSummary?>(null) }
 
   LaunchedEffect(creationRequest) {
     if (creationRequest > 0) creating = true
@@ -173,7 +182,11 @@ fun ExportManagerScreen(input: ExportManagerInput) {
     actions = ExportManagerSurfaceActions(
       onCreatingChange = { creating = it },
       onDeleteTask = { deleteTask = it },
-      onSendTask = { sendTask = it },
+      onSendTask = { summary ->
+        viewModel.sendToNoteLink(
+          summary.task.id, callbacks.beforeExport, callbacks.discoverClients, callbacks.sendToNoteLink,
+        )
+      },
     ),
   )
 
@@ -187,16 +200,11 @@ fun ExportManagerScreen(input: ExportManagerInput) {
     )
   }
 
-  sendTask?.let { summary ->
+  state.choosingClients?.let { clients ->
     ExportSendTaskDialog(
-      clients = pairedClients,
-      onDismiss = { sendTask = null },
-      onSend = { client ->
-        sendTask = null
-        viewModel.sendToNoteLink(summary.task.id, callbacks.beforeExport) { artifact, progress ->
-          callbacks.sendToNoteLink(client.id, artifact, progress)
-        }
-      },
+      clients = clients,
+      onDismiss = { viewModel.cancel() },
+      onSend = viewModel::chooseClient,
     )
   }
 }
@@ -216,7 +224,7 @@ private fun ExportManagerSurface(state: ExportManagerSurfaceState, actions: Expo
           pageBitmap = callbacks.pageBitmap,
           requestThumbnails = callbacks.requestThumbnails,
           onCreate = { notebookId, scope, format, ids ->
-            viewModel.createTask(notebookId, scope, format, ids)
+            viewModel.createTask(notebookId, scope, format, ids, callbacks.beforeExport)
             actions.onCreatingChange(false)
           },
           onBack = { actions.onCreatingChange(false) },
@@ -226,7 +234,6 @@ private fun ExportManagerSurface(state: ExportManagerSurfaceState, actions: Expo
       Column(Modifier.fillMaxSize()) {
         ExportTopBar(
           taskCount = exportState.tasks.size,
-          busy = exportState.activeTaskId != null,
           onBack = callbacks.onClose,
           onAdd = { actions.onCreatingChange(true) },
         )
@@ -263,25 +270,21 @@ private fun ExportTaskList(input: ExportTaskListInput, actions: ExportTaskListAc
         state = ExportTaskRowState(
           summary = summary,
           active = exportState.activeTaskId == summary.task.id,
-          busy = exportState.activeTaskId != null,
+          busy = exportState.activeTaskId == summary.task.id || summary.task.id in exportState.queuedTaskIds,
           phoneTransferAvailable = input.pairedClients.isNotEmpty(),
           progress = exportState.progress,
+          queued = summary.task.id in exportState.queuedTaskIds,
+          outcome = exportState.outcomes[summary.task.id],
+          errorDetails = exportState.errors[summary.task.id]?.details,
         ),
         actions = ExportTaskRowActions(
           onSave = {
             input.viewModel.saveToDownloads(summary.task.id, input.callbacks.beforeExport)
           },
-          onSend = {
-            if (input.pairedClients.size == 1) {
-              val clientId = input.pairedClients.single().id
-              input.viewModel.sendToNoteLink(summary.task.id, input.callbacks.beforeExport) { artifact, progress ->
-                input.callbacks.sendToNoteLink(clientId, artifact, progress)
-              }
-            } else {
-              actions.onSendTask(summary)
-            }
-          },
+          onSend = { actions.onSendTask(summary) },
           onDelete = { actions.onDeleteTask(summary) },
+          onGenerate = { input.viewModel.generate(summary.task.id, input.callbacks.beforeExport) },
+          onCancel = { input.viewModel.cancel(summary.task.id) },
         ),
       )
       HorizontalDivider(color = ExportBorder)
@@ -325,12 +328,12 @@ private fun ExportSendTaskDialog(clients: List<PairedDevice>, onDismiss: () -> U
 }
 
 @Composable
-private fun ExportTopBar(taskCount: Int, busy: Boolean, onBack: () -> Unit, onAdd: () -> Unit) {
+private fun ExportTopBar(taskCount: Int, onBack: () -> Unit, onAdd: () -> Unit) {
   Row(
     Modifier.fillMaxWidth().height(64.dp).padding(horizontal = 18.dp),
     verticalAlignment = Alignment.CenterVertically,
   ) {
-    IconButton(onClick = onBack, enabled = !busy) {
+    IconButton(onClick = onBack) {
       Icon(Icons.AutoMirrored.Filled.ArrowBack, noteText("返回", "Back"))
     }
     Text(noteText("导出", "Export"), fontSize = 18.sp, fontWeight = FontWeight.Medium)
@@ -341,7 +344,7 @@ private fun ExportTopBar(taskCount: Int, busy: Boolean, onBack: () -> Unit, onAd
       modifier = Modifier.padding(start = 10.dp),
     )
     Spacer(Modifier.weight(1f))
-    IconButton(onClick = onAdd, enabled = !busy) { Icon(Icons.Filled.Add, noteText("新建导出任务", "New export task")) }
+    IconButton(onClick = onAdd) { Icon(Icons.Filled.Add, noteText("新建导出任务", "New export task")) }
   }
 }
 
@@ -349,6 +352,7 @@ private fun ExportTopBar(taskCount: Int, busy: Boolean, onBack: () -> Unit, onAd
 private fun ExportTaskRow(state: ExportTaskRowState, actions: ExportTaskRowActions) {
   val summary = state.summary
   val active = state.active
+  var detailsOpen by remember { mutableStateOf(false) }
   val availability = ExportActionAvailability.resolve(
     summary.state,
     state.busy,
@@ -374,11 +378,31 @@ private fun ExportTaskRow(state: ExportTaskRowState, actions: ExportTaskRowActio
           maxLines = 1,
           overflow = TextOverflow.Ellipsis,
         )
-        Text(taskStatus(summary), color = stateColor(summary.state), fontSize = 13.sp)
+        Text(
+          when {
+            state.queued -> noteText("排队中", "Queued")
+            active -> state.progress?.let(::progressLabel) ?: noteText("准备中", "Preparing")
+            else -> state.outcome ?: taskStatus(summary)
+          },
+          color = if (state.errorDetails != null) Color(0xFFB00020) else stateColor(summary.state),
+          fontSize = 13.sp,
+          maxLines = 3,
+          overflow = TextOverflow.Ellipsis,
+        )
       }
       if (active) {
         CircularProgressIndicator(Modifier.size(28.dp), strokeWidth = 2.dp, color = Color.Black)
         Spacer(Modifier.width(4.dp))
+      }
+      if (state.errorDetails != null) {
+        IconButton(onClick = { detailsOpen = true }) { Icon(Icons.Filled.Info, noteText("错误详情", "Error details")) }
+      }
+      if (state.busy) {
+        IconButton(onClick = actions.onCancel) { Icon(Icons.Filled.Close, noteText("取消", "Cancel")) }
+      } else {
+        IconButton(onClick = actions.onGenerate, enabled = availability.saveEnabled) {
+          Icon(Icons.Filled.Refresh, noteText("生成或重试", "Generate or retry"))
+        }
       }
       IconButton(onClick = actions.onSave, enabled = availability.saveEnabled) {
         Icon(
@@ -389,14 +413,7 @@ private fun ExportTaskRow(state: ExportTaskRowState, actions: ExportTaskRowActio
       IconButton(onClick = actions.onSend, enabled = availability.sendEnabled) {
         Icon(
           Icons.AutoMirrored.Filled.Send,
-          if (state.phoneTransferAvailable) {
-            noteText(
-              "发送 ${summary.notebookTitle} 到 NoteLink",
-              "Send ${summary.notebookTitle} to NoteLink",
-            )
-          } else {
-            "NoteLink is not paired or unavailable"
-          },
+          noteText("发送 ${summary.notebookTitle} 到 NoteLink", "Send ${summary.notebookTitle} to NoteLink"),
         )
       }
       IconButton(onClick = actions.onDelete, enabled = availability.deleteEnabled) {
@@ -405,14 +422,45 @@ private fun ExportTaskRow(state: ExportTaskRowState, actions: ExportTaskRowActio
     }
     if (active && state.progress != null) {
       val progress = state.progress
-      val ratio = if (progress.total <= 0) 0f else progress.current.toFloat() / progress.total
-      LinearProgressIndicator(
-        progress = { ratio.coerceIn(0f, 1f) },
-        modifier = Modifier.fillMaxWidth().padding(top = 10.dp),
-        color = Color.Black,
-      )
+      val modifier = Modifier.fillMaxWidth().padding(top = 10.dp)
+      val fraction = progress.determinateFraction()
+      if (fraction == null) {
+        LinearProgressIndicator(modifier = modifier, color = Color.Black)
+      } else {
+        LinearProgressIndicator(progress = { fraction }, modifier = modifier, color = Color.Black)
+      }
     }
   }
+  if (detailsOpen) {
+    EinkModalOverlay(onDismissRequest = { detailsOpen = false }) {
+      Column(Modifier.padding(20.dp).verticalScroll(rememberScrollState())) {
+        EinkDialogAction(noteText("关闭", "Close"), onClick = { detailsOpen = false })
+        androidx.compose.foundation.text.selection.SelectionContainer {
+          Text(state.errorDetails.orEmpty(), fontSize = 13.sp)
+        }
+      }
+    }
+  }
+}
+
+internal fun ExportProgress.determinateFraction(): Float? = when (stage) {
+  ExportProgress.Stage.RENDERING, ExportProgress.Stage.SENDING -> {
+    if (total <= 0) null else (current.toFloat() / total).coerceIn(0f, 1f)
+  }
+  else -> null
+}
+
+private fun progressLabel(progress: ExportProgress): String = when (progress.stage) {
+  ExportProgress.Stage.PREPARING -> noteText("准备中", "Preparing")
+  ExportProgress.Stage.RENDERING -> noteText(
+    "生成页面 ${progress.current}/${progress.total}", "Rendering ${progress.current}/${progress.total}",
+  )
+  ExportProgress.Stage.ASSEMBLING -> noteText("合并中", "Assembling")
+  ExportProgress.Stage.SAVING -> noteText("保存中", "Saving")
+  ExportProgress.Stage.DISCOVERING -> noteText("发现设备中", "Discovering devices")
+  ExportProgress.Stage.SENDING -> noteText(
+    "发送中 ${progress.current}/${progress.total}", "Sending ${progress.current}/${progress.total}",
+  )
 }
 
 @Composable

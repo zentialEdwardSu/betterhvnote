@@ -9,9 +9,9 @@ class ExportRevisionTest {
   @Test fun `pdf page cache name is renderer-versioned`() {
     val source = ExportPageSource(UUID.fromString("00000000-0000-0000-0000-000000000123"), 42L, 0)
 
-    assertEquals(5, ExportTaskRepository.RENDERER_VERSION)
+    assertEquals(6, ExportTaskRepository.RENDERER_VERSION)
     assertEquals(
-      "00000000-0000-0000-0000-000000000123-r42-be3b0c44298fc-v5.pdf",
+      "00000000-0000-0000-0000-000000000123-r42-be3b0c44298fc-v6.pdf",
       ExportTaskRepository.pageCacheFileName(source),
     )
   }

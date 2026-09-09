@@ -38,14 +38,14 @@ class ExportActionAvailabilityTest {
     assertFalse(actions.deleteEnabled)
   }
 
-  @Test fun unavailablePhoneOnlyDisablesSend() {
+  @Test fun unknownPhoneStatusStillAllowsLazyDiscovery() {
     val actions = ExportActionAvailability.resolve(
       ExportTaskState.NEVER_GENERATED,
       busy = false,
       phoneTransferAvailable = false,
     )
     assertTrue(actions.saveEnabled)
-    assertFalse(actions.sendEnabled)
+    assertTrue(actions.sendEnabled)
     assertTrue(actions.deleteEnabled)
   }
 }

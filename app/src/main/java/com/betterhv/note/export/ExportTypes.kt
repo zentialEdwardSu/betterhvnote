@@ -54,11 +54,11 @@ data class ExportArtifact(
 )
 
 data class ExportProgress(val current: Int, val total: Int, val pageId: UUID?, val stage: Stage = Stage.RENDERING) {
-  enum class Stage { PREPARING, RENDERING, ASSEMBLING, SAVING, SENDING }
+  enum class Stage { PREPARING, RENDERING, ASSEMBLING, SAVING, DISCOVERING, SENDING }
 }
 
 sealed interface ExportResult {
   data class Success(val artifact: ExportArtifact) : ExportResult
-  data class Failure(val error: String) : ExportResult
+  data class Failure(val error: String, val diagnostic: ExportDiagnostic? = null) : ExportResult
   data object Cancelled : ExportResult
 }

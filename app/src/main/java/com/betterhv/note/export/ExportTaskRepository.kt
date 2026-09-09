@@ -445,7 +445,7 @@ class ExportTaskRepository(context: Context) : AutoCloseable {
   )
 
   companion object {
-    const val RENDERER_VERSION = 5
+    const val RENDERER_VERSION = 6
 
     fun pageCacheFileName(source: ExportPageSource): String =
       "${source.id}-r${source.contentRevision}-b${backgroundHash(source.backgroundRevision)}-v$RENDERER_VERSION.pdf"

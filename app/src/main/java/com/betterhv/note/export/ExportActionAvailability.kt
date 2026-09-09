@@ -10,7 +10,7 @@ internal data class ExportActionAvailability(
       val destinationEnabled = !busy && state != ExportTaskState.SOURCE_MISSING
       return ExportActionAvailability(
         saveEnabled = destinationEnabled,
-        sendEnabled = destinationEnabled && phoneTransferAvailable,
+        sendEnabled = destinationEnabled,
         deleteEnabled = !busy,
       )
     }

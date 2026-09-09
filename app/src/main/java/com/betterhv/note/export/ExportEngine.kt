@@ -9,6 +9,8 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
@@ -26,20 +28,25 @@ class ExportEngine(
   private val pdfWriter: PdfInkAnnotationWriter = PdfInkAnnotationWriter(),
 ) {
   private val muPdf = MuPdfEngine()
+  private val fileOperations = Mutex()
   suspend fun generate(taskId: UUID, onProgress: (ExportProgress) -> Unit = {}): ExportResult =
+    fileOperations.withLock { generateLocked(taskId, onProgress) }
+
+  private suspend fun generateLocked(taskId: UUID, reportProgress: (ExportProgress) -> Unit): ExportResult =
     withContext(Dispatchers.IO) {
-      val task = taskRepository.loadTask(taskId)
-        ?: return@withContext ExportResult.Failure("Export task does not exist")
+      var latestProgress = ExportProgress(0, 1, null, ExportProgress.Stage.PREPARING)
+      val onProgress: (ExportProgress) -> Unit = { latestProgress = it; reportProgress(it) }
       try {
+        val task = taskRepository.loadTask(taskId) ?: error("Export task does not exist")
         onProgress(ExportProgress(0, 1, null, ExportProgress.Stage.PREPARING))
         val sources = taskRepository.resolveSources(task)
-        if (sources.isEmpty()) return@withContext ExportResult.Failure("Notebook has no pages to export")
-        if (task.scope != ExportScope.ALL_PAGES && sources.size != task.pageIds.size) {
-          return@withContext ExportResult.Failure("Export task contains deleted pages")
+        check(sources.isNotEmpty()) { "Notebook has no pages to export" }
+        check(task.scope == ExportScope.ALL_PAGES || sources.size == task.pageIds.size) {
+          "Export task contains deleted pages"
         }
         taskRepository.currentArtifact(task, sources)?.let { return@withContext ExportResult.Success(it) }
 
-        exportRoot.mkdirs()
+        check(exportRoot.isDirectory || exportRoot.mkdirs()) { "Could not create export directory: $exportRoot" }
         val fingerprint = taskRepository.fingerprint(task, sources)
         val artifactId = UUID.randomUUID()
         val artifactDir = File(exportRoot, "artifacts").also(File::mkdirs)
@@ -67,20 +74,22 @@ class ExportEngine(
       } catch (_: CancellationException) {
         ExportResult.Cancelled
       } catch (t: Throwable) {
-        val message = t.message ?: t.javaClass.simpleName
-        taskRepository.markError(taskId, message)
-        ExportResult.Failure(message)
+        val diagnostic = ExportDiagnostic.capture(
+          taskId, latestProgress, t, File(exportRoot.parentFile, "export-diagnostics"),
+        )
+        runCatching { taskRepository.markError(taskId, diagnostic.summary) }
+        ExportResult.Failure(diagnostic.summary, diagnostic)
       }
     }
 
-  fun deleteTask(taskId: UUID) {
+  suspend fun deleteTask(taskId: UUID) = fileOperations.withLock {
     taskRepository.deleteTask(taskId).forEach(File::delete)
     File(exportRoot, "pages/$taskId").deleteRecursively()
   }
 
-  fun pruneOrphanFiles() {
+  suspend fun pruneOrphanFiles() = fileOperations.withLock {
     val retained = taskRepository.referencedInternalFiles()
-    if (!exportRoot.isDirectory) return
+    if (!exportRoot.isDirectory) return@withLock
     exportRoot.walkBottomUp().forEach { file ->
       if (file.isFile && file.absolutePath !in retained) file.delete()
       if (file.isDirectory && file != exportRoot && file.list().isNullOrEmpty()) file.delete()
