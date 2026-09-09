@@ -28,9 +28,10 @@ class InkStrokeModelerJNI {
   external fun nativeReset(): Int
 
   /**
-   * @param inputXYP flat [x,y,pressure, ...], length >= 3 * eventTypes.size
+   * @param inputXYP flat [x,y,scalar, ...], length >= 3 * eventTypes.size;
+   * NormalPen uses normalized ROM width in the third channel
    * @param eventTypes one byte per sample: 0=DOWN, 2=UP, else MOVE
-   * @param outXYP caller-allocated output, filled with [x,y,pressure] triples
+   * @param outXYP caller-allocated output, filled with [x,y,scalar] triples
    * @return number of modeled Results written (>=0), or a negative error code
    */
   external fun nativeUpdate(inputXYP: FloatArray, eventTypes: ByteArray, outXYP: FloatArray): Int

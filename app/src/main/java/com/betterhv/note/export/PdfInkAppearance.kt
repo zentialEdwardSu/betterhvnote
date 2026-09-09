@@ -16,7 +16,8 @@ internal data class PdfInkBounds(val left: Float, val top: Float, val right: Flo
   val height: Float get() = bottom - top
 }
 
-internal data class PdfInkSample(val point: PdfInkPoint, val pressure: Float)
+internal data class PdfInkSample(val point: PdfInkPoint, val width: Float)
+internal data class PdfInkDisc(val center: PdfInkPoint, val radius: Float)
 
 internal data class PdfInkAppearanceContent(
   val bytes: ByteArray,
@@ -40,25 +41,35 @@ internal class PdfInkAppearance private constructor(
   val green: Float,
   val blue: Float,
   val opacity: Float,
-  private val normalLeft: List<PdfInkPoint>,
-  private val normalRight: List<PdfInkPoint>,
+  private val shapeDiscs: List<PdfInkDisc>,
+  private val shapeBodies: List<List<PdfInkPoint>>,
 ) {
   val penType: PenType get() = source.stroke.style.penType
 
   val visualBounds: PdfInkBounds
     get() {
-      val points = if (penType == PenType.NormalPen && normalLeft.isNotEmpty()) {
-        normalLeft + normalRight
-      } else {
-        samples.map(PdfInkSample::point)
-      }
-      val strokePadding = if (penType == PenType.NormalPen) 0f else borderWidth * 0.5f
-      val padding = strokePadding + ANTIALIAS_MARGIN_POINTS
+      val bodyPoints = shapeBodies.flatten()
+      val left = minOf(
+        shapeDiscs.minOf { it.center.x - it.radius },
+        bodyPoints.minOfOrNull(PdfInkPoint::x) ?: Float.MAX_VALUE,
+      )
+      val top = minOf(
+        shapeDiscs.minOf { it.center.y - it.radius },
+        bodyPoints.minOfOrNull(PdfInkPoint::y) ?: Float.MAX_VALUE,
+      )
+      val right = maxOf(
+        shapeDiscs.maxOf { it.center.x + it.radius },
+        bodyPoints.maxOfOrNull(PdfInkPoint::x) ?: -Float.MAX_VALUE,
+      )
+      val bottom = maxOf(
+        shapeDiscs.maxOf { it.center.y + it.radius },
+        bodyPoints.maxOfOrNull(PdfInkPoint::y) ?: -Float.MAX_VALUE,
+      )
       return PdfInkBounds(
-        left = points.minOf(PdfInkPoint::x) - padding,
-        top = points.minOf(PdfInkPoint::y) - padding,
-        right = points.maxOf(PdfInkPoint::x) + padding,
-        bottom = points.maxOf(PdfInkPoint::y) + padding,
+        left - ANTIALIAS_MARGIN_POINTS,
+        top - ANTIALIAS_MARGIN_POINTS,
+        right + ANTIALIAS_MARGIN_POINTS,
+        bottom + ANTIALIAS_MARGIN_POINTS,
       )
     }
 
@@ -74,82 +85,34 @@ internal class PdfInkAppearance private constructor(
     val alphaBuckets = linkedSetOf<Int>()
     val content = buildString {
       append("q\n1 0 0 -1 0 ").append(n(bounds.height)).append(" cm\n")
+      val bucket = opacityBucket(opacity * if (penType == PenType.Pencil) PENCIL_OPACITY else 1f)
+      alphaBuckets += bucket
       append(n(red)).append(' ').append(n(green)).append(' ').append(n(blue))
-      when (penType) {
-        PenType.NormalPen -> {
-          val bucket = opacityBucket(opacity)
-          alphaBuckets += bucket
-          append(" rg\n/").append(gsName(bucket)).append(" gs\n")
-          if (normalLeft.isNotEmpty()) {
-            val first = local(normalLeft.first())
-            append(n(first.x)).append(' ').append(n(first.y)).append(" m\n")
-            normalLeft.drop(1).forEach { point ->
-              val p = local(point)
-              append(n(p.x)).append(' ').append(n(p.y)).append(" l\n")
-            }
-            normalRight.asReversed().forEach { point ->
-              val p = local(point)
-              append(n(p.x)).append(' ').append(n(p.y)).append(" l\n")
-            }
-            append("h f\n")
-          }
+        .append(" rg\n/").append(gsName(bucket)).append(" gs\n")
+      shapeBodies.forEach { body ->
+        val first = local(body.first())
+        append(n(first.x)).append(' ').append(n(first.y)).append(" m\n")
+        body.drop(1).forEach { point ->
+          val p = local(point)
+          append(n(p.x)).append(' ').append(n(p.y)).append(" l\n")
         }
-
-        PenType.Marker -> {
-          val bucket = opacityBucket(opacity)
-          alphaBuckets += bucket
-          append(" RG\n")
-          append(n(red)).append(' ').append(n(green)).append(' ').append(n(blue))
-            .append(" rg\n/").append(gsName(bucket)).append(" gs\n1 J 1 j\n")
-          append(n(borderWidth)).append(" w\n")
-          if (samples.size == 1) {
-            appendCircle(this, local(samples.first().point), borderWidth * 0.5f, formatter)
-          } else {
-            appendCenterline(this, samples.map(PdfInkSample::point), bounds, formatter)
-          }
-        }
-
-        PenType.Pencil -> {
-          append(" RG\n")
-          append(n(red)).append(' ').append(n(green)).append(' ').append(n(blue))
-            .append(" rg\n1 J 1 j\n")
-          if (samples.size == 1) {
-            val sample = samples.first()
-            val bucket = opacityBucket(opacity * pencilOpacity(sample.pressure))
-            alphaBuckets += bucket
-            append('/').append(gsName(bucket)).append(" gs\n")
-            val p = local(sample.point)
-            appendCircle(this, p, segmentWidth(sample.pressure) * 0.5f, formatter)
-          } else {
-            for (index in 1 until samples.size) {
-              val from = samples[index - 1]
-              val to = samples[index]
-              val pressure = ((from.pressure + to.pressure) * 0.5f).coerceIn(0f, 1f)
-              val bucket = opacityBucket(opacity * pencilOpacity(pressure))
-              alphaBuckets += bucket
-              append('/').append(gsName(bucket)).append(" gs\n")
-              append(n(segmentWidth(pressure))).append(" w\n")
-              val a = local(from.point)
-              val b = local(to.point)
-              append(n(a.x)).append(' ').append(n(a.y)).append(" m ")
-                .append(n(b.x)).append(' ').append(n(b.y)).append(" l S\n")
-            }
-          }
-        }
+        append("h\n")
       }
+      shapeDiscs.forEach { disc ->
+        if (disc.radius > 0f) appendCirclePath(this, local(disc.center), disc.radius, formatter)
+      }
+      append("f\n")
       append("Q\n")
     }
     return PdfInkAppearanceContent(content.toByteArray(Charsets.US_ASCII), alphaBuckets)
   }
-
-  private fun segmentWidth(pressure: Float): Float = source.stroke.style.widthAt(pressure.coerceIn(0f, 1f)) *
-    source.transform.approximateScale() * PDF_POINTS_PER_LOGICAL_PIXEL
 
   companion object {
     const val PDF_POINTS_PER_LOGICAL_PIXEL = 72f / 96f
     private const val MIN_BORDER_WIDTH_POINTS = 0.1f
     private const val ANTIALIAS_MARGIN_POINTS = 1f
     private const val CIRCLE_CONTROL = 0.5522848f
+    private const val PENCIL_OPACITY = 0.8f
 
     fun from(source: StrokeObject): PdfInkAppearance? {
       val stroke = source.stroke
@@ -163,62 +126,50 @@ internal class PdfInkAppearance private constructor(
         )
       }
 
+      val transformedWidthScale = source.transform.approximateScale() * PDF_POINTS_PER_LOGICAL_PIXEL
       val samples = stroke.points.map { point ->
-        PdfInkSample(map(point.x, point.y), point.pressure.coerceIn(0f, 1f))
+        PdfInkSample(map(point.x, point.y), stroke.style.widthAt(point) * transformedWidthScale)
+      }
+      val outline = stroke.outline
+      val shapeDiscs = outline.discs.toList().chunked(3).map { values ->
+        PdfInkDisc(map(values[0], values[1]), values[2] * transformedWidthScale)
+      }
+      val shapeBodies = outline.bodies.toList().chunked(8).map { values ->
+        listOf(
+          map(values[0], values[1]),
+          map(values[2], values[3]),
+          map(values[4], values[5]),
+          map(values[6], values[7]),
+        )
       }
       val inkList = if (samples.size == 1) {
         listOf(samples[0].point, samples[0].point)
       } else {
         samples.map(PdfInkSample::point)
       }
-      val outline = if (stroke.style.penType == PenType.NormalPen) stroke.outline else null
-      val left = outline?.left?.toPdfPoints(::map).orEmpty()
-      val right = outline?.right?.toPdfPoints(::map).orEmpty()
       val color = stroke.style.color
       return PdfInkAppearance(
         source = source,
         samples = samples,
         inkList = inkList,
         borderWidth = (
-          stroke.style.maxWidth * source.transform.approximateScale() *
-            PDF_POINTS_PER_LOGICAL_PIXEL
+          samples.maxOf(PdfInkSample::width)
           ).coerceAtLeast(MIN_BORDER_WIDTH_POINTS),
         red = ((color ushr 16) and 0xFF) / 255f,
         green = ((color ushr 8) and 0xFF) / 255f,
         blue = (color and 0xFF) / 255f,
         opacity = ((color ushr 24) and 0xFF) / 255f,
-        normalLeft = left,
-        normalRight = right,
+        shapeDiscs = shapeDiscs,
+        shapeBodies = shapeBodies,
       )
     }
 
-    private fun FloatArray.toPdfPoints(map: (Float, Float) -> PdfInkPoint): List<PdfInkPoint> =
-      List(size / 2) { index -> map(this[index * 2], this[index * 2 + 1]) }
-
-    private fun appendCenterline(
+    private fun appendCirclePath(
       target: StringBuilder,
-      points: List<PdfInkPoint>,
-      bounds: PdfInkBounds,
+      center: PdfInkPoint,
+      radius: Float,
       formatter: DecimalFormat,
     ) {
-      if (points.isEmpty()) return
-      fun n(value: Float): String = formatter.format(if (abs(value) < 0.00005f) 0f else value)
-      val first = points.first()
-      target.append(n(first.x - bounds.left)).append(' ')
-        .append(n(first.y - bounds.top)).append(" m\n")
-      if (points.size == 1) {
-        target.append(n(first.x - bounds.left)).append(' ')
-          .append(n(first.y - bounds.top)).append(" l\n")
-      } else {
-        points.drop(1).forEach { point ->
-          target.append(n(point.x - bounds.left)).append(' ')
-            .append(n(point.y - bounds.top)).append(" l\n")
-        }
-      }
-      target.append("S\n")
-    }
-
-    private fun appendCircle(target: StringBuilder, center: PdfInkPoint, radius: Float, formatter: DecimalFormat) {
       fun n(value: Float): String = formatter.format(if (abs(value) < 0.00005f) 0f else value)
       val control = radius * CIRCLE_CONTROL
       val left = center.x - radius
@@ -237,10 +188,9 @@ internal class PdfInkAppearance private constructor(
         .append(n(left)).append(' ').append(n(center.y)).append(" c\n")
       target.append(n(left)).append(' ').append(n(center.y - control)).append(' ')
         .append(n(center.x - control)).append(' ').append(n(top)).append(' ')
-        .append(n(center.x)).append(' ').append(n(top)).append(" c f\n")
+        .append(n(center.x)).append(' ').append(n(top)).append(" c\n")
     }
 
-    private fun pencilOpacity(pressure: Float): Float = 0.35f + 0.45f * pressure.coerceIn(0f, 1f)
     private fun opacityBucket(opacity: Float): Int = (opacity * 100f).roundToInt().coerceIn(0, 100)
     fun gsName(bucket: Int): String = "GS${bucket.coerceIn(0, 100)}"
   }

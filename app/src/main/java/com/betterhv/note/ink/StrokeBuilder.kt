@@ -112,7 +112,9 @@ class StrokeBuilder(
     // real sample instead of ending short.
     points.addAll(smoother.finishStroke())
     if (points.isEmpty()) return null
-    val simplified = simplifier.simplify(points)
+    // Transactional model fallback means "raw for the whole stroke". Do not
+    // immediately alter those ROM centers with RDP after making that choice.
+    val simplified = if (smoother.usedRawFallback) points else simplifier.simplify(points)
     if (simplified.isEmpty()) return null
     return Stroke(points = simplified.toList(), style = style)
   }

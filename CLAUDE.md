@@ -60,12 +60,12 @@ PenDrawView (HvPenDrawListener impl)
       v
 StrokeBuilder  — one instance per gesture
       |  per point: InputFilter (drop near-duplicate samples) -> StrokeSmoother
-      |  (OneEuroSmoother, online) -> accumulate
+      |  (Google ink-stroke-modeler, transactional whole-stroke output)
       |  at pen-up: StrokeSimplifier (RamerDouglasPeuckerSimplifier, pressure-aware RDP)
       v
 Stroke (immutable, ink/Stroke.kt) — the authoritative vector record
-      |  StrokeGeometry.build() computes a variable-width ribbon outline from the
-      |  centerline + pressure curve (cached, since it's expensive)
+      |  StrokeGeometry.build() computes the shared swept-disc fill from the
+      |  centerline + PenStyle.widthAt(point) (cached, since it's expensive)
       v
 InkRenderer — draws the outline as a filled Path via Android Canvas/Skia
       |  into PenDrawView's own cached Bitmap (the "document" bitmap is a
@@ -76,10 +76,11 @@ View.postInvalidate(dirtyRect) — only the touched region is repainted
 
 Key invariants to preserve when touching this path (see extensive rationale comments in `PenDrawView.kt`):
 - **Strokes are the source of truth; the bitmap is a rebuildable cache** (spec §2.1). Any new editing feature must mutate the `strokes` list and repaint from it, not touch pixels directly.
-- The ROM paints its own low-latency overlay ink independently of what this app does; `penDraw.resetData()` must be called after consuming each batch or the ROM's copy lingers on screen alongside the app's own rendering.
+- The ROM paints its own low-latency overlay independently of the document bitmap. During writing, keep that overlay as the live image; at a structural materialization point, first commit the vector stroke, redraw the bitmap, then call `penDraw.resetData()` so the old overlay copy does not remain beside the materialized result.
 - `PenGeometry` is a bit-exact port of decompiled vendor bytecode (coordinate transforms depending on device model / screen origin / rotation). Comments explicitly warn not to "simplify" the branch structure — it mirrors the original smali register-by-register and encodes device quirks that aren't otherwise documented.
 - Eraser mode is selected on the ROM side via `setDrawStatus` with an *encoded width* (`eraserWidth + 0x69`), not a mode enum — this is a reverse-engineered vendor quirk, not arbitrary.
-- Pressure arrives from the ROM in undocumented raw units; `PenDrawView.PRESSURE_MAX` (4095) is an unverified working assumption flagged for validation against real hardware logs (via the on-screen `EventLog` overlay).
+- The ROM callback's third float is a vendor-computed geometric width in screen pixels. For `NormalPen`, divide it by the exact integer width configured for that gesture and store the dimensionless ratio in the existing `InkPoint.pressure` scalar slot. Do not clip it: any non-finite or out-of-range scalar makes the modeler return the filtered raw stroke in full. `Pencil` and `Marker` store `1f` and resolve to fixed width.
+- All three brushes use the same modeler and swept-disc geometry. `PenStyle.widthAt(InkPoint)` is the sole geometry width boundary: `NormalPen` uses `baseWidth * point.pressure`; `Pencil` and `Marker` use `baseWidth`. Brush-specific rendering is limited to color/alpha.
 - `StrokeRenderer` + `HWPenEngine` (the vendor's native pen rasterizer) are legacy/Phase-0 code paths, superseded by `InkRenderer`'s own Skia-based rendering. `NativeSelfTest` keeps a smoke-test around for the native libs in case a future editing feature (e.g. eraser trace mode) still needs them — don't assume they're dead code without checking current usage.
 
 ### The `ink` package (`com.betterhv.note.ink`) is framework-free by design

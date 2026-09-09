@@ -51,7 +51,7 @@ class StrokeGeometryTest {
       outline.left[2] - outline.right[2],
       outline.left[3] - outline.right[3],
     )
-    assertEquals(style.widthAt(pressure), separation, EPS)
+    assertEquals(style.widthAt(points[1]), separation, EPS)
   }
 
   @Test
@@ -85,6 +85,8 @@ class StrokeGeometryTest {
     val outline = StrokeGeometry.build(points, style)
     for (v in outline.left) assertFalse("NaN in left boundary", v.isNaN())
     for (v in outline.right) assertFalse("NaN in right boundary", v.isNaN())
+    for (v in outline.discs) assertFalse("NaN in sample disc", v.isNaN())
+    for (v in outline.bodies) assertFalse("NaN in tangent body", v.isNaN())
   }
 
   @Test
@@ -93,14 +95,52 @@ class StrokeGeometryTest {
     val outline = StrokeGeometry.build(points, style)
     for (v in outline.left) assertFalse(v.isNaN())
     for (v in outline.right) assertFalse(v.isNaN())
+    for (v in outline.discs) assertFalse(v.isNaN())
+    for (v in outline.bodies) assertFalse(v.isNaN())
   }
 
   @Test
   fun `single point renders as a dot with non-zero area`() {
     val outline = StrokeGeometry.build(listOf(point(5f, 5f, 1.0f)), style)
     assertTrue(outline.pointCount > 0)
+    assertEquals(3, outline.discs.size)
+    assertEquals(2f, outline.discs[2], EPS)
+    assertTrue(outline.bodies.isEmpty())
     assertTrue("dot collapsed to zero width", outline.bounds.width > 0f)
     assertTrue("dot collapsed to zero height", outline.bounds.height > 0f)
+  }
+
+  @Test
+  fun `all pen types use discs and tangent bodies`() {
+    val points = listOf(point(0f, 0f, 1f), point(20f, 0f, 0.2f))
+    PenType.entries.forEach { type ->
+      val outline = StrokeGeometry.build(points, PenStyle(baseWidth = 8f, penType = type))
+      assertEquals(points.size * 3, outline.discs.size)
+      assertEquals(8, outline.bodies.size)
+    }
+  }
+
+  @Test
+  fun `sharp turn contains a round join disc`() {
+    val outline = StrokeGeometry.build(
+      listOf(point(0f, 0f, 1f), point(10f, 0f, 1f), point(10f, 10f, 1f)),
+      PenStyle(baseWidth = 10f, penType = PenType.Marker),
+    )
+    assertEquals(floatArrayOf(10f, 0f, 5f).toList(), outline.discs.sliceArray(3..5).toList())
+    assertEquals(16, outline.bodies.size)
+  }
+
+  @Test
+  fun `reversed segments keep body winding consistent`() {
+    fun signedArea(body: FloatArray): Float = (0 until 4).sumOf { index ->
+      val next = (index + 1) % 4
+      (body[index * 2] * body[next * 2 + 1] - body[index * 2 + 1] * body[next * 2]).toDouble()
+    }.toFloat()
+
+    val forward = StrokeGeometry.build(listOf(point(0f, 0f, 1f), point(20f, 0f, 1f)), style)
+    val backward = StrokeGeometry.build(listOf(point(20f, 0f, 1f), point(0f, 0f, 1f)), style)
+    assertTrue(signedArea(forward.bodies) >= 0f)
+    assertTrue(signedArea(backward.bodies) >= 0f)
   }
 
   @Test
@@ -119,6 +159,22 @@ class StrokeGeometryTest {
     assertEquals(60f, stroke.bounds.right, EPS)
     assertEquals(20f, stroke.bounds.top, EPS)
     assertEquals(40f, stroke.bounds.bottom, EPS)
+  }
+
+  @Test
+  fun `normal pen bounds use each width ratio`() {
+    val stroke = Stroke(
+      points = listOf(
+        point(10f, 20f, 1f),
+        point(30f, 20f, 3f),
+      ),
+      style = style,
+    )
+
+    assertEquals(8f, stroke.bounds.left, EPS)
+    assertEquals(36f, stroke.bounds.right, EPS)
+    assertEquals(14f, stroke.bounds.top, EPS)
+    assertEquals(26f, stroke.bounds.bottom, EPS)
   }
 
   @Test

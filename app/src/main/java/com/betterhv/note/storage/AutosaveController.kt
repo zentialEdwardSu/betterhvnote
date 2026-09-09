@@ -19,6 +19,17 @@ class AutosaveController(private val repository: NotebookRepository, private val
     }
   }
 
+  /** New pages must be persisted before recording their navigation position. */
+  fun recordLastOpenedPage(notebookId: java.util.UUID, pageId: java.util.UUID, onFailure: (Throwable) -> Unit) {
+    executor.execute {
+      try {
+        repository.setLastOpenedPage(notebookId, pageId)
+      } catch (error: Exception) {
+        onFailure(error)
+      }
+    }
+  }
+
   /** Enqueues behind prior saves and waits for the object + receipt transaction. */
   fun persistWithReceipt(change: DocumentChange, receipt: TransferReceipt, timeoutSeconds: Long = 10): Boolean = try {
     executor.submit { repository.persistWithReceipt(change, receipt) }

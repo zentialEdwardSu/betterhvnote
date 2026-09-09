@@ -3,10 +3,11 @@ package com.betterhv.note.ink
 /**
  * One stylus sample. Spec §12.
  *
- * Coordinates are page coordinates (§60) -- never screen pixels. Pressure is
- * normalized to [0,1] by the input adapter before it gets here; `timestamp` is
- * milliseconds and is recorded from the first version even though nothing
- * consumes it yet, because audio sync and AI features later key off it (§2.5).
+ * Coordinates are page units (§60), never screen pixels. [pressure] is the
+ * existing per-point scalar slot: for NormalPen strokes produced by the ROM it
+ * carries vendor geometric width / the exact width configured on hvpen; fixed
+ * width brushes write 1. The name is retained for the version-1 document
+ * format and for other inputs that really do provide normalized pressure.
  *
  * Deliberately a plain value type with no validation in the constructor: a page
  * holds millions of these (§72) and they are allocated on the input hot path,

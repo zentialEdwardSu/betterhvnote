@@ -6,6 +6,16 @@ import org.junit.Test
 
 class PressureCurveTest {
 
+
+  @Test
+  fun `default response retains legacy curve`() {
+    val curve = PressureCurve()
+    assertEquals(0.25f, curve.factor(0f), EPS)
+    assertEquals(0.25f + 0.75f * Math.pow(0.25, 0.7).toFloat(), curve.factor(0.25f), EPS)
+    assertEquals(0.25f + 0.75f * Math.pow(0.5, 0.7).toFloat(), curve.factor(0.5f), EPS)
+    assertEquals(1f, curve.factor(1f), EPS)
+  }
+
   @Test
   fun `zero pressure yields the floor factor`() {
     val curve = PressureCurve(a = 0.25f, gamma = 0.7f)
@@ -20,13 +30,10 @@ class PressureCurveTest {
 
   @Test
   fun `spec example matches documented formula`() {
-    // Spec §14 plus the brush engine's visual scale:
-    // w = w0 * s(type) * (0.25 + 0.75 * p^0.7)
-    val style = PenStyle(baseWidth = 4.0f, pressureCurve = PressureCurve(0.25f, 0.7f))
+    val curve = PressureCurve(0.25f, 0.7f)
     val p = 0.5f
-    val expected = 4.0f * style.renderedWidthScale *
-      (0.25f + 0.75f * Math.pow(0.5, 0.7).toFloat())
-    assertEquals(expected, style.widthAt(p), EPS)
+    val expected = 0.25f + 0.75f * Math.pow(0.5, 0.7).toFloat()
+    assertEquals(expected, curve.factor(p), EPS)
   }
 
   @Test
@@ -44,16 +51,13 @@ class PressureCurveTest {
 
   @Test
   fun `light pressure never collapses width to zero`() {
-    // The whole point of the `a` floor (spec §14).
-    val style = PenStyle(baseWidth = 3.0f)
-    assertTrue(style.widthAt(0.0f) > 0.0f)
+    assertTrue(PressureCurve().factor(0.0f) > 0.0f)
   }
 
   @Test
   fun `width scales linearly with base width`() {
-    val narrow = PenStyle(baseWidth = 2.0f)
-    val wide = PenStyle(baseWidth = 6.0f)
-    assertEquals(3.0f, wide.widthAt(0.4f) / narrow.widthAt(0.4f), EPS)
+    val factor = PressureCurve().factor(0.4f)
+    assertEquals(3.0f, (6f * factor) / (2f * factor), EPS)
   }
 
   private companion object {

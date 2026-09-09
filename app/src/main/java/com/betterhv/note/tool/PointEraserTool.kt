@@ -64,7 +64,7 @@ class PointEraserTool(
       for (i in points.indices) {
         if (i in marked) continue
         val p = points[i]
-        val halfWidth = obj.stroke.style.widthAt(p.pressure.coerceIn(0f, 1f)) * 0.5f
+        val halfWidth = obj.stroke.style.widthAt(p) * 0.5f
         val dx = p.x - local[0]
         val dy = p.y - local[1]
         if (dx * dx + dy * dy <= (localRadius + halfWidth) * (localRadius + halfWidth)) {

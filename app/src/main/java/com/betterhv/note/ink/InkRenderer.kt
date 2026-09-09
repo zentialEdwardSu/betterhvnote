@@ -27,27 +27,11 @@ class InkRenderer {
     isAntiAlias = true
     style = Paint.Style.FILL
   }
-  private val pencilPaint = Paint().apply {
-    isAntiAlias = true
-    style = Paint.Style.STROKE
-    strokeCap = Paint.Cap.ROUND
-    strokeJoin = Paint.Join.ROUND
-  }
-  private val markerPaint = Paint().apply {
-    isAntiAlias = true
-    style = Paint.Style.STROKE
-    strokeCap = Paint.Cap.ROUND
-    strokeJoin = Paint.Join.ROUND
-  }
   private val path = Path()
 
   /** Draw a finished stroke. */
   fun drawStroke(canvas: Canvas, stroke: Stroke) {
-    when (stroke.style.penType) {
-      PenType.Pencil -> drawPencil(canvas, stroke)
-      PenType.Marker -> drawMarker(canvas, stroke)
-      PenType.NormalPen -> drawOutline(canvas, stroke.outline, stroke.style.color)
-    }
+    drawOutline(canvas, stroke.outline, displayColor(stroke.style))
   }
 
   /** Draw an in-progress stroke from its live outline. */
@@ -58,78 +42,28 @@ class InkRenderer {
     canvas.drawPath(path, paint)
   }
 
-  /**
-   * Walk the left edge forward and the right edge backward to close the
-   * ribbon into a single fillable polygon.
-   */
+  /** Build the compound swept-disc coverage shared by all three brushes. */
   private fun buildPath(outline: StrokeOutline) {
     path.rewind()
-    val left = outline.left
-    val right = outline.right
-    val n = outline.pointCount
-
-    path.moveTo(left[0], left[1])
-    for (i in 1 until n) {
-      path.lineTo(left[i * 2], left[i * 2 + 1])
+    for (offset in outline.bodies.indices step 8) {
+      path.moveTo(outline.bodies[offset], outline.bodies[offset + 1])
+      path.lineTo(outline.bodies[offset + 2], outline.bodies[offset + 3])
+      path.lineTo(outline.bodies[offset + 4], outline.bodies[offset + 5])
+      path.lineTo(outline.bodies[offset + 6], outline.bodies[offset + 7])
+      path.close()
     }
-    for (i in n - 1 downTo 0) {
-      path.lineTo(right[i * 2], right[i * 2 + 1])
-    }
-    path.close()
-  }
-
-  /**
-   * Marker has a pressure-independent width, so a stroked centerline is both
-   * simpler and more robust than closing a filled ribbon. In particular it
-   * gives the same round caps as the ROM overlay and avoids the crossed-edge
-   * spikes that a very wide ribbon can develop near a short final segment.
-   */
-  private fun drawMarker(canvas: Canvas, stroke: Stroke) {
-    val points = stroke.points
-    if (points.isEmpty()) return
-
-    markerPaint.color = stroke.style.color
-    markerPaint.strokeWidth = stroke.style.widthAt(1f)
-    if (points.size == 1) {
-      canvas.drawPoint(points[0].x, points[0].y, markerPaint)
-      return
-    }
-
-    path.rewind()
-    path.moveTo(points[0].x, points[0].y)
-    for (i in 1 until points.size) {
-      path.lineTo(points[i].x, points[i].y)
-    }
-    canvas.drawPath(path, markerPaint)
-  }
-
-  /**
-   * Pencil is intentionally rendered from its centerline instead of as one opaque ribbon.
-   * Pressure controls both segment width and opacity, approximating hvNote's light graphite
-   * output while keeping the vector record and redraw deterministic.
-   */
-  private fun drawPencil(canvas: Canvas, stroke: Stroke) {
-    val points = stroke.points
-    if (points.isEmpty()) return
-    if (points.size == 1) {
-      val pressure = points[0].pressure.coerceIn(0f, 1f)
-      pencilPaint.strokeWidth = stroke.style.widthAt(pressure)
-      pencilPaint.color = colorWithOpacity(stroke.style.color, pencilOpacity(pressure))
-      canvas.drawPoint(points[0].x, points[0].y, pencilPaint)
-      return
-    }
-
-    for (i in 1 until points.size) {
-      val from = points[i - 1]
-      val to = points[i]
-      val pressure = ((from.pressure + to.pressure) * 0.5f).coerceIn(0f, 1f)
-      pencilPaint.strokeWidth = stroke.style.widthAt(pressure)
-      pencilPaint.color = colorWithOpacity(stroke.style.color, pencilOpacity(pressure))
-      canvas.drawLine(from.x, from.y, to.x, to.y, pencilPaint)
+    for (offset in outline.discs.indices step 3) {
+      val radius = outline.discs[offset + 2]
+      if (radius > 0f) {
+        path.addCircle(outline.discs[offset], outline.discs[offset + 1], radius, Path.Direction.CW)
+      }
     }
   }
 
-  private fun pencilOpacity(pressure: Float): Float = 0.35f + 0.45f * pressure
+  private fun displayColor(style: PenStyle): Int = when (style.penType) {
+    PenType.Pencil -> colorWithOpacity(style.color, PENCIL_OPACITY)
+    PenType.NormalPen, PenType.Marker -> style.color
+  }
 
   private fun colorWithOpacity(color: Int, opacity: Float): Int {
     val sourceAlpha = (color ushr 24) and 0xFF
@@ -139,13 +73,11 @@ class InkRenderer {
 
   companion object {
     /**
-     * Dirty rect for a stroke's outline. Spec §28: pad by half the max pen
-     * width plus a margin for anti-aliasing and the panel's own update
-     * granularity, otherwise the edge of a stroke can be left un-repainted.
+     * [bounds] already encloses the full swept-disc shape, so only antialiasing
+     * padding is required here.
      */
-    fun dirtyRect(bounds: Bounds, style: PenStyle): Rect {
-      val margin = style.maxWidth * 0.5f + ANTIALIAS_MARGIN
-      val inflated = bounds.inflate(margin)
+    fun dirtyRect(bounds: Bounds): Rect {
+      val inflated = bounds.inflate(ANTIALIAS_MARGIN)
       return Rect(
         kotlin.math.floor(inflated.left).toInt(),
         kotlin.math.floor(inflated.top).toInt(),
@@ -155,5 +87,6 @@ class InkRenderer {
     }
 
     private const val ANTIALIAS_MARGIN = 2.0f
+    private const val PENCIL_OPACITY = 0.8f
   }
 }

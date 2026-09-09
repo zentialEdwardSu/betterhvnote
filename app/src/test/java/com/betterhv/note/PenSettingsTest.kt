@@ -99,9 +99,9 @@ class PenSettingsTest {
   }
 
   @Test
-  fun romOverlayWidthCompensatesForItsThinnerRendering() {
+  fun romOverlayReceivesSelectedScreenWidthDirectly() {
     assertEquals(
-      7,
+      4,
       PenProfiles.serviceWidth(PenStyle(baseWidth = 4f, penType = PenType.NormalPen)),
     )
     assertEquals(

@@ -1,103 +1,60 @@
 package com.betterhv.note.jni
 
 import com.betterhv.note.ink.InkPoint
-import com.betterhv.note.ink.NoopSmoother
-import com.betterhv.note.ink.StrokeSmoother
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
-import org.junit.Assert.assertSame
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * These run on the plain JVM, where libink_stroke_modeler_jni.so cannot load,
- * so [InkStrokeModelerJNI.available] is false and [ModelerStrokeSmoother] must
- * degrade to its fallback on every call. That is exactly the contract this
- * covers: the native upgrade is optional and its absence must never break
- * writing. The real native path can only be exercised on-device (Milestone 6).
- */
+/** JVM tests exercise the transactional raw path because JNI is Android-only. */
 class ModelerStrokeSmootherTest {
-
-  @Test
-  fun `native library is unavailable on the JVM`() {
-    // Guards the premise of every other test here: if this ever flips, the
-    // fallback assertions below would be silently testing the native path.
+  @Test fun nativeLibraryIsUnavailableOnTheJvm() {
     assertFalse(InkStrokeModelerJNI.available)
   }
 
-  @Test
-  fun `smooth delegates to the fallback when native is unavailable`() {
-    // A spy fallback that records what it saw, so we can prove delegation.
-    val recorder = RecordingSmoother()
-    val smoother = ModelerStrokeSmoother(fallback = recorder)
+  @Test fun batchesAreHeldUntilTheGestureDecisionIsFinal() {
+    val smoother = ModelerStrokeSmoother()
+    assertTrue(smoother.smoothBatch(listOf(point(0f, 0.4f), point(5f, 0.5f))).isEmpty())
+    assertFalse(smoother.usedRawFallback)
 
-    val p = InkPoint(10f, 20f, 0.5f, 1_000L)
-    val out = smoother.smooth(p)
-
-    assertEquals(1, recorder.batchesSeen)
-    assertSame(p, out) // Noop-style recorder returns the same instance
+    val output = smoother.finishStroke()
+    assertEquals(listOf(point(0f, 0.4f), point(5f, 0.5f)), output)
+    assertTrue(smoother.usedRawFallback)
   }
 
-  @Test
-  fun `smoothBatch delegates the whole batch to the fallback`() {
-    val recorder = RecordingSmoother()
-    val smoother = ModelerStrokeSmoother(fallback = recorder)
+  @Test fun invalidScalarInALaterBatchFallsBackTheWholeStrokeWithoutClipping() {
+    val smoother = ModelerStrokeSmoother()
+    val first = listOf(point(0f, 0.4f), point(5f, 0.5f))
+    val second = listOf(point(10f, 1.25f))
+    smoother.smoothBatch(first)
+    smoother.smoothBatch(second)
 
-    val batch = listOf(
-      InkPoint(0f, 0f, 0.4f, 1_000L),
-      InkPoint(5f, 5f, 0.5f, 1_008L),
-      InkPoint(10f, 10f, 0.6f, 1_016L),
-    )
-    val out = smoother.smoothBatch(batch)
-
-    assertEquals(3, out.size)
-    assertEquals(1, recorder.batchesSeen)
-    assertEquals(3, recorder.pointsSeen)
+    val output = smoother.finishStroke()
+    assertEquals(first + second, output)
+    assertEquals(1.25f, output.last().pressure, 0f)
+    assertTrue(smoother.usedRawFallback)
   }
 
-  @Test
-  fun `empty batch produces no output and no fallback call`() {
-    val recorder = RecordingSmoother()
-    val smoother = ModelerStrokeSmoother(fallback = recorder)
+  @Test fun invalidScalarInTheFirstBatchFallsBackWithoutClipping() {
+    val smoother = ModelerStrokeSmoother()
+    val input = listOf(point(0f, -0.2f), point(5f, 0.5f))
+    smoother.smoothBatch(input)
 
-    val out = smoother.smoothBatch(emptyList())
-
-    assertEquals(0, out.size)
-    assertEquals(0, recorder.batchesSeen)
+    val output = smoother.finishStroke()
+    assertEquals(input, output)
+    assertEquals(-0.2f, output.first().pressure, 0f)
+    assertTrue(smoother.usedRawFallback)
   }
 
-  @Test
-  fun `reset forwards to the fallback`() {
-    val recorder = RecordingSmoother()
-    val smoother = ModelerStrokeSmoother(fallback = recorder)
-
-    smoother.smooth(InkPoint(1f, 1f, 0.5f, 1_000L))
+  @Test fun resetClearsBufferedGestureAndFallbackState() {
+    val smoother = ModelerStrokeSmoother()
+    smoother.smoothBatch(listOf(point(1f, 0.5f)))
+    smoother.finishStroke()
     smoother.reset()
 
-    assertEquals(1, recorder.resets)
+    assertFalse(smoother.usedRawFallback)
+    assertTrue(smoother.finishStroke().isEmpty())
   }
 
-  /** A [NoopSmoother]-equivalent that counts what passes through it. */
-  private class RecordingSmoother : StrokeSmoother {
-    var batchesSeen = 0
-    var pointsSeen = 0
-    var resets = 0
-
-    private val delegate = NoopSmoother()
-
-    override fun smooth(point: InkPoint): InkPoint {
-      batchesSeen++
-      pointsSeen++
-      return delegate.smooth(point)
-    }
-
-    override fun smoothBatch(batch: List<InkPoint>): List<InkPoint> {
-      batchesSeen++
-      pointsSeen += batch.size
-      return batch.map { delegate.smooth(it) }
-    }
-
-    override fun reset() {
-      resets++
-    }
-  }
+  private fun point(x: Float, scalar: Float) = InkPoint(x, x * 0.5f, scalar, 1_000L)
 }

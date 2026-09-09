@@ -191,10 +191,7 @@ class ThumbnailManager(cacheDir: File, private val documentsDir: File = cacheDir
             val previewStyle = sourceStyle.copy(
               baseWidth = maxOf(
                 sourceStyle.baseWidth,
-                MIN_BASE_WIDTH_PX / (scale * sourceStyle.renderedWidthScale),
-              ),
-              pressureCurve = sourceStyle.pressureCurve.copy(
-                a = maxOf(sourceStyle.pressureCurve.a, MIN_PRESSURE_FLOOR),
+                MIN_BASE_WIDTH_PX / scale,
               ),
             )
             renderer.drawStroke(inkCanvas, obj.stroke.copy(style = previewStyle))
@@ -286,7 +283,6 @@ class ThumbnailManager(cacheDir: File, private val documentsDir: File = cacheDir
     private const val RENDER_VERSION = 10
     private const val IMAGE_DECODE_DIMENSION = 1024
     private const val MIN_BASE_WIDTH_PX = 1.5f
-    private const val MIN_PRESSURE_FLOOR = 0.65f
     private val THICKEN_OFFSETS = arrayOf(
       -0.25f to -0.25f, 0f to -0.25f, 0.25f to -0.25f,
       -0.25f to 0f, 0f to 0f, 0.25f to 0f,

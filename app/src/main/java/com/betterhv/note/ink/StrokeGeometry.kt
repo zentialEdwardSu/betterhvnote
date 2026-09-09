@@ -1,5 +1,6 @@
 package com.betterhv.note.ink
 
+import kotlin.math.abs
 import kotlin.math.sqrt
 
 /** Axis-aligned bounds in page coordinates. Framework-free stand-in for a Rect. */
@@ -46,28 +47,40 @@ data class Bounds(val left: Float, val top: Float, val right: Float, val bottom:
  * page (§4.2) the per-object allocation overhead of a List<PointF> is exactly
  * what §72 warns against.
  *
- * The two sides are kept separate so the renderer can walk `left` forward and
- * `right` backward to form one closed polygon.
+ * [left] and [right] remain available for centerline-offset diagnostics and
+ * incremental seam checks. Renderers consume [discs] and [bodies], which are
+ * the authoritative filled shape.
  */
-class StrokeOutline(val left: FloatArray, val right: FloatArray, val bounds: Bounds) {
+class StrokeOutline(
+  val left: FloatArray,
+  val right: FloatArray,
+  val bounds: Bounds,
+  /** Flat (centerX, centerY, radius) triples shared by every pen renderer. */
+  val discs: FloatArray = FloatArray(0),
+  /** Flat four-corner (x,y) quads joining adjacent discs by their external tangents. */
+  val bodies: FloatArray = FloatArray(0),
+) {
   val pointCount: Int get() = left.size / 2
-  val isEmpty: Boolean get() = pointCount == 0
+  val isEmpty: Boolean get() = discs.isEmpty()
 }
 
 /**
  * Builds the stroke outline from a centerline.
  *
- * For each point: tangent Ti = Pi+1 - Pi-1 (central difference, one-sided at the
- * ends), normal Ni = (-Ty, Tx)/|T|, half-width wi/2 from the pressure curve, so
- * Li = Pi + (wi/2)Ni and Ri = Pi - (wi/2)Ni.
+ * Every sample becomes a round disc. Adjacent discs are connected by the quad
+ * between their external tangents. Filling the compound shape produces one
+ * continuous swept-disc stroke with round caps and joins for both fixed and
+ * variable widths; renderers never select a different geometry by pen type.
+ *
+ * [left] and [right] retain one offset pair per centerline point for incremental
+ * seam diagnostics. Actual coverage is defined by [discs] and [bodies].
  *
  * Two cases the naive formula does not cover:
  *  - Degenerate tangent (a duplicate/stationary sample) would divide by zero.
  *    We carry the previous valid normal forward instead, which keeps the ribbon
  *    continuous rather than collapsing it to a spike.
- *  - A single point (a dot -- tap without movement) has no tangent at all. We
- *    emit a small square quad so a deliberate dot still renders; a zero-area
- *    outline would silently swallow it.
+ *  - A single point (a dot -- tap without movement) has no tangent at all. Its
+ *    one sample disc is already the complete round shape.
  */
 object StrokeGeometry {
 
@@ -101,6 +114,8 @@ object StrokeGeometry {
     val emitted = n - start
     val left = FloatArray(emitted * 2)
     val right = FloatArray(emitted * 2)
+    val discs = FloatArray(emitted * 3)
+    val bodies = ArrayList<Float>((emitted - 1).coerceAtLeast(0) * 8)
 
     var minX = Float.MAX_VALUE
     var minY = Float.MAX_VALUE
@@ -159,7 +174,7 @@ object StrokeGeometry {
         hasNormal = true
       }
 
-      val halfWidth = style.widthAt(p.pressure.coerceIn(0.0f, 1.0f)) * 0.5f
+      val halfWidth = style.widthAt(p) * 0.5f
       val offsetX = normalX * halfWidth
       val offsetY = normalY * halfWidth
 
@@ -174,17 +189,78 @@ object StrokeGeometry {
       right[idx] = rx
       right[idx + 1] = ry
 
-      if (lx < minX) minX = lx
-      if (rx < minX) minX = rx
-      if (ly < minY) minY = ly
-      if (ry < minY) minY = ry
-      if (lx > maxX) maxX = lx
-      if (rx > maxX) maxX = rx
-      if (ly > maxY) maxY = ly
-      if (ry > maxY) maxY = ry
+      val discIndex = (i - start) * 3
+      discs[discIndex] = p.x
+      discs[discIndex + 1] = p.y
+      discs[discIndex + 2] = halfWidth
+
+      if (i > start) {
+        appendExternalTangentBody(all[i - 1], style.widthAt(all[i - 1]) * 0.5f, p, halfWidth, bodies)
+      }
+
+      if (p.x - halfWidth < minX) minX = p.x - halfWidth
+      if (p.y - halfWidth < minY) minY = p.y - halfWidth
+      if (p.x + halfWidth > maxX) maxX = p.x + halfWidth
+      if (p.y + halfWidth > maxY) maxY = p.y + halfWidth
     }
 
-    return StrokeOutline(left, right, Bounds(minX, minY, maxX, maxY))
+    return StrokeOutline(left, right, Bounds(minX, minY, maxX, maxY), discs, bodies.toFloatArray())
+  }
+
+  /**
+   * Add the convex body between two unequal-radius discs. If one disc fully
+   * contains the other, their union needs no connecting body. Duplicate points
+   * likewise collapse safely to their discs.
+   */
+  private fun appendExternalTangentBody(
+    first: InkPoint,
+    firstRadius: Float,
+    second: InkPoint,
+    secondRadius: Float,
+    target: MutableList<Float>,
+  ) {
+    val dx = second.x - first.x
+    val dy = second.y - first.y
+    val distanceSquared = dx * dx + dy * dy
+    if (distanceSquared <= 1e-12f) return
+    val distance = sqrt(distanceSquared)
+    val radiusDelta = firstRadius - secondRadius
+    if (distance <= abs(radiusDelta)) return
+
+    val ux = dx / distance
+    val uy = dy / distance
+    val along = radiusDelta / distance
+    val across = sqrt((1f - along * along).coerceAtLeast(0f))
+    val perpendicularX = -uy
+    val perpendicularY = ux
+
+    val firstNormalX = ux * along + perpendicularX * across
+    val firstNormalY = uy * along + perpendicularY * across
+    val secondNormalX = ux * along - perpendicularX * across
+    val secondNormalY = uy * along - perpendicularY * across
+
+    val quad = floatArrayOf(
+      first.x + firstNormalX * firstRadius,
+      first.y + firstNormalY * firstRadius,
+      second.x + firstNormalX * secondRadius,
+      second.y + firstNormalY * secondRadius,
+      second.x + secondNormalX * secondRadius,
+      second.y + secondNormalY * secondRadius,
+      first.x + secondNormalX * firstRadius,
+      first.y + secondNormalY * firstRadius,
+    )
+    // Keep every body winding the same way as Path.Direction.CW circles. A
+    // backtracking centerline otherwise reverses quad winding and non-zero
+    // filling can cancel overlap at the round join.
+    val signedArea = (0 until 4).sumOf { index ->
+      val next = (index + 1) % 4
+      (quad[index * 2] * quad[next * 2 + 1] - quad[index * 2 + 1] * quad[next * 2]).toDouble()
+    }
+    val order = if (signedArea >= 0.0) intArrayOf(0, 1, 2, 3) else intArrayOf(0, 3, 2, 1)
+    order.forEach { index ->
+      target += quad[index * 2]
+      target += quad[index * 2 + 1]
+    }
   }
 
   /**
@@ -218,7 +294,7 @@ object StrokeGeometry {
   }
 
   private fun buildDot(point: InkPoint, style: PenStyle): StrokeOutline {
-    val halfWidth = style.widthAt(point.pressure.coerceIn(0.0f, 1.0f)) * 0.5f
+    val halfWidth = style.widthAt(point) * 0.5f
     val left = floatArrayOf(
       point.x - halfWidth,
       point.y - halfWidth,
@@ -237,6 +313,11 @@ object StrokeGeometry {
       point.x + halfWidth,
       point.y + halfWidth,
     )
-    return StrokeOutline(left, right, bounds)
+    return StrokeOutline(
+      left,
+      right,
+      bounds,
+      discs = floatArrayOf(point.x, point.y, halfWidth),
+    )
   }
 }

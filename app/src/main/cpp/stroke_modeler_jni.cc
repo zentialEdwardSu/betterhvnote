@@ -12,7 +12,7 @@
 //    guards against a pathological concurrent first-init, it is not on a hot
 //    multi-threaded path.
 //  * Batch-oriented: one nativeUpdate call marshals a whole batch of samples as
-//    a flat [x,y,pressure, ...] FloatArray, rather than one JNI crossing per
+//    a flat [x,y,scalar, ...] FloatArray, rather than one JNI crossing per
 //    point.
 //  * Synthetic monotonic time: the ROM stamps every sample in a batch with the
 //    same receipt time, which StrokeModeler cannot use (it requires strictly
@@ -40,13 +40,12 @@ using ::ink::stroke_model::StrokeModelParams;
 using ::ink::stroke_model::Time;
 
 // The ROM does not report per-sample timing, so we synthesize a monotonic
-// clock at this nominal rate. Kept in sync with OneEuroSmoother's own nominal
-// 120 Hz assumption so the two smoothers behave comparably; tune on-device.
+// clock at this nominal rate. Tune the resulting centerline on-device.
 constexpr double kNominalSampleHz = 120.0;
 constexpr double kNominalDt = 1.0 / kNominalSampleHz;
 
 // Return codes shared with the Kotlin side. Non-negative = number of Results
-// produced; negative = error (Kotlin falls back to OneEuroSmoother).
+// produced; negative = error (Kotlin publishes the whole filtered raw stroke).
 constexpr jint kErrNotInit = -1;        // Reset() never succeeded
 constexpr jint kErrModelerError = -2;   // Update/Predict returned !ok, or bad args
 constexpr jint kErrBufferTooSmall = -3; // caller's output array can't hold Results
@@ -60,7 +59,7 @@ bool g_save_active = false;
 // Defaults tuned for pixel/second units. Wobble smoothing is left OFF: its
 // speed_floor/speed_ceiling are in px/s and need real-hardware tuning (deferred
 // to the on-device milestone); disabling keeps params validation trivially
-// satisfied while the spring-mass position model and pressure interpolation --
+// satisfied while the spring-mass position model and scalar interpolation --
 // the parts that address the live/final consistency goal -- do the work.
 StrokeModelParams DefaultParams() {
   StrokeModelParams p;
@@ -74,7 +73,9 @@ StrokeModelParams DefaultParams() {
   return p;
 }
 
-// Writes results as [x, y, pressure] triples into outXYP. Returns the count, or
+// Writes results as [x, y, scalar] triples into outXYP. The third channel is
+// NormalPen's normalized ROM width, not a second physical-pressure curve.
+// Returns the count, or
 // kErrBufferTooSmall if the array can't hold them.
 jint MarshalResults(JNIEnv* env, const std::vector<Result>& results,
                     jfloatArray outXYP) {
@@ -109,7 +110,7 @@ Java_com_betterhv_note_jni_InkStrokeModelerJNI_nativeReset(JNIEnv*, jobject) {
   return g_modeler->Reset(DefaultParams()).ok() ? 0 : kErrModelerError;
 }
 
-// Feed one batch. inputXYP is [x,y,pressure, ...] (length >= 3*N); eventTypes
+// Feed one batch. inputXYP is [x,y,scalar, ...] (length >= 3*N); eventTypes
 // is N bytes (0=DOWN, 2=UP, anything else=MOVE). The first sample of a gesture
 // must be DOWN. Modeled Results are written to outXYP as [x,y,pressure] triples;
 // returns the Result count (>=0) or a negative error code.

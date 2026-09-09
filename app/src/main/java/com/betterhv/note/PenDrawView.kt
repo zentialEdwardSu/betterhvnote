@@ -314,12 +314,16 @@ class PenDrawView @JvmOverloads constructor(context: Context, attrs: AttributeSe
 
   @Volatile private var pagePreRenderClosed = false
   private var penStyle = PenStyle(baseWidth = DEFAULT_PEN_WIDTH)
+  private var configuredServiceWidthPx = PenProfiles.serviceWidth(penStyle)
+  private var gestureViewport: ViewportTransform? = null
+  private var gestureServiceWidthPx: Int? = null
+  private var gesturePenStyle: PenStyle? = null
 
   private val eraserWidth = DEFAULT_ERASER_WIDTH
 
   // -- Tools (spec §17, §33-40) ------------------------------------------
 
-  private var penTool = PenTool(page, commandStack, this) { penStyle }
+  private var penTool = PenTool(page, commandStack, this) { gesturePenStyle ?: penStyle }
   private var strokeEraserTool = StrokeEraserTool(page, commandStack, this) { eraserWidth / 2.0f }
   private var pointEraserTool = PointEraserTool(page, commandStack, this) { eraserWidth / 2.0f }
   private var selectionTool = SelectionTool(page, commandStack, this) { HANDLE_TOUCH_RADIUS }
@@ -754,8 +758,8 @@ class PenDrawView @JvmOverloads constructor(context: Context, attrs: AttributeSe
 
   private fun screenToPage(x: Float, y: Float): FloatArray = currentViewport().screenToPage(x, y)
 
-  private fun screenPointToPage(point: InkPoint): InkPoint {
-    val mapped = screenToPage(point.x, point.y)
+  private fun screenPointToPage(point: InkPoint, viewport: ViewportTransform = currentViewport()): InkPoint {
+    val mapped = viewport.screenToPage(point.x, point.y)
     return point.copy(x = mapped[0], y = mapped[1])
   }
 
@@ -918,9 +922,19 @@ class PenDrawView @JvmOverloads constructor(context: Context, attrs: AttributeSe
     }
   }
 
-  fun createBlankNotebook(title: String, templateId: String = DEFAULT_TEMPLATE_ID, onComplete: (Result<UUID>) -> Unit) {
+  fun createBlankNotebook(
+    title: String, templateId: String = DEFAULT_TEMPLATE_ID, onComplete: (Result<UUID>) -> Unit,
+    pageSize: Pair<Float, Float> = newNotebookPageSize(),
+  ) {
+    val size = pageSize
     runNotebookOperation(onComplete) {
-      val id = repository.createBlankNotebook(title, width.toFloat(), height.toFloat(), templateId)
+      check(size.first > 0f && size.second > 0f) { "Canvas size is not ready" }
+      val definition = templateStore.snapshot().templates.firstOrNull { it.id == templateId }
+      check(definition != null && definition.availability != com.betterhv.note.template.TemplateAvailability.INVALID &&
+        definition.isCompatible(size.first, size.second)) {
+        "Template does not match new page ${size.first} x ${size.second}"
+      }
+      val id = repository.createBlankNotebook(title, size.first, size.second, templateId)
       repository.loadNotebook(id) ?: error("Could not load new notebook")
     }
   }
@@ -1024,6 +1038,8 @@ class PenDrawView @JvmOverloads constructor(context: Context, attrs: AttributeSe
   fun currentPageBookmarked(): Boolean = page.bookmarked
   fun currentPageKind(): PageKind = page.kind
   fun currentPageSize(): Pair<Float, Float> = page.width to page.height
+
+  fun newNotebookPageSize(): Pair<Float, Float> = width.toFloat() to height.toFloat()
   fun currentPageTemplateId(): String? = page.templateId
   fun templateCatalog(): TemplateCatalogSnapshot = templateStore.snapshot()
 
@@ -1169,6 +1185,7 @@ class PenDrawView @JvmOverloads constructor(context: Context, attrs: AttributeSe
         )
         renderedPageId = null
         redrawAll()
+        reconfigurePenForViewport()
       }
       selectedRichObjectId = location.focusedObjectId?.takeIf { page.getObject(it) != null }
       location.focusedAnchorId?.let(::highlightAnchor)
@@ -1373,8 +1390,9 @@ class PenDrawView @JvmOverloads constructor(context: Context, attrs: AttributeSe
     }
     page = target
     if (persistenceAvailable) {
-      runCatching { repository.setLastOpenedPage(notebook.id, page.id) }
-        .onFailure { EventLog.log(TAG, "last-page save failed: ${it.message}") }
+      autosave.recordLastOpenedPage(notebook.id, page.id) {
+        EventLog.log(TAG, "last-page save failed: ${it.message}")
+      }
     }
     selectedRichObjectId = null
     refreshVisiblePdfAnchors()
@@ -1385,6 +1403,7 @@ class PenDrawView @JvmOverloads constructor(context: Context, attrs: AttributeSe
     }
     rebuildTools()
     showPageBitmap(target)
+    reconfigurePenForViewport()
     warmAdjacentPages(index)
     clearOverlayInk()
     requestThumbnail(page)
@@ -1393,9 +1412,7 @@ class PenDrawView @JvmOverloads constructor(context: Context, attrs: AttributeSe
   }
 
   private fun rebuildTools() {
-    penTool = PenTool(page, commandStack, this) {
-      penStyle.copy(baseWidth = currentViewport().screenDistanceToPage(penStyle.baseWidth))
-    }
+    penTool = PenTool(page, commandStack, this) { gesturePenStyle ?: penStyle }
     strokeEraserTool = StrokeEraserTool(page, commandStack, this) {
       currentViewport().screenDistanceToPage(eraserWidth / 2.0f)
     }
@@ -1696,6 +1713,10 @@ class PenDrawView @JvmOverloads constructor(context: Context, attrs: AttributeSe
    * lower down, so this only observes; it does not consume the event.
    */
   override fun onTouchEvent(event: MotionEvent): Boolean {
+    if (BuildConfig.DEBUG) {
+      EventLog.log("PressureInput", "android action=${event.actionMasked} t=${event.eventTime} " +
+        "p=${event.pressure} x=${event.x} y=${event.y} history=${event.historySize}")
+    }
     // hvNote performs side-button classification in HandView.onTouchEvent.
     // Observe here too because the Hanvon input layer can route vendor tool
     // type 6 directly to the hvpen-registered view without a useful key event.
@@ -1735,9 +1756,21 @@ class PenDrawView @JvmOverloads constructor(context: Context, attrs: AttributeSe
       clearOverlayInk()
     }
     gestureOpen = true
-    val point = screenToPage(x, y)
+    if (toolKind == ToolKind.PEN) capturePenGestureConfiguration()
+    val viewport = gestureViewport ?: currentViewport()
+    val point = viewport.screenToPage(x, y)
     currentTool.onDown(point[0], point[1])
     if (toolKind != ToolKind.PEN) postInvalidate()
+  }
+
+  private fun capturePenGestureConfiguration() {
+    val viewport = currentViewport()
+    val serviceWidth = configuredServiceWidthPx.coerceAtLeast(1)
+    gestureViewport = viewport
+    gestureServiceWidthPx = serviceWidth
+    gesturePenStyle = penStyle.copy(
+      baseWidth = com.betterhv.note.ink.RomStrokeMapping.effectivePageWidth(serviceWidth, viewport.scale),
+    )
   }
 
   /** Sets the tip-driven tool the toolbar has selected. Any open gesture is finished first. */
@@ -1876,12 +1909,17 @@ class PenDrawView @JvmOverloads constructor(context: Context, attrs: AttributeSe
 
     val n = raw[0].toInt()
     if (n <= 0) return
+    if (n > (raw.size - 1) / 3) {
+      EventLog.log(TAG, "Malformed pen batch count=$n size=${raw.size}")
+      return
+    }
 
     // A batch can arrive without a preceding ACTION_DOWN if the ROM starts
     // reporting before touch dispatch reaches us; open a gesture rather than
     // discarding real input.
     if (!gestureOpen) {
       gestureOpen = true
+      capturePenGestureConfiguration()
       EventLog.log(TAG, "batch without DOWN, opened gesture")
     }
 
@@ -1890,22 +1928,29 @@ class PenDrawView @JvmOverloads constructor(context: Context, attrs: AttributeSe
     val loc = IntArray(2)
     getLocationOnScreen(loc)
 
+    val viewport = gestureViewport ?: currentViewport()
+    val serviceWidthPx = (gestureServiceWidthPx ?: configuredServiceWidthPx).coerceAtLeast(1)
+    val strokeStyle = gesturePenStyle ?: penStyle
     val batch = ArrayList<InkPoint>(n)
-    // Tracked so the raw sensor range shows up in the log -- lets us sanity
-    // check what pressureCalibrator is converging on against real hardware.
-    var rawPressureMin = Float.MAX_VALUE
-    var rawPressureMax = -Float.MAX_VALUE
+    var vendorWidthMinPx = Float.MAX_VALUE
+    var vendorWidthMaxPx = -Float.MAX_VALUE
     for (i in 0 until n) {
-      // Stride of 3 starting at index 1: x, y, pressure. Note the pressure
-      // for point i sits at i*3+3, i.e. the triples are offset by one from
-      // the naive [count, x,y,p, ...] reading -- see HandView's use of
+      // Stride of 3 starting at index 1: x, y, vendor-computed width. The
+      // width for point i sits at i*3+3; see HandView's use of
       // (i*3+1, i*3+2, i*3+3).
       val base = i * 3
       val sysX = raw[base + 1]
       val sysY = raw[base + 2]
-      val rawPressure = raw[base + 3]
-      if (rawPressure < rawPressureMin) rawPressureMin = rawPressure
-      if (rawPressure > rawPressureMax) rawPressureMax = rawPressure
+      val vendorWidthPx = raw[base + 3]
+      if (vendorWidthPx.isFinite()) {
+        vendorWidthMinPx = minOf(vendorWidthMinPx, vendorWidthPx)
+        vendorWidthMaxPx = maxOf(vendorWidthMaxPx, vendorWidthPx)
+      }
+      val pointScalar = com.betterhv.note.ink.RomStrokeMapping.pointScalar(
+        strokeStyle.penType,
+        vendorWidthPx,
+        serviceWidthPx,
+      )
 
       // Digitizer system coords -> view coords. Without this the stroke is
       // rendered with its axes swapped (see PenGeometry.pointSysToClient).
@@ -1925,13 +1970,23 @@ class PenDrawView @JvmOverloads constructor(context: Context, attrs: AttributeSe
           InkPoint(
             x = p[0],
             y = p[1],
-            pressure = normalizePressure(rawPressure),
+            pressure = pointScalar,
             timestamp = now,
-          )
+          ),
+          viewport,
         ),
       )
     }
     currentTool.onBatch(batch)
+    if (BuildConfig.DEBUG && toolKind == ToolKind.PEN) {
+      EventLog.log(
+        "PressureCalibration",
+        "model=${android.os.Build.MODEL} serviceWidthPx=$serviceWidthPx " +
+          com.betterhv.note.ink.PressureDiagnostics.summarize(
+            raw, n, strokeStyle, viewport.scale, serviceWidthPx,
+          ),
+      )
+    }
 
     // The lasso tool draws a transient app-side overlay (marquee, selection
     // box) in onDraw; invalidate so it follows the tip. It also mutates the
@@ -1968,7 +2023,7 @@ class PenDrawView @JvmOverloads constructor(context: Context, attrs: AttributeSe
     EventLog.log(
       TAG,
       "batch n=$n tool=$toolKind up=$up " +
-        "p=[${"%.0f".format(rawPressureMin)}..${"%.0f".format(rawPressureMax)}] " +
+        "vendorWidthPx=[${"%.2f".format(vendorWidthMinPx)}..${"%.2f".format(vendorWidthMaxPx)}] " +
         "xy=(${"%.0f".format(first?.x ?: 0f)},${"%.0f".format(first?.y ?: 0f)})",
     )
 
@@ -2032,6 +2087,9 @@ class PenDrawView @JvmOverloads constructor(context: Context, attrs: AttributeSe
     if (!gestureOpen) return
     gestureOpen = false
     currentTool.onUp()
+    gestureViewport = null
+    gestureServiceWidthPx = null
+    gesturePenStyle = null
     onDocChanged?.invoke()
 
     // Non-pen tools: pen-up is the flush point ("抬笔即 flush"). Do one clean
@@ -2047,13 +2105,11 @@ class PenDrawView @JvmOverloads constructor(context: Context, attrs: AttributeSe
       setRomPenInkEnabled(true)
     }
 
-    // Do NOT repaint the region at pen-up for the pen tool: the live pass
-    // already painted this stroke, and StrokeGeometry.buildRange made that
-    // live geometry match the final simplified outline (spec §2.1 seam fix),
-    // so the pixels on screen are already correct -- see PenTool. Erasers
-    // and the selection tool request their own repaints via ToolHost as
-    // they mutate the model, which IS necessary since nothing painted them
-    // live.
+    // Do NOT repaint the region at pen-up for the pen tool: the ROM overlay
+    // remains the intentional low-latency live representation until the next
+    // structural materialization. The committed modeled/shared geometry may
+    // replace it then. Erasers and selection request their own repaints via
+    // ToolHost because those model mutations have no ROM-painted equivalent.
     EventLog.log(TAG, "gesture finished tool=$toolKind total=${page.scene.size}")
   }
 
@@ -2199,7 +2255,7 @@ class PenDrawView @JvmOverloads constructor(context: Context, attrs: AttributeSe
       redrawAll()
     } else {
       val screenBounds = currentViewport().pageToScreen(bounds)
-      repaintRegion(InkRenderer.dirtyRect(screenBounds, penStyle))
+      repaintRegion(InkRenderer.dirtyRect(screenBounds))
     }
     onDocChanged?.invoke()
   }
@@ -2307,20 +2363,6 @@ class PenDrawView @JvmOverloads constructor(context: Context, attrs: AttributeSe
     postInvalidate()
     EventLog.log(TAG, "erase end")
   }
-
-  /**
-   * On this device the ROM reports pressure as a small discrete level, not
-   * a fine-grained ADC reading: logged raw values cluster tightly in
-   * [PRESSURE_RAW_MIN, PRESSURE_RAW_MAX] across many different strokes (see
-   * the batch log's `p=[..]` range). The original constant here (4095) came
-   * from an unrelated guess and, being ~1000x too large, collapsed nearly
-   * every sample to the bottom of [0,1] -- producing uniformly thin
-   * strokes. This app targets one specific device rather than a range of
-   * hardware, so a fixed linear scale calibrated to that logged range is
-   * simpler and less error-prone than runtime auto-calibration.
-   */
-  private fun normalizePressure(rawPressure: Float): Float =
-    ((rawPressure - PRESSURE_RAW_MIN) / (PRESSURE_RAW_MAX - PRESSURE_RAW_MIN)).coerceIn(0.0f, 1.0f)
 
   override fun onDraw(c: Canvas) {
     super.onDraw(c)
@@ -2584,6 +2626,7 @@ class PenDrawView @JvmOverloads constructor(context: Context, attrs: AttributeSe
       pdfViewportStates[page.id] = preview.copy(revision = navigationStartState.revision + 1)
       renderedPageId = null
       redrawAll()
+      reconfigurePenForViewport()
     }
     navigationGesture = PdfNavigationGesture.NONE
     navigationPreviewState = null
@@ -2601,6 +2644,7 @@ class PenDrawView @JvmOverloads constructor(context: Context, attrs: AttributeSe
     pdfViewportStates[page.id] = previous.copy(zoom = nextZoom, revision = previous.revision + 1)
     renderedPageId = null
     redrawAll()
+    reconfigurePenForViewport()
     return true
   }
 
@@ -2610,6 +2654,7 @@ class PenDrawView @JvmOverloads constructor(context: Context, attrs: AttributeSe
     pdfViewportStates[page.id] = PdfViewportState(revision = previous.revision + 1)
     renderedPageId = null
     redrawAll()
+    reconfigurePenForViewport()
     return true
   }
 
@@ -3051,22 +3096,40 @@ class PenDrawView @JvmOverloads constructor(context: Context, attrs: AttributeSe
     val pd = penDraw ?: return
     val servicePen = PenProfiles.servicePen(penStyle.penType)
     val serviceColor = PenProfiles.serviceColor(penStyle, HanvonHardware.isColorDevice)
-    val serviceWidth = PenProfiles.serviceWidth(penStyle)
+    val viewport = currentViewport()
+    val serviceWidth = PenProfiles.serviceWidth(penStyle.copy(baseWidth = penStyle.baseWidth * viewport.scale))
+    configuredServiceWidthPx = serviceWidth
+    val pageWidth = com.betterhv.note.ink.RomStrokeMapping.effectivePageWidth(serviceWidth, viewport.scale)
     pd.setPen(penDrawPt, servicePen)
     pd.setPenColor(penDrawPt, serviceColor)
     pd.setPenWidth(penDrawPt, serviceWidth)
     EventLog.log(
       TAG,
       "pen style type=${penStyle.penType} servicePen=$servicePen " +
-        "color=0x${serviceColor.toUInt().toString(16)} width=$serviceWidth",
+        "color=0x${serviceColor.toUInt().toString(16)} widthPx=$serviceWidth " +
+        "pageWidth=$pageWidth viewportScale=${viewport.scale}",
     )
+  }
+
+  /** Re-send the integer ROM width whenever page-to-screen scale changes. */
+  private fun reconfigurePenForViewport() {
+    if (!initPenService || gestureOpen) return
+    try {
+      applyPenStyleToService()
+    } catch (t: Throwable) {
+      EventLog.log(TAG, "ERROR reconfigure pen for viewport: ${t.message}")
+    }
   }
 
   fun strokeCount(): Int = page.scene.size
 
   fun clear() {
     handler.removeCallbacks(finishRunnable)
+    if (gestureOpen) currentTool.onCancel()
     gestureOpen = false
+    gestureViewport = null
+    gestureServiceWidthPx = null
+    gesturePenStyle = null
     page.clear()
     notebook.refreshPageMetadata(page)
     thumbnails.invalidate(page.id, page.contentRevision, templateStore.visualFingerprint(page.templateId))
@@ -3143,14 +3206,6 @@ class PenDrawView @JvmOverloads constructor(context: Context, attrs: AttributeSe
     private const val LINK_ICON_RADIUS_DP = 12f
     private const val ANCHOR_HIT_RADIUS_DP = 22f
 
-    /**
-     * Observed raw pressure range on-device: batch logs consistently show
-     * `p=[0..4]` / `p=[1..4]` / `p=[1..3]` across many different strokes,
-     * so the ROM appears to report a small discrete level rather than a
-     * fine-grained ADC value. Widen these if a wider range is ever logged.
-     */
-    private const val PRESSURE_RAW_MIN = 0.0f
-    private const val PRESSURE_RAW_MAX = 4.0f
 
     /** Long enough to catch a trailing batch, short enough to feel immediate. */
     private const val FINALIZE_DELAY_MS = 80L

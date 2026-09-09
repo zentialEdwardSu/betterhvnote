@@ -126,6 +126,19 @@ class StrokeBuilderTest {
   }
 
   @Test
+  fun `whole-stroke raw fallback skips simplification`() {
+    val counting = CountingSimplifier()
+    val input = listOf(point(0f, 0f), point(1f, 0f), point(2f, 0f))
+    val b = builder(smoother = RawFallbackSmoother(), simplifier = counting)
+
+    b.append(input)
+    val stroke = b.finish()!!
+
+    assertEquals(input, stroke.points)
+    assertEquals(0, counting.calls)
+  }
+
+  @Test
   fun `stroke timestamps span the gesture`() {
     val b = builder()
     b.append(listOf(InkPoint(0f, 0f, 0.5f, 1_000L)))
@@ -167,5 +180,17 @@ class StrokeBuilderTest {
       calls++
       return points
     }
+  }
+
+  private class RawFallbackSmoother : StrokeSmoother {
+    private val raw = ArrayList<InkPoint>()
+    override val usedRawFallback: Boolean get() = true
+    override fun smooth(point: InkPoint): InkPoint = point
+    override fun smoothBatch(batch: List<InkPoint>): List<InkPoint> {
+      raw.addAll(batch)
+      return emptyList()
+    }
+    override fun finishStroke(): List<InkPoint> = raw.toList()
+    override fun reset() = raw.clear()
   }
 }

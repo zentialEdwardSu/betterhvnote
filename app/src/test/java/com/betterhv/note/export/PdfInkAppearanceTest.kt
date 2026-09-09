@@ -35,7 +35,9 @@ class PdfInkAppearanceTest {
     assertEquals(ink.inkList[0], ink.inkList[1])
     assertTrue(ink.visualBounds.width > 0f)
     assertTrue(ink.visualBounds.height > 0f)
-    assertTrue(String(ink.buildAppearance(ink.visualBounds).bytes).contains(" c f"))
+    val appearance = String(ink.buildAppearance(ink.visualBounds).bytes)
+    assertTrue(appearance.contains(" c\n"))
+    assertTrue(appearance.contains("f\n"))
   }
 
   @Test fun `argb is split into annotation rgb and source opacity`() {
@@ -51,23 +53,29 @@ class PdfInkAppearanceTest {
     assertEquals(0x80 / 255f, ink.opacity, EPS)
   }
 
-  @Test fun `normal pen appearance is a filled pressure outline`() {
+  @Test fun `normal pen appearance uses shared swept disc geometry`() {
     val ink = requireNotNull(
       PdfInkAppearance.from(
         stroke(
           PenType.NormalPen,
-          listOf(point(0f, 0f, 0.2f), point(10f, 5f, 1f), point(20f, 0f, 0.4f)),
+          listOf(
+            point(0f, 0f, 4f / 12f),
+            point(10f, 5f, 8f / 12f),
+            point(20f, 0f, 1f),
+          ),
         )
       )
     )
     val appearance = String(ink.buildAppearance(ink.visualBounds).bytes)
 
     assertTrue(appearance.contains(" rg"))
-    assertTrue(appearance.contains("h f"))
+    assertEquals(12, appearance.windowed(3).count { it == " c\n" })
+    assertTrue(appearance.contains("h\n"))
+    assertEquals(9f, ink.borderWidth, EPS)
     assertTrue(appearance.contains("/GS100 gs"))
   }
 
-  @Test fun `marker appearance uses round constant-width centerline`() {
+  @Test fun `marker appearance uses shared fixed-width swept discs`() {
     val ink = requireNotNull(
       PdfInkAppearance.from(
         stroke(
@@ -78,14 +86,12 @@ class PdfInkAppearanceTest {
     )
     val appearance = String(ink.buildAppearance(ink.visualBounds).bytes)
 
-    assertTrue(appearance.contains("1 J 1 j"))
-    assertTrue(appearance.contains(" RG\n0.0667 0.1333 0.2 rg"))
-    assertTrue(!appearance.contains("RG rg"))
+    assertTrue(appearance.contains("0.0667 0.1333 0.2 rg"))
     assertTrue(appearance.contains(" m\n"))
-    assertTrue(appearance.contains(" l\nS"))
+    assertTrue(appearance.contains("h\n"))
   }
 
-  @Test fun `pencil appearance emits per-segment width and opacity states`() {
+  @Test fun `pencil appearance uses one fixed width and opacity state`() {
     val ink = requireNotNull(
       PdfInkAppearance.from(
         stroke(
@@ -98,8 +104,8 @@ class PdfInkAppearanceTest {
     val appearance = ink.buildAppearance(ink.visualBounds)
     val content = String(appearance.bytes)
 
-    assertEquals(2, appearance.opacityBuckets.size)
-    assertTrue(content.windowed(2).count { it == " w" } >= 2)
+    assertEquals(setOf(40), appearance.opacityBuckets)
+    assertEquals(0, content.windowed(2).count { it == " w" })
     appearance.opacityBuckets.forEach { assertTrue(content.contains("/${PdfInkAppearance.gsName(it)} gs")) }
   }
 
@@ -122,7 +128,8 @@ class PdfInkAppearanceTest {
     ),
   )
 
-  private fun point(x: Float, y: Float, pressure: Float = 0.5f) = InkPoint(x, y, pressure, 1L)
+  private fun point(x: Float, y: Float, pressure: Float = 0.5f) =
+    InkPoint(x, y, pressure, 1L)
 
   private companion object {
     const val EPS = 0.0001f

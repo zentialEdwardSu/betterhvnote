@@ -4,15 +4,18 @@ import kotlin.math.PI
 import kotlin.math.abs
 
 /**
- * Online smoothing of the incoming sample stream. Spec §21 requires an online
- * algorithm: it must not add perceptible latency and must not wait for the
- * stroke to end before producing output, so every implementation here emits one
- * smoothed point per input point with no lookahead.
+ * Smoothing of the incoming sample stream. Ordinary 1:1 filters can emit
+ * immediately; a transactional modeler may buffer until pen-up so that any
+ * invalid scalar or native failure can select the filtered raw stroke in full
+ * instead of mixing raw and modeled segments.
  *
  * Instances are stateful and single-stroke: [StrokeBuilder] creates one per
  * gesture, or calls [reset] between strokes.
  */
 interface StrokeSmoother {
+  /** True after [finishStroke] chose the original filtered samples. */
+  val usedRawFallback: Boolean get() = false
+
   fun smooth(point: InkPoint): InkPoint
 
   /**
@@ -22,8 +25,9 @@ interface StrokeSmoother {
    * of points than it consumes (upsampling a slow batch, or lagging behind
    * fast input) -- a 1:1 signature cannot express that, so batching is the
    * honest boundary. Returned points are already smoothed and ready to
-   * accumulate; the batch is one ROM delivery, always within a single
-   * gesture, in temporal order.
+   * accumulate; an empty result is valid while a transactional smoother is
+   * buffering its whole-stroke decision. The batch is one ROM delivery,
+   * always within a single gesture, in temporal order.
    */
   fun smoothBatch(batch: List<InkPoint>): List<InkPoint> = batch.map { smooth(it) }
 

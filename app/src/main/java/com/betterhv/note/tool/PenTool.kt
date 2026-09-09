@@ -57,10 +57,9 @@ class PenTool(
       stroke = stroke,
     )
     commandStack.execute(AddObjectCommand(page, obj))
-    // Deliberately NOT calling host.requestRepaint here: the ROM's live
-    // overlay already painted this stroke with matching geometry (spec
-    // §2.1 seam fix), and a CLEAR+redraw repaint is the visible pen-up
-    // flash on e-ink. See PenDrawView.finishGesture's comment.
+    // Deliberately NOT calling host.requestRepaint here: the ROM overlay owns
+    // the low-latency live image until the next structural materialization,
+    // and a CLEAR+redraw at every pen-up visibly flashes on e-ink.
   }
 
   override fun onCancel() {

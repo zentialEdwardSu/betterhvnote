@@ -1,8 +1,9 @@
 package com.betterhv.note.jni
 
 import com.betterhv.note.ink.InkPoint
-import com.betterhv.note.ink.OneEuroSmoother
 import com.betterhv.note.ink.StrokeSmoother
+import com.betterhv.note.BuildConfig
+import com.betterhv.note.EventLog
 
 /**
  * [StrokeSmoother] backed by Google's ink-stroke-modeler via [InkStrokeModelerJNI].
@@ -12,9 +13,10 @@ import com.betterhv.note.ink.StrokeSmoother
  * [smoothBatch]: this class overrides it and passes the count through, while
  * [smooth] (the 1:1 method) is only a degenerate single-element batch.
  *
- * Fallback: if the .so did not load, or the native modeler returns an error
- * mid-gesture, this transparently delegates to a [OneEuroSmoother] for the rest
- * of that gesture, so writing never breaks -- it just quietly loses the upgrade.
+ * Output is transactional per gesture. Raw filtered input and native output are
+ * buffered separately; only [finishStroke] publishes one of them. This allows
+ * an invalid scalar or native failure in a late batch to fall back to the whole
+ * raw gesture instead of splicing two algorithms into one stroke.
  * Kept OUTSIDE the framework-free `com.betterhv.note.ink` package on purpose:
  * System.loadLibrary and native methods are Android-runtime concepts and must
  * not leak into the JVM-testable core.
@@ -24,15 +26,17 @@ import com.betterhv.note.ink.StrokeSmoother
  * only one ModelerStrokeSmoother may be driving it at a time -- which holds,
  * since PenDrawView runs one gesture at a time on one thread.
  */
-class ModelerStrokeSmoother(private val fallback: StrokeSmoother = OneEuroSmoother()) : StrokeSmoother {
+class ModelerStrokeSmoother : StrokeSmoother {
 
   private val jni: InkStrokeModelerJNI? =
     if (InkStrokeModelerJNI.available) InkStrokeModelerJNI() else null
 
-  // True once we have committed to the fallback for the current gesture:
-  // either native was never available, or a native call failed and we must
-  // not resume mid-stroke (the modeler's stroke state would be inconsistent).
   private var degraded: Boolean = jni == null
+  private var fallbackPublished = false
+  private val rawPoints = ArrayList<InkPoint>()
+  private val modeledPoints = ArrayList<InkPoint>()
+
+  override val usedRawFallback: Boolean get() = fallbackPublished
 
   // Whether the next sample is the first of the gesture (a kDown event).
   private var atGestureStart: Boolean = true
@@ -45,20 +49,32 @@ class ModelerStrokeSmoother(private val fallback: StrokeSmoother = OneEuroSmooth
   private var lastRaw: InkPoint? = null
 
   override fun smooth(point: InkPoint): InkPoint {
-    // 1:1 convenience path: a single-element batch. Falls back to the raw
-    // point if the modeler produced nothing (rare; keeps output non-null).
-    val out = smoothBatch(listOf(point))
-    return out.firstOrNull() ?: point
+    smoothBatch(listOf(point))
+    return point
   }
 
   override fun smoothBatch(batch: List<InkPoint>): List<InkPoint> {
     if (batch.isEmpty()) return emptyList()
+    rawPoints.addAll(batch)
+    if (batch.any { !it.pressure.isFinite() || it.pressure !in 0f..1f }) {
+      degrade("input scalar outside [0,1]")
+      return emptyList()
+    }
     val modeler = jni
-    if (degraded || modeler == null) return fallback.smoothBatch(batch)
+    if (degraded || modeler == null) return emptyList()
 
     // On the first batch of a gesture, (re)initialize native state.
     if (atGestureStart) {
-      if (modeler.nativeReset() != 0) return degradeAndFallback(batch)
+      val resetResult = try {
+        modeler.nativeReset()
+      } catch (t: Throwable) {
+        degrade("native reset threw ${t.javaClass.simpleName}: ${t.message}")
+        return emptyList()
+      }
+      if (resetResult != 0) {
+        degrade("native reset failed: $resetResult")
+        return emptyList()
+      }
     }
 
     val n = batch.size
@@ -75,24 +91,30 @@ class ModelerStrokeSmoother(private val fallback: StrokeSmoother = OneEuroSmooth
     // The modeler may emit more points than we fed it; size the buffer for
     // a generous upper bound and retry-grow if it ever reports too-small.
     ensureCapacity(n * OUTPUT_HEADROOM)
-    var count = modeler.nativeUpdate(inXYP, events, outBuf)
-    if (count == ERR_BUFFER_TOO_SMALL) {
-      ensureCapacity(outBuf.size * 2)
-      count = modeler.nativeUpdate(inXYP, events, outBuf)
+    val count = updateWithRetry(modeler, inXYP, events)
+    if (count < 0) {
+      degrade("native update failed: $count")
+      return emptyList()
     }
-    if (count < 0) return degradeAndFallback(batch)
 
     atGestureStart = false
     lastRaw = batch.last()
-    return marshalOut(count, batch.last().timestamp)
+    val output = marshalOut(count, batch.last().timestamp)
+    if (!validModeledPoints(output)) {
+      degrade("modeled point non-finite or scalar outside [0,1]")
+      return emptyList()
+    }
+    modeledPoints.addAll(output)
+    return emptyList()
   }
 
   override fun finishStroke(): List<InkPoint> {
     val modeler = jni
     val last = lastRaw
-    // Nothing to flush if we never modeled anything this gesture, or if the
-    // gesture already degraded to the (backlog-free) fallback.
-    if (degraded || modeler == null || last == null) return fallback.finishStroke()
+    if (degraded || modeler == null || last == null) {
+      fallbackPublished = true
+      return rawPoints.toList()
+    }
 
     // A kUp at the last raw position makes the modeler emit its end-of-
     // stroke catch-up run, so the committed stroke reaches the real pen-up
@@ -100,20 +122,36 @@ class ModelerStrokeSmoother(private val fallback: StrokeSmoother = OneEuroSmooth
     val inXYP = floatArrayOf(last.x, last.y, last.pressure)
     val events = byteArrayOf(EVENT_UP)
     ensureCapacity(OUTPUT_HEADROOM)
-    var count = modeler.nativeUpdate(inXYP, events, outBuf)
-    if (count == ERR_BUFFER_TOO_SMALL) {
-      ensureCapacity(outBuf.size * 2)
-      count = modeler.nativeUpdate(inXYP, events, outBuf)
+    val count = updateWithRetry(modeler, inXYP, events)
+    if (count < 0) {
+      degrade("native finish failed: $count")
+      fallbackPublished = true
+      return rawPoints.toList()
     }
-    if (count <= 0) return emptyList()
-    return marshalOut(count, last.timestamp)
+    val tail = marshalOut(count, last.timestamp)
+    if (!validModeledPoints(tail)) {
+      degrade("modeled finish point non-finite or scalar outside [0,1]")
+      fallbackPublished = true
+      return rawPoints.toList()
+    }
+    modeledPoints.addAll(tail)
+    if (modeledPoints.isEmpty()) {
+      fallbackPublished = true
+      return rawPoints.toList()
+    }
+    return modeledPoints.toList()
   }
 
   override fun reset() {
-    jni?.let { if (!degraded) it.nativeClear() }
-    fallback.reset()
+    jni?.let { modeler ->
+      if (!degraded) runCatching { modeler.nativeClear() }
+        .onFailure { EventLog.log("PressureModeler", "native clear failed: ${it.message}") }
+    }
     atGestureStart = true
     lastRaw = null
+    rawPoints.clear()
+    modeledPoints.clear()
+    fallbackPublished = false
     // Re-arm native for the next gesture only if the .so is present; a
     // permanent load failure stays degraded for this instance's lifetime.
     degraded = (jni == null)
@@ -129,21 +167,46 @@ class ModelerStrokeSmoother(private val fallback: StrokeSmoother = OneEuroSmooth
         InkPoint(
           x = outBuf[i * 3],
           y = outBuf[i * 3 + 1],
-          pressure = outBuf[i * 3 + 2].coerceIn(0f, 1f),
+          pressure = outBuf[i * 3 + 2],
           timestamp = ts,
         ),
       )
     }
+    if (BuildConfig.DEBUG && result.isNotEmpty()) {
+      EventLog.log("PressureModeler", "t=$ts n=$count min=${result.minOf { it.pressure }} " +
+        "max=${result.maxOf { it.pressure }} saturated=${result.count { it.pressure >= 1f }}")
+    }
     return result
   }
 
-  // Abandon native for the remainder of this gesture and smooth the current
-  // batch with the fallback. The fallback has no prior state for this stroke,
-  // but one-euro converges within a few samples, so the visual seam is minor
-  // and only occurs on an (unexpected) native error.
-  private fun degradeAndFallback(batch: List<InkPoint>): List<InkPoint> {
+  private fun validModeledPoints(points: List<InkPoint>): Boolean =
+    points.all {
+      it.x.isFinite() && it.y.isFinite() && it.pressure.isFinite() && it.pressure in 0f..1f
+    }
+
+  private fun degrade(reason: String) {
+    if (!degraded) EventLog.log("PressureModeler", "raw fallback: $reason")
     degraded = true
-    return fallback.smoothBatch(batch)
+  }
+
+  private fun updateWithRetry(modeler: InkStrokeModelerJNI, input: FloatArray, events: ByteArray): Int {
+    repeat(8) {
+      var checkpointed = false
+      try {
+        modeler.nativeSave()
+        checkpointed = true
+        val count = modeler.nativeUpdate(input, events, outBuf)
+        if (count >= 0) return count
+        modeler.nativeRestore()
+        if (count != ERR_BUFFER_TOO_SMALL) return count
+        ensureCapacity(outBuf.size * 2)
+      } catch (t: Throwable) {
+        if (checkpointed) runCatching { modeler.nativeRestore() }
+        EventLog.log("PressureModeler", "native update threw ${t.javaClass.simpleName}: ${t.message}")
+        return ERR_NATIVE_EXCEPTION
+      }
+    }
+    return ERR_BUFFER_TOO_SMALL
   }
 
   private fun ensureCapacity(floats: Int) {
@@ -155,6 +218,7 @@ class ModelerStrokeSmoother(private val fallback: StrokeSmoother = OneEuroSmooth
     const val EVENT_MOVE: Byte = 1
     const val EVENT_UP: Byte = 2
     const val ERR_BUFFER_TOO_SMALL = -3
+    const val ERR_NATIVE_EXCEPTION = -4
 
     // A batch rarely exceeds a few dozen samples; start comfortably above
     // that (in floats: 3 per point) so the first gesture never reallocates.

@@ -98,23 +98,8 @@ object PenProfiles {
     PenType.Pencil, PenType.Marker -> 15
   }
 
-  /**
-   * Width sent to the ROM's low-latency overlay renderer.
-   *
-   * The ROM does not use one width response for every pen ID. Normal pen
-   * (service ID 6) still needs the measured 1.75x input compensation, while
-   * pencil and marker share service ID 15 and use the nominal width directly.
-   * Keep this device-facing calibration separate from the stored nominal
-   * [PenStyle.baseWidth]. Rounding also avoids systematic Float.toInt()
-   * thinning at the narrow end.
-   */
-  fun serviceWidth(style: PenStyle): Int {
-    val scale = when (style.penType) {
-      PenType.NormalPen -> ROM_NORMAL_PEN_WIDTH_SCALE
-      PenType.Pencil, PenType.Marker -> ROM_PEN_ID_15_WIDTH_SCALE
-    }
-    return (style.baseWidth * scale).roundToInt().coerceAtLeast(1)
-  }
+  /** Width in screen pixels sent directly to the ROM overlay renderer. */
+  fun serviceWidth(style: PenStyle): Int = style.baseWidth.roundToInt().coerceAtLeast(1)
 
   /** hvNote's five logical settings linearly interpolated into device-specific actual pixels. */
   fun actualWidth(type: PenType, widthLevel: Int, model: String): Float {
@@ -134,8 +119,7 @@ object PenProfiles {
       color = if (type == PenType.Marker) markerColor(preset.colorIndex) else baseColor,
       pressureCurve = when (type) {
         PenType.NormalPen -> PressureCurve()
-        PenType.Pencil -> PressureCurve(a = 0.20f, gamma = 1.0f)
-        PenType.Marker -> PressureCurve(a = 1.0f, gamma = 1.0f)
+        PenType.Pencil, PenType.Marker -> PressureCurve(a = 1f, gamma = 1f)
       },
       penType = type,
     )
@@ -202,8 +186,6 @@ object PenProfiles {
   const val SERVICE_COLOR_DARK_GRAY = 3
   const val SERVICE_COLOR_LIGHT_GRAY = 4
 
-  private const val ROM_NORMAL_PEN_WIDTH_SCALE = 1.75f
-  private const val ROM_PEN_ID_15_WIDTH_SCALE = 1.0f
 }
 
 /** SharedPreferences uses this pure codec so invalid stored values have deterministic defaults. */

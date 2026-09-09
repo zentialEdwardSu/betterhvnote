@@ -66,14 +66,16 @@ class PenProfilesTest {
     val pencil = PenProfiles.style(PenSettings().selectType(PenType.Pencil), "N10Pro")
     val marker = PenProfiles.style(PenSettings().selectType(PenType.Marker), "N10Pro")
 
-    assertTrue(normal.widthAt(0f) < normal.widthAt(1f))
-    assertTrue(pencil.widthAt(0f) < pencil.widthAt(1f))
-    assertEquals(marker.widthAt(0f), marker.widthAt(1f), 0.001f)
+    fun sample(scalar: Float) = com.betterhv.note.ink.InkPoint(0f, 0f, scalar, 0L)
+    assertTrue(normal.widthAt(sample(0f)) < normal.widthAt(sample(0.5f)))
+    assertTrue(normal.widthAt(sample(0.5f)) < normal.widthAt(sample(1f)))
+    assertEquals(pencil.widthAt(sample(0f)), pencil.widthAt(sample(1f)), 0.001f)
+    assertEquals(marker.widthAt(sample(0f)), marker.widthAt(sample(1f)), 0.001f)
     assertEquals(PenType.Marker, marker.penType)
   }
 
   @Test
-  fun normalPenAppliesItsMeasuredVisualWidthScale() {
+  fun stylesUseTheirNominalMaximumWidthWithoutHiddenMultipliers() {
     val normal = PenProfiles.style(
       PenSettings().updateActivePreset { it.copy(widthLevel = 4) },
       "N10Pro",
@@ -84,7 +86,26 @@ class PenProfilesTest {
       "N10Pro",
     )
 
-    assertEquals(36f * 0.34f, normal.widthAt(1f), 0.001f)
-    assertEquals(80f, marker.widthAt(1f), 0.001f)
+    val full = com.betterhv.note.ink.InkPoint(0f, 0f, 1f, 0L)
+    assertEquals(36f, normal.widthAt(full), 0.001f)
+    assertEquals(80f, marker.widthAt(full), 0.001f)
+  }
+
+  @Test
+  fun normalPenUsesPointScalarWhileFixedBrushesIgnoreIt() {
+    val sample = com.betterhv.note.ink.InkPoint(1f, 2f, 0.375f, 3L)
+    val normal = PenStyle(baseWidth = 20f, penType = PenType.NormalPen)
+    val pencil = PenStyle(baseWidth = 20f, penType = PenType.Pencil)
+    val marker = PenStyle(baseWidth = 20f, penType = PenType.Marker)
+
+    assertEquals(7.5f, normal.widthAt(sample), 0.001f)
+    assertEquals(20f, pencil.widthAt(sample), 0.001f)
+    assertEquals(20f, marker.widthAt(sample), 0.001f)
+
+    listOf(Float.NEGATIVE_INFINITY, -1f, 0f, 2f, Float.NaN).forEach { scalar ->
+      val arbitrary = sample.copy(pressure = scalar)
+      assertEquals(20f, pencil.widthAt(arbitrary), 0.001f)
+      assertEquals(20f, marker.widthAt(arbitrary), 0.001f)
+    }
   }
 }
