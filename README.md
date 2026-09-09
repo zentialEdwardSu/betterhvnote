@@ -1,6 +1,6 @@
 # BetterHvNote
 
-BetterHvNote 立志成为汉王N10 Pro 2一个更加顺手的笔记软件，其主要目标是：通过更高效的用户交互，更简洁的页面设计以及配套手机与电脑应用，更提供更加接近纸的笔记体验。
+BetterHvNote 希望成为比汉王N10 Pro 2自带笔记软件更加顺手的笔记软件，其主要目标是：通过更高效的用户交互，更简洁的页面设计以及配套手机与电脑应用，更提供更加接近纸的笔记体验。
 
 目前只支持汉王N10 Pro 2，Notelink只支持带有BLE的Windows和Android设备
 ## Features of Betterhvnote
