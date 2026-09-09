@@ -3,13 +3,14 @@ package com.betterhv.transfer.core
 import java.io.File
 import java.util.UUID
 
-enum class ContentKind { IMAGE, TEXT, PDF }
+enum class ContentKind { IMAGE, TEXT, PDF, APP_PACKAGE }
 
-data class ContentCounts(val images: Int, val texts: Int, val pdfs: Int = 0) {
+data class ContentCounts(val images: Int, val texts: Int, val pdfs: Int = 0, val appPackages: Int = 0) {
   fun forKind(kind: ContentKind): Int = when (kind) {
     ContentKind.IMAGE -> images
     ContentKind.TEXT -> texts
     ContentKind.PDF -> pdfs
+    ContentKind.APP_PACKAGE -> appPackages
   }
 }
 
@@ -70,12 +71,34 @@ data class QueueItem(
   }
 }
 
+data class PreparedQueueItemSummary(
+  val id: UUID,
+  val kind: ContentKind,
+  val mimeType: String,
+  val byteLength: Long,
+  val sha256: ByteArray,
+  val displayName: String,
+) {
+  init {
+    require(byteLength >= 0)
+    require(sha256.size == QueueItem.SHA256_BYTES)
+    require(displayName.isNotBlank())
+  }
+
+  override fun equals(other: Any?): Boolean = other is PreparedQueueItemSummary &&
+    id == other.id && kind == other.kind && mimeType == other.mimeType && byteLength == other.byteLength &&
+    sha256.contentEquals(other.sha256) && displayName == other.displayName
+
+  override fun hashCode(): Int = 31 * id.hashCode() + sha256.contentHashCode()
+}
+
 sealed interface RemotePayload {
   val item: QueueItem
 
   data class Image(override val item: QueueItem, val stagedFile: File) : RemotePayload
   data class Text(override val item: QueueItem, val text: String) : RemotePayload
   data class Pdf(override val item: QueueItem, val stagedFile: File) : RemotePayload
+  data class AppPackage(override val item: QueueItem, val stagedFile: File) : RemotePayload
 }
 
 sealed interface TransferState {
@@ -112,4 +135,5 @@ object TransferLimits {
   const val LEASE_TIMEOUT_MILLIS: Long = 60_000L
   const val MAX_EXPORT_BYTES: Long = 512L * 1024L * 1024L
   const val MAX_EXPORT_NAME_BYTES: Int = 96
+  const val MAX_APP_PACKAGE_BYTES: Long = 512L * 1024L * 1024L
 }

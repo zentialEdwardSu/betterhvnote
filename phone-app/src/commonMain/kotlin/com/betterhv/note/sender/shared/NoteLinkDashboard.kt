@@ -145,6 +145,7 @@ data class DashboardState(
     val notice: String? = null,
     val appVersion: String = "",
     val updateUiState: UpdateUiState = UpdateUiState(),
+    val notePackageStatus: String? = null,
 )
 
 data class DashboardActions(
@@ -167,6 +168,7 @@ data class DashboardActions(
     val checkForUpdates: () -> Unit,
     val openRelease: (String) -> Unit,
     val dismissUpdate: () -> Unit,
+    val importNotePackage: () -> Unit,
     val dragInboxItem: @Composable (String) -> Modifier = { Modifier }
 )
 
@@ -554,6 +556,22 @@ private fun SettingsPage(state: DashboardState, actions: DashboardActions) {
                 onCheck = actions.checkForUpdates,
                 onOpenRelease = actions.openRelease,
             )
+        }
+        item { HorizontalDivider() }
+        item {
+            Column {
+                Text(t("Note 安装包", "Note package"), style = MaterialTheme.typography.titleMedium)
+                Text(
+                    state.notePackageStatus ?: t(
+                        "可导入最新正式版 APK；Note 请求更新时会优先复用。",
+                        "Import the latest stable APK to reuse when Note requests an update."
+                    ),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                OutlinedButton(onClick = actions.importNotePackage, modifier = Modifier.padding(top = 8.dp)) {
+                    Text(t("导入 Note APK", "Import Note APK"))
+                }
+            }
         }
         item { HorizontalDivider() }
         item {

@@ -13,7 +13,9 @@ import com.betterhv.transfer.core.BleCommand
 import com.betterhv.transfer.core.BleQueueProtocol
 import com.betterhv.transfer.core.BleResponse
 import com.betterhv.transfer.core.CapabilityNegotiation
+import com.betterhv.transfer.core.ContentKind
 import com.betterhv.transfer.core.DeviceCapabilities
+import com.betterhv.transfer.core.PreparedQueueItemSummary
 import com.betterhv.transfer.core.TransferChannelException
 import com.betterhv.transfer.core.TransferErrorCode
 import com.betterhv.transfer.core.TransferEvent
@@ -24,6 +26,8 @@ import com.betterhv.transfer.core.TransferObservable
 import com.betterhv.transfer.core.TransferPhase
 import com.betterhv.transfer.core.TransferProgressMeter
 import com.betterhv.transfer.core.TransferSnapshot
+import com.betterhv.update.NoteAppUpdateCoordinator
+import com.betterhv.update.NoteAppUpdateTaskState
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -67,6 +71,15 @@ class PhoneCommandProcessor(
   private val inboundReplay = BleReplayCache()
   private val mutableSnapshot = MutableStateFlow(TransferSnapshot())
   private val mutableEvents = MutableSharedFlow<TransferEvent>(extraBufferCapacity = 64)
+  private val noteUpdate = NoteAppUpdateCoordinator(
+    scope,
+    File(context.filesDir, "note-update-cache"),
+  ) { file, descriptor, peerId ->
+    val item = queue.enqueueAppPackage(file, descriptor, peerId)
+    onQueueChanged()
+    item.id
+  }
+  val noteUpdateState = noteUpdate.state
   override val snapshot: StateFlow<TransferSnapshot> = mutableSnapshot.asStateFlow()
   override val events: SharedFlow<TransferEvent> = mutableEvents.asSharedFlow()
 
@@ -245,6 +258,44 @@ class PhoneCommandProcessor(
       onQueueChanged()
       BleResponse.Ok
     }
+
+    is BleCommand.RequestNoteAppUpdate -> updateResponse(
+      command.operationId,
+      noteUpdate.begin(command.operationId, peerId, command.currentVersion),
+    )
+
+    is BleCommand.NoteAppUpdateStatus -> updateResponse(
+      command.operationId,
+      noteUpdate.status(command.operationId, peerId),
+    )
+
+    is BleCommand.NoteAppUpdateCancel -> {
+      noteUpdate.cancel(command.operationId, peerId)
+      BleResponse.Ok
+    }
+  }
+
+  private fun updateResponse(id: UUID, state: NoteAppUpdateTaskState): BleResponse = when (state) {
+    NoteAppUpdateTaskState.Resolving -> BleResponse.UpdateResolving(id)
+    is NoteAppUpdateTaskState.Downloading -> BleResponse.UpdateDownloading(
+      id, state.version, state.bytesDownloaded, state.totalBytes,
+    )
+    is NoteAppUpdateTaskState.UpToDate -> BleResponse.UpdateUpToDate(id, state.latestVersion)
+    is NoteAppUpdateTaskState.Ready -> BleResponse.UpdateReady(
+      id,
+      state.version,
+      PreparedQueueItemSummary(
+        state.itemId,
+        ContentKind.APP_PACKAGE,
+        com.betterhv.update.NotePackageResolver.NOTE_PACKAGE_MIME,
+        state.byteLength,
+        state.sha256,
+        state.displayName,
+      ),
+    )
+    is NoteAppUpdateTaskState.Failed -> BleResponse.Failure(
+      TransferFailure(TransferErrorCode.INTERNAL, state.message, state.recoverable),
+    )
   }
 
   private fun prepare(command: BleCommand.PrepareFileTransfer, peerId: String, pairingKey: ByteArray): BleResponse {
@@ -405,7 +456,7 @@ class PhoneCommandProcessor(
   private fun localCapabilities(key: ByteArray) = network.capabilities(
     key,
     highBandwidth.endpoint(),
-    BleQueueProtocol.CAPABILITY_EXPORT_PUSH,
+    BleQueueProtocol.CAPABILITY_EXPORT_PUSH or BleQueueProtocol.CAPABILITY_NOTE_APP_UPDATE,
   )
 
   private fun begin(
@@ -508,6 +559,7 @@ class PhoneCommandProcessor(
 
   override fun close() {
     cancel()
+    noteUpdate.close()
     leases.values.forEach { runCatching { it.release() } }
     leases.clear()
     leaseOwners.clear()

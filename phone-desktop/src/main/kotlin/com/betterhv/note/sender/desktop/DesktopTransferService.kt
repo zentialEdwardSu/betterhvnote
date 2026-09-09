@@ -5,8 +5,10 @@ import com.betterhv.transfer.core.BleCommand
 import com.betterhv.transfer.core.BleQueueProtocol
 import com.betterhv.transfer.core.BleResponse
 import com.betterhv.transfer.core.CapabilityNegotiation
+import com.betterhv.transfer.core.ContentKind
 import com.betterhv.transfer.core.DeviceCapabilities
 import com.betterhv.transfer.core.NetworkEndpoint
+import com.betterhv.transfer.core.PreparedQueueItemSummary
 import com.betterhv.transfer.core.TransferChannelException
 import com.betterhv.transfer.core.TransferErrorCode
 import com.betterhv.transfer.core.TransferEvent
@@ -26,6 +28,8 @@ import com.betterhv.transfer.windows.WindowsFileTransfer
 import com.betterhv.transfer.windows.WindowsNativeApi
 import com.betterhv.transfer.windows.WindowsReplayCache
 import com.betterhv.transfer.windows.WindowsSecureEnvelope
+import com.betterhv.update.NoteAppUpdateCoordinator
+import com.betterhv.update.NoteAppUpdateTaskState
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -62,6 +66,7 @@ class DesktopTransferService(
   private val settings: DesktopSettings,
   private val queue: DesktopQueueRepository,
   private val inbox: DesktopInboxRepository,
+  updateCache: File,
   private val onPairingChanged: () -> Unit = {},
 ) : AutoCloseable,
   TransferObservable {
@@ -80,6 +85,12 @@ class DesktopTransferService(
   private val mutableSnapshot = MutableStateFlow(TransferSnapshot())
   private val mutableEvents = MutableSharedFlow<TransferEvent>(extraBufferCapacity = 64)
   private val eventLog = TransferEventLog()
+  private val noteUpdate = NoteAppUpdateCoordinator(scope, updateCache) { file, descriptor, peerId ->
+    val item = queue.enqueueAppPackage(file, descriptor, peerId)
+    refreshCounts()
+    item.id
+  }
+  val noteUpdateState = noteUpdate.state
   override val snapshot: StateFlow<TransferSnapshot> = mutableSnapshot.asStateFlow()
   override val events: SharedFlow<TransferEvent> = mutableEvents.asSharedFlow()
   val eventHistory: StateFlow<List<TransferLogEntry>> = eventLog.entries
@@ -357,6 +368,49 @@ class DesktopTransferService(
     is BleCommand.PushStatus -> pushStatus(command.artifactId, peerId)
 
     is BleCommand.PushCancel -> cancelPush(command.artifactId, peerId)
+
+    is BleCommand.RequestNoteAppUpdate -> updateResponse(
+      command.operationId,
+      noteUpdate.begin(command.operationId, peerId, command.currentVersion),
+    )
+
+    is BleCommand.NoteAppUpdateStatus -> updateResponse(
+      command.operationId,
+      noteUpdate.status(command.operationId, peerId),
+    )
+
+    is BleCommand.NoteAppUpdateCancel -> {
+      noteUpdate.cancel(command.operationId, peerId)
+      BleResponse.Ok
+    }
+  }
+
+  private fun updateResponse(id: UUID, state: NoteAppUpdateTaskState): BleResponse = when (state) {
+    NoteAppUpdateTaskState.Resolving -> BleResponse.UpdateResolving(id)
+    is NoteAppUpdateTaskState.Downloading -> BleResponse.UpdateDownloading(
+      id, state.version, state.bytesDownloaded, state.totalBytes,
+    )
+    is NoteAppUpdateTaskState.UpToDate -> BleResponse.UpdateUpToDate(id, state.latestVersion)
+    is NoteAppUpdateTaskState.Ready -> BleResponse.UpdateReady(
+      id,
+      state.version,
+      PreparedQueueItemSummary(
+        state.itemId,
+        ContentKind.APP_PACKAGE,
+        com.betterhv.update.NotePackageResolver.NOTE_PACKAGE_MIME,
+        state.byteLength,
+        state.sha256,
+        state.displayName,
+      ),
+    )
+    is NoteAppUpdateTaskState.Failed -> BleResponse.Failure(
+      TransferFailure(TransferErrorCode.INTERNAL, state.message, state.recoverable),
+    )
+  }
+
+  fun importNotePackage(file: File): String {
+    val descriptor = noteUpdate.importLatest(file)
+    return descriptor.version.display
   }
 
   private fun pushStatus(artifactId: UUID, peerId: String): BleResponse = when (val state = pushed[artifactId]) {
@@ -536,7 +590,7 @@ class DesktopTransferService(
       modes = TransferModes.LAN,
       lanEndpoint = NetworkEndpoint(lan.ipv4),
       ssidFingerprint = TransferNetworkSecurity.ssidFingerprint(key, lan.ssid),
-      extensions = BleQueueProtocol.CAPABILITY_EXPORT_PUSH,
+      extensions = BleQueueProtocol.CAPABILITY_EXPORT_PUSH or BleQueueProtocol.CAPABILITY_NOTE_APP_UPDATE,
     )
   }
 
@@ -641,6 +695,7 @@ class DesktopTransferService(
 
   override fun close() {
     stop();
+    noteUpdate.close()
     scope.cancel();
     native.close()
   }

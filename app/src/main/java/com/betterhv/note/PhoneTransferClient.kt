@@ -26,6 +26,7 @@ import com.betterhv.transfer.core.DeviceCapabilities
 import com.betterhv.transfer.core.ExportTransferOffer
 import com.betterhv.transfer.core.NetworkEndpoint
 import com.betterhv.transfer.core.PairedDevice
+import com.betterhv.transfer.core.PreparedQueueItemSummary
 import com.betterhv.transfer.core.RemotePayload
 import com.betterhv.transfer.core.SsidMatch
 import com.betterhv.transfer.core.TransferChannelException
@@ -47,6 +48,7 @@ import com.betterhv.transfer.core.TransferState
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.async
 import kotlinx.coroutines.cancelAndJoin
@@ -121,6 +123,18 @@ class PhoneTransferClient(context: Context) :
     val bluetoothAddress: String,
   )
 
+  sealed interface NoteAppUpdateProgress {
+    data object Resolving : NoteAppUpdateProgress
+    data class Downloading(val version: String, val bytesDownloaded: Long, val totalBytes: Long) :
+      NoteAppUpdateProgress
+    data class Transferring(val version: String) : NoteAppUpdateProgress
+  }
+
+  sealed interface NoteAppUpdateOutcome {
+    data class UpToDate(val latestVersion: String?) : NoteAppUpdateOutcome
+    data class Package(val version: String, val lease: ReceivedLease) : NoteAppUpdateOutcome
+  }
+
   val pairedClients: List<PairedDevice> get() = pairing.pairedClients
 
   /** Uses the sender advertisement counts without leasing an item. */
@@ -160,6 +174,7 @@ class PhoneTransferClient(context: Context) :
         ContentKind.IMAGE -> candidate.imageCount > 0
         ContentKind.TEXT -> candidate.textCount > 0
         ContentKind.PDF -> candidate.pdfCount > 0
+        ContentKind.APP_PACKAGE -> true
         null -> true
       }
       hasContent && if (client.legacy) {
@@ -301,6 +316,10 @@ class PhoneTransferClient(context: Context) :
         ContentKind.PDF -> receiveImage(activeSession, offer, authenticatedId, negotiation, key).let {
           RemotePayload.Pdf(it.item, it.stagedFile)
         }
+
+        ContentKind.APP_PACKAGE -> receiveImage(activeSession, offer, authenticatedId, negotiation, key).let {
+          RemotePayload.AppPackage(it.item, it.stagedFile)
+        }
       }
       Log.i(TAG, "${kind.name.lowercase()} payload ready after ${elapsed(startedAt)} ms")
       mutableState.value = TransferState.AwaitingPlacement(offer.id)
@@ -334,6 +353,116 @@ class PhoneTransferClient(context: Context) :
         operationActive.set(false)
       }
     }
+  }
+
+  suspend fun requestNoteAppUpdate(
+    clientId: String,
+    currentVersion: String,
+    onProgress: (NoteAppUpdateProgress) -> Unit = {},
+  ): NoteAppUpdateOutcome = withContext(Dispatchers.IO) {
+    check(operationActive.compareAndSet(false, true)) { "A NoteLink transfer is already in progress" }
+    activeOperationJob = currentCoroutineContext()[Job]
+    val operationId = UUID.randomUUID()
+    val paired = pairing.pairedClient(clientId) ?: run {
+      operationActive.set(false)
+      error("Paired NoteLink does not exist")
+    }
+    var readyVersion: String? = null
+    var readyItem: PreparedQueueItemSummary? = null
+    try {
+      onProgress(NoteAppUpdateProgress.Resolving)
+      mutableState.value = TransferState.Scanning
+      startOperation(operationId, null, clientId, 0, TransferPhase.DISCOVERING)
+      val sender = findSender(paired, null, 8_000L)
+        ?: error("Could not find ${paired.name}; make sure NoteLink is running")
+      val immediate = withBleSession<NoteAppUpdateOutcome?>(sender.bluetoothAddress) { session ->
+        phase(TransferPhase.AUTHENTICATING)
+        val identity = verifyIdentity(session, sender, paired)
+        var authenticatedId = paired.id
+        if (paired.legacy) authenticatedId = pairing.resolveLegacyIdentity(paired.id, identity).id
+        val key = requireNotNull(pairing.sharedKey(authenticatedId)) { "Pairing key is unavailable" }
+        val negotiation = negotiate(session, authenticatedId, key)
+        require(negotiation.remote.extensions and BleQueueProtocol.CAPABILITY_NOTE_APP_UPDATE != 0) {
+          "This NoteLink version does not support Note app updates"
+        }
+        var terminal = false
+        try {
+          var response = exchange(
+            session,
+            authenticatedId,
+            BleCommand.RequestNoteAppUpdate(operationId, currentVersion),
+          )
+          var outcome: NoteAppUpdateOutcome? = null
+          while (!terminal) {
+            when (response) {
+              is BleResponse.UpdateResolving -> {
+                require(response.operationId == operationId) { "NoteLink returned another update operation" }
+                onProgress(NoteAppUpdateProgress.Resolving)
+              }
+              is BleResponse.UpdateDownloading -> {
+                require(response.operationId == operationId) { "NoteLink returned another update operation" }
+                onProgress(
+                  NoteAppUpdateProgress.Downloading(
+                    response.version,
+                    response.bytesDownloaded,
+                    response.totalBytes,
+                  ),
+                )
+              }
+              is BleResponse.UpdateUpToDate -> {
+                require(response.operationId == operationId) { "NoteLink returned another update operation" }
+                mutableState.value = TransferState.Idle
+                outcome = NoteAppUpdateOutcome.UpToDate(response.latestVersion)
+                terminal = true
+              }
+              is BleResponse.UpdateReady -> {
+                require(response.operationId == operationId) { "NoteLink returned another update operation" }
+                readyVersion = response.version
+                readyItem = response.item
+                terminal = true
+              }
+              is BleResponse.Failure -> throw TransferChannelException(response.failure)
+              is BleResponse.Error -> error(response.message)
+              else -> error("NoteLink returned an invalid update response")
+            }
+            if (!terminal) {
+              delay(500)
+              response = exchange(session, authenticatedId, BleCommand.NoteAppUpdateStatus(operationId))
+            }
+          }
+          outcome
+        } finally {
+          withContext(NonCancellable) {
+            runCatching { exchange(session, authenticatedId, BleCommand.NoteAppUpdateCancel(operationId)) }
+          }
+        }
+      }
+      immediate?.let { return@withContext it }
+    } catch (error: Throwable) {
+      mutableState.value = TransferState.Error(error.message ?: "NoteLink update failed")
+      fail(error)
+      throw error
+    } finally {
+      activeOperationJob = null
+      operationActive.set(false)
+    }
+
+    val version = requireNotNull(readyVersion)
+    val expected = requireNotNull(readyItem)
+    onProgress(NoteAppUpdateProgress.Transferring(version))
+    val lease = requestNext(clientId, ContentKind.APP_PACKAGE)
+      ?: error("NoteLink prepared an update but no package was available")
+    val received = lease.offer.item
+    if (
+      received.id != expected.id || received.kind != expected.kind || received.mimeType != expected.mimeType ||
+      received.byteLength != expected.byteLength || !received.sha256.contentEquals(expected.sha256) ||
+      received.displayName != expected.displayName
+    ) {
+      (lease.payload as? RemotePayload.AppPackage)?.stagedFile?.delete()
+      runCatching { lease.commitAndAwait() }
+      error("NoteLink transferred a package that does not match the prepared update")
+    }
+    NoteAppUpdateOutcome.Package(version, lease)
   }
 
   suspend fun sendExport(artifact: ExportArtifact, progress: (Long, Long) -> Unit = { _, _ -> }) {
@@ -678,7 +807,10 @@ class PhoneTransferClient(context: Context) :
 
   private fun localCapabilities(key: ByteArray): DeviceCapabilities {
     val base = network.capabilities(key)
-    return base.copy(modes = base.modes or TransferModes.WIFI_DIRECT)
+    return base.copy(
+      modes = base.modes or TransferModes.WIFI_DIRECT,
+      extensions = base.extensions or BleQueueProtocol.CAPABILITY_NOTE_APP_UPDATE,
+    )
   }
 
   private suspend fun negotiate(session: BleGattSession, clientId: String, key: ByteArray): CapabilityNegotiation {
@@ -824,6 +956,7 @@ class PhoneTransferClient(context: Context) :
       ContentKind.IMAGE -> sender.imageCount > 0
       ContentKind.TEXT -> sender.textCount > 0
       ContentKind.PDF -> sender.pdfCount > 0
+      ContentKind.APP_PACKAGE -> true
       null -> true
     }
     return contentMatches && (paired.legacy || sender.identityHash.equals(paired.identityHash, ignoreCase = true))

@@ -42,6 +42,7 @@ import com.betterhv.update.UpdateCheckState
 import com.betterhv.update.UpdateChecker
 import com.betterhv.update.UpdateProduct
 import com.betterhv.update.UpdateUiState
+import com.betterhv.update.NoteAppUpdateTaskState
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -204,11 +205,14 @@ private class DesktopAppController(private val native: JnaWindowsNativeApi) : Au
   private val inbox = DesktopInboxRepository(paths)
   private val notice = MutableStateFlow<String?>(null)
   private val updateUiState = MutableStateFlow(UpdateUiState())
+  private val notePackageStatus = MutableStateFlow<String?>(null)
   private val updateChecker = UpdateChecker()
   private val appVersion = loadNoteLinkVersion()
   private val mutableState = MutableStateFlow(DashboardState())
   private val pairingRevision = MutableStateFlow(0)
-  private val transfer = DesktopTransferService(native, settings, queue, inbox) { pairingRevision.value++ }
+  private val transfer = DesktopTransferService(native, settings, queue, inbox, paths.updateCache) {
+    pairingRevision.value++
+  }
   val state: StateFlow<DashboardState> = mutableState
 
   fun dashboardActions(owner: java.awt.Window) = DashboardActions(
@@ -231,18 +235,26 @@ private class DesktopAppController(private val native: JnaWindowsNativeApi) : Au
     checkForUpdates = { checkForUpdates(manual = true) },
     openRelease = ::openRelease,
     dismissUpdate = ::dismissUpdate,
+    importNotePackage = { chooseApk(owner)?.let(::importNotePackage) },
     dragInboxItem = { id -> desktopInboxDragModifier(inboxFile(id)) },
   )
 
   init {
     scope.launch {
-      val revisionAndUpdate = combine(pairingRevision, updateUiState) { _, update -> update }
+      transfer.noteUpdateState.collect { state ->
+        if (state != null) notePackageStatus.value = state.desktopText()
+      }
+    }
+    scope.launch {
+      val revisionAndUpdate = combine(pairingRevision, updateUiState, notePackageStatus) { _, update, packageStatus ->
+        update to packageStatus
+      }
       combine(queue.itemFlow, inbox.itemFlow, transfer.status, notice, revisionAndUpdate) {
           queued,
           received,
           status,
           currentNotice,
-          currentUpdate,
+          updateAndPackage,
         ->
         val pairings = settings.pairings
         val pairing = pairings.maxByOrNull(DesktopPairing::lastUsedAt)
@@ -295,7 +307,8 @@ private class DesktopAppController(private val native: JnaWindowsNativeApi) : Au
           },
           notice = currentNotice,
           appVersion = appVersion,
-          updateUiState = currentUpdate,
+          updateUiState = updateAndPackage.first,
+          notePackageStatus = updateAndPackage.second,
         )
       }.collect(mutableState)
     }
@@ -329,6 +342,15 @@ private class DesktopAppController(private val native: JnaWindowsNativeApi) : Au
         notice.value = noteLinkText("文字已加入发送队列", "Text added to send queue")
       }
       .onFailure { notice.value = it.message ?: "Could not add text" }
+  }
+
+  fun importNotePackage(file: File) = scope.launch {
+    notePackageStatus.value = noteLinkText("正在校验 APK…", "Verifying APK...")
+    runCatching { transfer.importNotePackage(file) }
+      .onSuccess { version ->
+        notePackageStatus.value = noteLinkText("已验证 BetterHvNote $version", "Verified BetterHvNote $version")
+      }
+      .onFailure { notePackageStatus.value = it.message ?: "Could not import Note APK" }
   }
 
   fun addClipboard() = scope.launch {
@@ -567,6 +589,23 @@ private fun findPortableDirectory(): File? {
   return developmentRoot.takeIf { it.resolve("Allow-NoteLink-Firewall.ps1").isFile }
 }
 
+private fun NoteAppUpdateTaskState.desktopText(): String = when (this) {
+  NoteAppUpdateTaskState.Resolving -> noteLinkText("正在查询 Note 正式版…", "Resolving the stable Note release...")
+  is NoteAppUpdateTaskState.Downloading -> noteLinkText(
+    "正在下载 $version：$bytesDownloaded/$totalBytes",
+    "Downloading $version: $bytesDownloaded/$totalBytes",
+  )
+  is NoteAppUpdateTaskState.UpToDate -> noteLinkText("请求设备已是最新版本", "The requesting Note is up to date")
+  is NoteAppUpdateTaskState.Ready -> noteLinkText(
+    "BetterHvNote $version 已验证并准备发送",
+    "BetterHvNote $version is verified and ready",
+  )
+  is NoteAppUpdateTaskState.Failed -> noteLinkText(
+    "准备更新失败：$message",
+    "Update preparation failed: $message",
+  )
+}
+
 private fun loadNoteLinkVersion(): String {
   val properties = Properties()
   val resource = Thread.currentThread().contextClassLoader
@@ -613,6 +652,14 @@ private fun chooseFiles(owner: java.awt.Window): List<File>? {
   return dialog.files.toList().takeIf(List<File>::isNotEmpty)
 }
 
+private fun chooseApk(owner: java.awt.Window): File? {
+  val dialog = FileDialog(owner as? Frame, noteLinkText("导入 Note APK", "Import Note APK"), FileDialog.LOAD).apply {
+    filenameFilter = java.io.FilenameFilter { _, name -> name.endsWith(".apk", ignoreCase = true) }
+    isVisible = true
+  }
+  return dialog.files.singleOrNull()
+}
+
 private fun chooseSaveLocation(owner: java.awt.Window, source: File?): File? {
   source ?: return null
   val dialog = FileDialog(
@@ -626,13 +673,11 @@ private fun chooseSaveLocation(owner: java.awt.Window, source: File?): File? {
   return dialog.file?.let { File(dialog.directory, it) }
 }
 
-private fun ContentKind.label() = if (this == ContentKind.IMAGE) {
-  noteLinkText(
-    "图片",
-    "Image",
-  )
-} else {
-  noteLinkText("文字", "Text")
+private fun ContentKind.label() = when (this) {
+  ContentKind.IMAGE -> noteLinkText("图片", "Image")
+  ContentKind.TEXT -> noteLinkText("文字", "Text")
+  ContentKind.PDF -> "PDF"
+  ContentKind.APP_PACKAGE -> noteLinkText("Note 安装包", "Note package")
 }
 private fun QueueState.label() = when (this) {
   QueueState.PENDING -> noteLinkText("等待发送", "Pending")

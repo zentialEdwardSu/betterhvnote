@@ -112,6 +112,8 @@ import com.betterhv.update.UpdateChecker
 import com.betterhv.update.UpdateInfo
 import com.betterhv.update.UpdateProduct
 import com.betterhv.update.UpdateUiState
+import com.betterhv.update.NoteAppUpdateCoordinator
+import com.betterhv.update.NoteAppUpdateTaskState
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -268,6 +270,7 @@ private fun BetterHvSendApp(
   val inboxItems by inbox.items.collectAsState()
   val transfer by NoteLinkTransferRuntime.snapshot.collectAsState()
   val transferLog by NoteLinkTransferRuntime.eventHistory.collectAsState()
+  val remoteNoteUpdate by NoteLinkTransferRuntime.noteUpdateState.collectAsState()
   val scope = rememberCoroutineScope()
   var textDialog by remember { mutableStateOf<String?>(null) }
   var pairingCode by remember { mutableStateOf<String?>(null) }
@@ -281,6 +284,7 @@ private fun BetterHvSendApp(
   var language by remember { mutableStateOf(settings.language) }
   var showSettings by remember { mutableStateOf(false) }
   var settingsMessage by remember { mutableStateOf<String?>(null) }
+  var notePackageStatus by remember { mutableStateOf<String?>(null) }
   val pairedDevices = remember(statusRevision) { pairing.pairedClients }
   val selectedDevice = pairedDevices.maxByOrNull(PairedDevice::lastUsedAt)
   val updateChecker = remember { UpdateChecker() }
@@ -370,6 +374,35 @@ private fun BetterHvSendApp(
         .onFailure { showNotice("Could not add PDF: ${it.message}") }
     }
   }
+  val apkPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+    if (uri == null) return@rememberLauncherForActivityResult
+    scope.launch {
+      notePackageStatus = noteLinkText("正在校验 APK…", "Verifying APK...")
+      runCatching {
+        withContext(Dispatchers.IO) {
+          val temporary = File(context.cacheDir, "import-note-${UUID.randomUUID()}.apk")
+          try {
+            context.contentResolver.openInputStream(uri).use { input ->
+              requireNotNull(input) { "Could not read selected APK" }
+              temporary.outputStream().buffered().use(input::copyTo)
+            }
+            NoteAppUpdateCoordinator(
+              scope,
+              File(context.filesDir, "note-update-cache"),
+              enqueue = { _, _, _ -> UUID.randomUUID() },
+            ).use { it.importLatest(temporary) }
+          } finally {
+            temporary.delete()
+          }
+        }
+      }.onSuccess { descriptor ->
+        notePackageStatus = noteLinkText(
+          "已验证 BetterHvNote ${descriptor.version.display}",
+          "Verified BetterHvNote ${descriptor.version.display}",
+        )
+      }.onFailure { notePackageStatus = it.message ?: "Could not import Note APK" }
+    }
+  }
   val camera = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { ok ->
     val uri = cameraUri
     if (ok && uri != null) {
@@ -407,6 +440,7 @@ private fun BetterHvSendApp(
         language = language,
         message = settingsMessage,
         updateUiState = updateUiState,
+        notePackageStatus = remoteNoteUpdate?.displayText() ?: notePackageStatus,
         onBack = {
           showSettings = false
           settingsMessage = null
@@ -463,6 +497,7 @@ private fun BetterHvSendApp(
         },
         onCheckUpdate = { checkForUpdates(true) },
         onOpenRelease = openRelease,
+        onImportNotePackage = { apkPicker.launch(arrayOf("application/vnd.android.package-archive")) },
       )
     } else {
       Scaffold(
@@ -869,6 +904,23 @@ private fun phoneFormatDuration(millis: Long): String {
   return if (seconds < 60) "${seconds}s" else "${seconds / 60}m ${seconds % 60}s"
 }
 
+private fun NoteAppUpdateTaskState.displayText(): String = when (this) {
+  NoteAppUpdateTaskState.Resolving -> noteLinkText("正在查询 Note 正式版…", "Resolving the stable Note release...")
+  is NoteAppUpdateTaskState.Downloading -> noteLinkText(
+    "正在下载 $version：$bytesDownloaded/$totalBytes",
+    "Downloading $version: $bytesDownloaded/$totalBytes",
+  )
+  is NoteAppUpdateTaskState.UpToDate -> noteLinkText("请求设备已是最新版本", "The requesting Note is up to date")
+  is NoteAppUpdateTaskState.Ready -> noteLinkText(
+    "BetterHvNote $version 已验证并准备发送",
+    "BetterHvNote $version is verified and ready",
+  )
+  is NoteAppUpdateTaskState.Failed -> noteLinkText(
+    "准备更新失败：$message",
+    "Update preparation failed: $message",
+  )
+}
+
 private enum class CacheToClear { SENT, RECEIVED }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -884,6 +936,7 @@ private fun SettingsScreen(
   language: NoteLinkLanguage,
   message: String?,
   updateUiState: UpdateUiState,
+  notePackageStatus: String?,
   onBack: () -> Unit,
   onSaveName: (String) -> Unit,
   onShowRecentTransferEventsChange: (Boolean) -> Unit,
@@ -892,6 +945,7 @@ private fun SettingsScreen(
   onClearReceived: () -> Unit,
   onCheckUpdate: () -> Unit,
   onOpenRelease: (String) -> Unit,
+  onImportNotePackage: () -> Unit,
 ) {
   var editedName by remember(displayName) { mutableStateOf(displayName) }
   var confirmation by remember { mutableStateOf<CacheToClear?>(null) }
@@ -988,6 +1042,22 @@ private fun SettingsScreen(
           onCheck = onCheckUpdate,
           onOpenRelease = onOpenRelease,
         )
+      }
+      item { HorizontalDivider() }
+      item {
+        Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp)) {
+          Text(noteLinkText("Note 安装包", "Note package"), style = MaterialTheme.typography.titleMedium)
+          Text(
+            notePackageStatus ?: noteLinkText(
+              "可导入最新正式版 APK；Note 请求更新时会优先复用。",
+              "Import the latest stable APK to reuse when Note requests an update.",
+            ),
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+          )
+          OutlinedButton(onClick = onImportNotePackage, modifier = Modifier.padding(top = 8.dp)) {
+            Text(noteLinkText("导入 Note APK", "Import Note APK"))
+          }
+        }
       }
       item { HorizontalDivider() }
       item {
@@ -1330,7 +1400,12 @@ private fun DeviceDropdown(
     Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
       Column(Modifier.weight(1f)) {
         Text(
-          if (item.kind == ContentKind.IMAGE) noteLinkText("图片", "Image") else noteLinkText("文字", "Text"),
+          when (item.kind) {
+            ContentKind.IMAGE -> noteLinkText("图片", "Image")
+            ContentKind.TEXT -> noteLinkText("文字", "Text")
+            ContentKind.PDF -> "PDF"
+            ContentKind.APP_PACKAGE -> noteLinkText("Note 安装包", "Note package")
+          },
           fontWeight = FontWeight.Bold,
         )
         Text(item.displayName.orEmpty(), maxLines = 2, overflow = TextOverflow.Ellipsis)

@@ -40,6 +40,13 @@ class GitHubReleaseSource(
           pageUrl = release.htmlUrl.orEmpty(),
           draft = release.draft,
           preRelease = release.preRelease,
+          assets = release.assets.orEmpty().map { asset ->
+            ReleaseAsset(
+              name = asset.name.orEmpty(),
+              downloadUrl = asset.downloadUrl.orEmpty(),
+              byteLength = asset.size ?: -1L,
+            )
+          },
         )
       } ?: throw IOException("Invalid GitHub response format")
     } catch (error: JsonParseException) {
@@ -67,6 +74,13 @@ class GitHubReleaseSource(
     @SerializedName("html_url") val htmlUrl: String?,
     val draft: Boolean,
     @SerializedName("prerelease") val preRelease: Boolean,
+    val assets: List<GitHubAsset>?,
+  )
+
+  private data class GitHubAsset(
+    val name: String?,
+    @SerializedName("browser_download_url") val downloadUrl: String?,
+    val size: Long?,
   )
 
   companion object {

@@ -91,6 +91,7 @@ import com.betterhv.note.storage.StartupBehavior
 import com.betterhv.note.template.TemplateStore
 import com.betterhv.transfer.android.TransferPermissions
 import com.betterhv.transfer.core.ContentKind
+import com.betterhv.transfer.core.RemotePayload
 import com.betterhv.transfer.core.TransferPhase
 import com.betterhv.transfer.core.TransferSnapshot
 import com.betterhv.transfer.core.isActiveTransferPhase
@@ -188,6 +189,7 @@ private fun contentKindLabel(kind: ContentKind): String = when (kind) {
   ContentKind.IMAGE -> noteText("图片", "image")
   ContentKind.TEXT -> noteText("文字", "text")
   ContentKind.PDF -> "PDF"
+  ContentKind.APP_PACKAGE -> noteText("应用安装包", "app package")
 }
 
 internal enum class InsertionStartDecision { CHOOSE_SOURCE, DISCOVER_REMOTE, REQUEST_PERMISSIONS }
@@ -265,6 +267,13 @@ private fun AppRoot(
   val updateNotificationState = rememberInAppNotificationState()
   val appScope = rememberCoroutineScope()
   val phoneTransfer = remember(context) { PhoneTransferClient(context) }
+  val noteAppInstaller = remember(context) { NoteAppInstaller(context) }
+  var noteAppUpdateState by remember {
+    mutableStateOf<NoteAppUpdateUiState>(
+      noteAppInstaller.pending()?.let { NoteAppUpdateUiState.Ready(it.versionName) }
+        ?: NoteAppUpdateUiState.Idle,
+    )
+  }
   val transferSnapshot by phoneTransfer.snapshot.collectAsState()
   val transferEvents by phoneTransfer.eventHistory.collectAsState()
   val insertion = remember(phoneTransfer) { InsertionCoordinator(phoneTransfer) }
@@ -385,6 +394,66 @@ private fun AppRoot(
     var pairingInProgress by remember { mutableStateOf(false) }
     var suppressNextOnlineDiscovery by remember { mutableStateOf(false) }
     var transferStatusRevision by remember { mutableIntStateOf(0) }
+    val updateViaNoteLink: (String) -> Unit = { clientId ->
+      if (!TransferPermissions.hasAllNotePermissions(context)) {
+        noteAppUpdateState = NoteAppUpdateUiState.Failed(
+          noteText("请先授予附近设备权限", "Grant Nearby devices permission first"),
+        )
+      } else {
+        appScope.launch {
+          runCatching {
+            phoneTransfer.requestNoteAppUpdate(clientId, BuildConfig.VERSION_NAME) { progress ->
+              appScope.launch {
+                noteAppUpdateState = when (progress) {
+                  PhoneTransferClient.NoteAppUpdateProgress.Resolving -> NoteAppUpdateUiState.Resolving
+                  is PhoneTransferClient.NoteAppUpdateProgress.Downloading -> NoteAppUpdateUiState.Downloading(
+                    progress.version, progress.bytesDownloaded, progress.totalBytes,
+                  )
+                  is PhoneTransferClient.NoteAppUpdateProgress.Transferring ->
+                    NoteAppUpdateUiState.Transferring(progress.version)
+                }
+              }
+            }
+          }.onSuccess { outcome ->
+            when (outcome) {
+              is PhoneTransferClient.NoteAppUpdateOutcome.UpToDate -> {
+                noteAppUpdateState = NoteAppUpdateUiState.UpToDate(outcome.latestVersion)
+              }
+              is PhoneTransferClient.NoteAppUpdateOutcome.Package -> {
+                val payload = outcome.lease.payload as? RemotePayload.AppPackage
+                if (payload == null) {
+                  runCatching { outcome.lease.commitAndAwait() }
+                  noteAppUpdateState = NoteAppUpdateUiState.Failed("NoteLink returned a non-APK payload")
+                } else {
+                  val staged = runCatching {
+                    withContext(Dispatchers.IO) {
+                      noteAppInstaller.validateAndStage(payload.stagedFile, outcome.version)
+                    }
+                  }
+                  runCatching { outcome.lease.commitAndAwait() }
+                  staged.onSuccess { pending ->
+                    noteAppUpdateState = NoteAppUpdateUiState.Ready(pending.versionName)
+                    if (!noteAppInstaller.launch(pending)) {
+                      showNotice(
+                        noteText(
+                          "请允许此来源安装应用，然后点击“继续安装”",
+                          "Allow installs from this source, then tap Continue installation",
+                        ),
+                      )
+                    }
+                  }.onFailure { error ->
+                    payload.stagedFile.delete()
+                    noteAppUpdateState = NoteAppUpdateUiState.Failed(error.message ?: "APK validation failed")
+                  }
+                }
+              }
+            }
+          }.onFailure { error ->
+            noteAppUpdateState = NoteAppUpdateUiState.Failed(error.message ?: "NoteLink update failed")
+          }
+        }
+      }
+    }
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
       var stopped = false
@@ -393,6 +462,7 @@ private fun AppRoot(
           Lifecycle.Event.ON_STOP -> stopped = true
 
           Lifecycle.Event.ON_RESUME -> {
+            noteAppInstaller.pending()?.let { noteAppUpdateState = NoteAppUpdateUiState.Ready(it.versionName) }
             if (stopped) {
               stopped = false
               appScope.launch {
@@ -1176,6 +1246,7 @@ private fun AppRoot(
               ContentKind.IMAGE -> available.imageCount
               ContentKind.TEXT -> available.textCount
               ContentKind.PDF -> available.pdfCount
+              ContentKind.APP_PACKAGE -> 0
             }
             Button(
               onClick = {
@@ -1559,6 +1630,7 @@ private fun AppRoot(
           shortcutBindings = shortcutBindings,
           shortcutBindingRequest = shortcutBindingRequest,
           updateUiState = updateUiState,
+          noteAppUpdateState = noteAppUpdateState,
         ),
         actions = SettingsActions(
           onDebugModeChange = { debugMode = it },
@@ -1671,6 +1743,11 @@ private fun AppRoot(
           onCancelTransfer = phoneTransfer::cancel,
           onCheckUpdate = { checkForUpdates(true) },
           onOpenRelease = openRelease,
+          onUpdateViaNoteLink = updateViaNoteLink,
+          onContinueNoteAppInstall = {
+            runCatching { noteAppInstaller.launch() }
+              .onFailure { noteAppUpdateState = NoteAppUpdateUiState.Failed(it.message ?: "Cannot open installer") }
+          },
           onClose = { settingsOpen = false },
         ),
       )

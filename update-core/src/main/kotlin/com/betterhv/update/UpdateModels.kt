@@ -11,7 +11,29 @@ data class ReleaseRecord(
   val pageUrl: String,
   val draft: Boolean,
   val preRelease: Boolean,
+  val assets: List<ReleaseAsset> = emptyList(),
 )
+
+data class ReleaseAsset(
+  val name: String,
+  val downloadUrl: String,
+  val byteLength: Long,
+)
+
+data class NotePackageDescriptor(
+  val version: AppVersion,
+  val tagName: String,
+  val releaseTitle: String,
+  val apk: ReleaseAsset,
+  val checksums: ReleaseAsset,
+  val expectedSha256: ByteArray,
+) {
+  override fun equals(other: Any?): Boolean = other is NotePackageDescriptor &&
+    version == other.version && tagName == other.tagName && releaseTitle == other.releaseTitle &&
+    apk == other.apk && checksums == other.checksums && expectedSha256.contentEquals(other.expectedSha256)
+
+  override fun hashCode(): Int = 31 * version.hashCode() + expectedSha256.contentHashCode()
+}
 
 data class UpdateInfo(
   val currentVersion: AppVersion,

@@ -18,6 +18,8 @@ import com.betterhv.transfer.core.QueueState
 import com.betterhv.transfer.core.QueueStore
 import com.betterhv.transfer.core.TransferLimits
 import com.betterhv.transfer.core.TransferOffer
+import com.betterhv.update.NotePackageDescriptor
+import com.betterhv.update.NotePackageResolver
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import java.io.File
@@ -147,6 +149,30 @@ class PhoneQueueRepository(context: Context) :
     }
   }
 
+  @Synchronized
+  fun enqueueAppPackage(source: File, descriptor: NotePackageDescriptor, destinationDeviceId: String): QueueItem {
+    require(source.isFile && source.length() == descriptor.apk.byteLength)
+    require(sha256(source).contentEquals(descriptor.expectedSha256))
+    items().filter {
+      it.kind == ContentKind.APP_PACKAGE && it.destinationDeviceId == destinationDeviceId &&
+        it.state in setOf(QueueState.PENDING, QueueState.FAILED)
+    }.forEach { delete(it.id) }
+    val id = UUID.randomUUID()
+    val temporary = File(outboxDir, "$id.tmp")
+    val target = File(outboxDir, "$id.apk")
+    try {
+      source.copyTo(temporary, overwrite = true)
+      check(temporary.renameTo(target)) { "Could not save Note APK" }
+      return QueueItem(
+        id, destinationDeviceId, ContentKind.APP_PACKAGE, NotePackageResolver.NOTE_PACKAGE_MIME,
+        target.length(), descriptor.expectedSha256, System.currentTimeMillis(), nextPosition(),
+        QueueState.PENDING, descriptor.apk.name,
+      ).also { insertWithPayload(it, target.relativeTo(appContext.filesDir).path, null) }
+    } catch (error: Throwable) {
+      temporary.delete(); target.delete(); throw error
+    }
+  }
+
   fun delete(id: UUID): Boolean {
     payloadFile(id)?.delete()
     val removed = remove(id)
@@ -227,6 +253,7 @@ class PhoneQueueRepository(context: Context) :
     count { it.kind == ContentKind.IMAGE },
     count { it.kind == ContentKind.TEXT },
     count { it.kind == ContentKind.PDF },
+    count { it.kind == ContentKind.APP_PACKAGE },
   )
 
   override fun leaseNext(kind: ContentKind, destinationDeviceId: String): SenderLease? {

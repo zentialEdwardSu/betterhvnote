@@ -92,6 +92,7 @@ data class SettingsState(
   val shortcutBindings: HardwareShortcutBindings,
   val shortcutBindingRequest: Pair<ShortcutScene, HardwareKeyId>?,
   val updateUiState: UpdateUiState,
+  val noteAppUpdateState: NoteAppUpdateUiState,
 )
 
 data class SettingsActions(
@@ -116,6 +117,8 @@ data class SettingsActions(
   val onCancelTransfer: () -> Unit,
   val onCheckUpdate: () -> Unit,
   val onOpenRelease: (String) -> Unit,
+  val onUpdateViaNoteLink: (String) -> Unit,
+  val onContinueNoteAppInstall: () -> Unit,
   val onClose: () -> Unit,
 )
 
@@ -141,6 +144,7 @@ fun SettingsScreen(state: SettingsState, actions: SettingsActions) {
   val shortcutBindings = state.shortcutBindings
   val shortcutBindingRequest = state.shortcutBindingRequest
   val updateUiState = state.updateUiState
+  val noteAppUpdateState = state.noteAppUpdateState
   val onDebugModeChange = actions.onDebugModeChange
   val onStartupBehaviorChange = actions.onStartupBehaviorChange
   val onSkipSourceSelectionChange = actions.onSkipSourceSelectionChange
@@ -162,6 +166,8 @@ fun SettingsScreen(state: SettingsState, actions: SettingsActions) {
   val onCancelTransfer = actions.onCancelTransfer
   val onCheckUpdate = actions.onCheckUpdate
   val onOpenRelease = actions.onOpenRelease
+  val onUpdateViaNoteLink = actions.onUpdateViaNoteLink
+  val onContinueNoteAppInstall = actions.onContinueNoteAppInstall
   val onClose = actions.onClose
   var pairingCode by remember { mutableStateOf("") }
   var selectedCandidateId by remember { mutableStateOf<String?>(null) }
@@ -258,6 +264,11 @@ fun SettingsScreen(state: SettingsState, actions: SettingsActions) {
               state = updateUiState,
               onCheck = onCheckUpdate,
               onOpenRelease = onOpenRelease,
+              pairedClients = pairedClients,
+              onlineClients = onlineClients,
+              noteLinkState = noteAppUpdateState,
+              onUpdateViaNoteLink = onUpdateViaNoteLink,
+              onContinueInstall = onContinueNoteAppInstall,
             )
             SettingRow(noteText("开源许可", "Open-source licenses"), onClick = { showOpenSourceLicenses = true }) {
               Text("AGPL-3.0-or-later", color = Color.DarkGray)
@@ -555,8 +566,15 @@ private fun UpdateSettingsSection(
   state: UpdateUiState,
   onCheck: () -> Unit,
   onOpenRelease: (String) -> Unit,
+  pairedClients: List<PairedDevice>,
+  onlineClients: List<PhoneTransferClient.AvailableNoteLink>,
+  noteLinkState: NoteAppUpdateUiState,
+  onUpdateViaNoteLink: (String) -> Unit,
+  onContinueInstall: () -> Unit,
 ) {
   val checkState = state.checkState
+  var chooseClient by remember { mutableStateOf(false) }
+  val online = onlineClients.map { it.client }
   Column(Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
     Text(noteText("应用更新", "App updates"), fontSize = 18.sp)
     Text(
@@ -610,6 +628,75 @@ private fun UpdateSettingsSection(
         Button(onClick = { onOpenRelease(available.info.releaseUrl) }) { Text(noteText("查看 Release", "View release")) }
       }
     }
+    Text(
+      when (noteLinkState) {
+        NoteAppUpdateUiState.Idle -> noteText(
+          "可由已配对的 NoteLink 代为下载并传输",
+          "A paired NoteLink can download and transfer the update",
+        )
+        NoteAppUpdateUiState.Resolving -> noteText("NoteLink 正在查询正式版…", "NoteLink is resolving the stable release...")
+        is NoteAppUpdateUiState.Downloading -> noteText(
+          "NoteLink 正在下载 ${noteLinkState.version}：${noteLinkState.downloaded}/${noteLinkState.total}",
+          "NoteLink is downloading ${noteLinkState.version}: ${noteLinkState.downloaded}/${noteLinkState.total}",
+        )
+        is NoteAppUpdateUiState.Transferring -> noteText(
+          "正在传输 ${noteLinkState.version}…",
+          "Transferring ${noteLinkState.version}...",
+        )
+        is NoteAppUpdateUiState.Ready -> noteText(
+          "${noteLinkState.version} 已验证，可继续安装",
+          "${noteLinkState.version} is verified and ready to install",
+        )
+        is NoteAppUpdateUiState.UpToDate -> noteLinkState.latestVersion?.let {
+          noteText("NoteLink 确认已是最新版本（$it）", "NoteLink reports this is up to date ($it)")
+        } ?: noteText("NoteLink 未找到正式版", "NoteLink found no stable release")
+        is NoteAppUpdateUiState.Failed -> noteText(
+          "NoteLink 更新失败：${noteLinkState.message}",
+          "NoteLink update failed: ${noteLinkState.message}",
+        )
+      },
+      color = if (noteLinkState is NoteAppUpdateUiState.Failed) Color.Red else Color.DarkGray,
+      modifier = Modifier.padding(top = 12.dp),
+    )
+    Row(Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+      if (noteLinkState is NoteAppUpdateUiState.Ready) {
+        Button(onClick = onContinueInstall) { Text(noteText("继续安装", "Continue installation")) }
+      } else {
+        Button(
+          enabled = pairedClients.isNotEmpty() && noteLinkState !is NoteAppUpdateUiState.Resolving &&
+            noteLinkState !is NoteAppUpdateUiState.Downloading && noteLinkState !is NoteAppUpdateUiState.Transferring,
+          onClick = {
+            when (online.size) {
+              1 -> onUpdateViaNoteLink(online.single().id)
+              else -> chooseClient = true
+            }
+          },
+        ) { Text(noteText("通过 NoteLink 更新", "Update via NoteLink")) }
+      }
+    }
+  }
+  if (chooseClient) {
+    AlertDialog(
+      onDismissRequest = { chooseClient = false },
+      title = { Text(noteText("选择 NoteLink", "Select NoteLink")) },
+      text = {
+        Column {
+          val candidates = online.ifEmpty { pairedClients }
+          if (online.isEmpty()) {
+            Text(
+              noteText(
+                "当前未发现在线客户端，将尝试连接已配对设备。",
+                "No client is currently online; a paired client will be tried.",
+              ),
+            )
+          }
+          candidates.forEach { client ->
+            TextButton(onClick = { chooseClient = false; onUpdateViaNoteLink(client.id) }) { Text(client.name) }
+          }
+        }
+      },
+      confirmButton = { TextButton(onClick = { chooseClient = false }) { Text(noteText("取消", "Cancel")) } },
+    )
   }
 }
 

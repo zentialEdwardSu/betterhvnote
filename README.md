@@ -63,6 +63,21 @@ On a connected Hanvon device, Android instrumentation tests can be run with:
 See `CLAUDE.md` for the pen pipeline, storage invariants, native integration,
 and module-specific development constraints.
 
+## 通过 NoteLink 更新 BetterHvNote
+
+安装了支持此功能的 BetterHvNote 与 NoteLink 后，可以在平板的“设置 → 常规 → 应用更新”中选择
+“通过 NoteLink 更新”。平板只负责发起请求；Android 或 Windows NoteLink 会查询最新正式版、下载并校验
+官方 `SHA256SUMS.txt`，再通过已经配对的加密通道把 ARM64 APK 传到平板。平板还会核对 APK 的包名、
+版本号和签名证书，随后交给 Android 系统安装器，由用户确认升级。
+
+如果不希望 NoteLink 下载完整 APK，可在 NoteLink 设置中选择“导入 Note APK”。导入文件可以改名，
+但其 SHA-256 必须与当前最新正式版的官方资产一致；校验清单无法访问或哈希不匹配时不会缓存或发送。
+首次使用系统安装器时，需要在平板上允许 BetterHvNote“安装未知应用”。取消安装后，可回到同一设置页
+点击“继续安装”。
+
+这条链路依赖平板上已有支持该协议的 BetterHvNote，并不用于首次安装。首个包含该能力的版本仍需通过
+原有方式安装；GitHub Release 页面入口也继续保留作为备用途径。预发布版本不会通过此链路分发。
+
 ## PDF notebooks
 
 The tablet app can import a local PDF as a separate notebook. MuPDF renders the

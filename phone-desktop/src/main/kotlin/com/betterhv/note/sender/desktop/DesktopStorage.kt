@@ -17,6 +17,8 @@ import com.betterhv.transfer.core.QueueState
 import com.betterhv.transfer.core.QueueStore
 import com.betterhv.transfer.core.TransferCrypto
 import com.betterhv.transfer.core.TransferLimits
+import com.betterhv.update.NotePackageDescriptor
+import com.betterhv.update.NotePackageResolver
 import com.betterhv.transfer.windows.WindowsNativeApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -36,6 +38,7 @@ class DesktopPaths(root: File = defaultRoot()) {
   val queueDatabase = File(this.root, "sender_queue.db")
   val inboxDatabase = File(this.root, "export_inbox.db")
   val settings = File(this.root, "settings.properties")
+  val updateCache = File(this.root, "updates").also(File::mkdirs)
 
   companion object {
     private fun defaultRoot(): File {
@@ -387,6 +390,29 @@ class DesktopQueueRepository(private val paths: DesktopPaths) :
     }
   }
 
+  @Synchronized fun enqueueAppPackage(
+    source: File,
+    descriptor: NotePackageDescriptor,
+    destinationDeviceId: String,
+  ): QueueItem {
+    require(source.isFile && source.length() == descriptor.apk.byteLength)
+    require(sha256(source).contentEquals(descriptor.expectedSha256))
+    items().filter {
+      it.kind == ContentKind.APP_PACKAGE && it.destinationDeviceId == destinationDeviceId &&
+        it.state in setOf(QueueState.PENDING, QueueState.FAILED)
+    }.forEach { delete(it.id) }
+    val id = UUID.randomUUID()
+    val target = File(paths.outbox, "$id.apk")
+    val temporary = File(paths.outbox, "$id.tmp")
+    source.copyTo(temporary, overwrite = true)
+    Files.move(temporary.toPath(), target.toPath(), StandardCopyOption.REPLACE_EXISTING)
+    return QueueItem(
+      id, destinationDeviceId, ContentKind.APP_PACKAGE, NotePackageResolver.NOTE_PACKAGE_MIME,
+      target.length(), descriptor.expectedSha256, System.currentTimeMillis(), nextPosition(),
+      displayName = descriptor.apk.name,
+    ).also { insertWithPayload(it, target.absolutePath, null); publish() }
+  }
+
   @Synchronized fun counts(): ContentCounts = items().filter { it.state == QueueState.PENDING }.let { available ->
     available.contentCounts()
   }
@@ -402,6 +428,7 @@ class DesktopQueueRepository(private val paths: DesktopPaths) :
     count { it.kind == ContentKind.IMAGE },
     count { it.kind == ContentKind.TEXT },
     count { it.kind == ContentKind.PDF },
+    count { it.kind == ContentKind.APP_PACKAGE },
   )
 
   @Synchronized fun leaseNext(kind: ContentKind, destinationDeviceId: String): DesktopSenderLease? {

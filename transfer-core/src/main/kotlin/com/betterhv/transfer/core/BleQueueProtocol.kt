@@ -31,6 +31,9 @@ sealed interface BleCommand {
   data class PushOffer(val offer: ExportTransferOffer) : BleCommand
   data class PushStatus(val artifactId: UUID) : BleCommand
   data class PushCancel(val artifactId: UUID) : BleCommand
+  data class RequestNoteAppUpdate(val operationId: UUID, val currentVersion: String) : BleCommand
+  data class NoteAppUpdateStatus(val operationId: UUID) : BleCommand
+  data class NoteAppUpdateCancel(val operationId: UUID) : BleCommand
 }
 
 sealed interface BleResponse {
@@ -50,6 +53,19 @@ sealed interface BleResponse {
   data class PushComplete(val artifactId: UUID) : BleResponse
   data class AlreadyReceived(val artifactId: UUID) : BleResponse
   data class Failure(val failure: TransferFailure) : BleResponse
+  data class UpdateResolving(val operationId: UUID) : BleResponse
+  data class UpdateDownloading(
+    val operationId: UUID,
+    val version: String,
+    val bytesDownloaded: Long,
+    val totalBytes: Long,
+  ) : BleResponse
+  data class UpdateUpToDate(val operationId: UUID, val latestVersion: String?) : BleResponse
+  data class UpdateReady(
+    val operationId: UUID,
+    val version: String,
+    val item: PreparedQueueItemSummary,
+  ) : BleResponse
 }
 
 class UnsupportedBleProtocolException(val receivedVersion: Int) :
@@ -61,6 +77,7 @@ object BleQueueProtocol {
   const val VERSION = 3
   const val TEXT_CHUNK_BYTES = 160
   const val CAPABILITY_EXPORT_PUSH = 1
+  const val CAPABILITY_NOTE_APP_UPDATE = 1 shl 1
   private const val MAX_STRING = 512
 
   fun encode(command: BleCommand): ByteArray = bytes { out ->
@@ -128,6 +145,18 @@ object BleQueueProtocol {
         out.writeByte(14);
         out.uuid(command.artifactId)
       }
+
+      is BleCommand.RequestNoteAppUpdate -> {
+        out.writeByte(15); out.uuid(command.operationId); out.safeUtf(command.currentVersion)
+      }
+
+      is BleCommand.NoteAppUpdateStatus -> {
+        out.writeByte(16); out.uuid(command.operationId)
+      }
+
+      is BleCommand.NoteAppUpdateCancel -> {
+        out.writeByte(17); out.uuid(command.operationId)
+      }
     }
   }
 
@@ -168,6 +197,12 @@ object BleQueueProtocol {
       13 -> BleCommand.PushStatus(value.uuid())
 
       14 -> BleCommand.PushCancel(value.uuid())
+
+      15 -> BleCommand.RequestNoteAppUpdate(value.uuid(), value.safeUtf())
+
+      16 -> BleCommand.NoteAppUpdateStatus(value.uuid())
+
+      17 -> BleCommand.NoteAppUpdateCancel(value.uuid())
 
       else -> error("Unknown BLE v3 command")
     }
@@ -252,6 +287,25 @@ object BleQueueProtocol {
         out.writeBoolean(response.failure.recoverable);
         out.writeByte(response.failure.causeMode?.ordinal?.plus(1) ?: 0)
       }
+
+      is BleResponse.UpdateResolving -> {
+        out.writeByte(13); out.uuid(response.operationId)
+      }
+
+      is BleResponse.UpdateDownloading -> {
+        out.writeByte(14); out.uuid(response.operationId); out.safeUtf(response.version)
+        out.writeLong(response.bytesDownloaded); out.writeLong(response.totalBytes)
+      }
+
+      is BleResponse.UpdateUpToDate -> {
+        out.writeByte(15); out.uuid(response.operationId); out.safeUtf(response.latestVersion.orEmpty())
+      }
+
+      is BleResponse.UpdateReady -> {
+        out.writeByte(16); out.uuid(response.operationId); out.safeUtf(response.version)
+        out.uuid(response.item.id); out.writeByte(response.item.kind.ordinal); out.safeUtf(response.item.mimeType)
+        out.writeLong(response.item.byteLength); out.write(response.item.sha256); out.safeUtf(response.item.displayName)
+      }
     }
   }
 
@@ -303,6 +357,25 @@ object BleQueueProtocol {
         val mode = value.readUnsignedByte().let { if (it == 0) null else TransferMode.entries[it - 1] }
         BleResponse.Failure(TransferFailure(code, message, recoverable, mode))
       }
+
+      13 -> BleResponse.UpdateResolving(value.uuid())
+
+      14 -> BleResponse.UpdateDownloading(value.uuid(), value.safeUtf(), value.readLong(), value.readLong())
+
+      15 -> BleResponse.UpdateUpToDate(value.uuid(), value.safeUtf().ifBlank { null })
+
+      16 -> BleResponse.UpdateReady(
+        value.uuid(),
+        value.safeUtf(),
+        PreparedQueueItemSummary(
+          value.uuid(),
+          ContentKind.entries[value.readUnsignedByte()],
+          value.safeUtf(),
+          value.readLong(),
+          ByteArray(QueueItem.SHA256_BYTES).also(value::readFully),
+          value.safeUtf(),
+        ),
+      )
 
       else -> error("Unknown BLE v3 response")
     }

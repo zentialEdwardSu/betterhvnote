@@ -177,6 +177,8 @@ class InsertionCoordinator(private val phone: PhoneTransferClient) : AutoCloseab
               finishLease(lease, commit = true)
               mutableState.value = InsertionState.Idle
             }
+
+            is RemotePayload.AppPackage -> error("App packages cannot be inserted into a notebook")
           }
         } catch (error: Throwable) {
           lease?.payload?.stagedFileOrNull()?.delete()
@@ -278,6 +280,7 @@ class InsertionCoordinator(private val phone: PhoneTransferClient) : AutoCloseab
   private fun RemotePayload.stagedFileOrNull() = when (this) {
     is RemotePayload.Image -> stagedFile
     is RemotePayload.Pdf -> stagedFile
+    is RemotePayload.AppPackage -> stagedFile
     is RemotePayload.Text -> null
   }
 
@@ -285,6 +288,7 @@ class InsertionCoordinator(private val phone: PhoneTransferClient) : AutoCloseab
     ContentKind.IMAGE -> noteText("图片", "image")
     ContentKind.TEXT -> noteText("文字", "text")
     ContentKind.PDF -> "PDF"
+    ContentKind.APP_PACKAGE -> noteText("应用安装包", "app package")
   }
 
   companion object {
