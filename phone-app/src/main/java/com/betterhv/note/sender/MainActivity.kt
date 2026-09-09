@@ -196,23 +196,7 @@ class MainActivity : ComponentActivity() {
     lifecycleScope.launch {
       runCatching {
         val added = withContext(Dispatchers.IO) {
-          val destination = pairing.pairedDevice?.id
-          val uris = when (action) {
-            Intent.ACTION_SEND -> listOfNotNull(
-              IntentCompat.getParcelableExtra(intent, Intent.EXTRA_STREAM, Uri::class.java),
-            )
-
-            else -> IntentCompat.getParcelableArrayListExtra(
-              intent,
-              Intent.EXTRA_STREAM,
-              Uri::class.java,
-            ).orEmpty()
-          }
-          buildList {
-            uris.forEach { add(queue.enqueueImage(it, destination).id) }
-            intent.getCharSequenceExtra(Intent.EXTRA_TEXT)?.toString()?.takeIf(String::isNotBlank)
-              ?.let { add(queue.enqueueText(it, destination).id) }
-          }
+          enqueueSharedIntent(this@MainActivity, intent, queue, pairing.pairedDevice?.id)
         }
         startWaiting()
         ShareUndoNotifier.show(this@MainActivity, added)
@@ -226,6 +210,48 @@ class MainActivity : ComponentActivity() {
     runCatching { TransferForegroundService.sync(this, queue.items().isNotEmpty()) }
       .onFailure { notice.value = "Content was saved; grant Nearby devices permission to wait for sending" }
   }
+}
+
+internal enum class SharedStreamKind { IMAGE, PDF }
+
+internal fun enqueueSharedIntent(
+  context: Context,
+  intent: Intent,
+  queue: PhoneQueueRepository,
+  destinationDeviceId: String?,
+): List<UUID> {
+  val action = intent.action
+  require(action == Intent.ACTION_SEND || action == Intent.ACTION_SEND_MULTIPLE) { "Unsupported share action" }
+  val uris = when (action) {
+    Intent.ACTION_SEND -> listOfNotNull(
+      IntentCompat.getParcelableExtra(intent, Intent.EXTRA_STREAM, Uri::class.java),
+    )
+    else -> IntentCompat.getParcelableArrayListExtra(intent, Intent.EXTRA_STREAM, Uri::class.java).orEmpty()
+  }
+  return buildList {
+    uris.forEach { uri ->
+      val resolvedMimeType = context.contentResolver.getType(uri)
+      when (classifySharedStream(resolvedMimeType, intent.type)) {
+        SharedStreamKind.IMAGE -> add(queue.enqueueImage(uri, destinationDeviceId).id)
+        SharedStreamKind.PDF -> add(queue.enqueuePdf(uri, destinationDeviceId).id)
+        null -> throw IllegalArgumentException(
+          "Unsupported shared file type: ${resolvedMimeType ?: intent.type ?: "unknown"}",
+        )
+      }
+    }
+    intent.getCharSequenceExtra(Intent.EXTRA_TEXT)?.toString()?.takeIf(String::isNotBlank)
+      ?.let { add(queue.enqueueText(it, destinationDeviceId).id) }
+  }
+}
+
+/** Resolves a shared stream from its provider MIME type, falling back to the intent declaration. */
+internal fun classifySharedStream(resolvedMimeType: String?, intentMimeType: String?): SharedStreamKind? =
+  classifySharedMimeType(resolvedMimeType) ?: classifySharedMimeType(intentMimeType)
+
+private fun classifySharedMimeType(mimeType: String?): SharedStreamKind? = when {
+  mimeType.equals("application/pdf", ignoreCase = true) -> SharedStreamKind.PDF
+  mimeType?.startsWith("image/", ignoreCase = true) == true -> SharedStreamKind.IMAGE
+  else -> null
 }
 
 @OptIn(ExperimentalMaterial3Api::class)

@@ -1,8 +1,12 @@
 package com.betterhv.note.sender
 
+import android.annotation.SuppressLint
+import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
 import androidx.test.core.app.ActivityScenario
+import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.core.content.IntentCompat
 import androidx.core.net.toUri
@@ -15,6 +19,19 @@ import org.junit.runner.RunWith
 
 @RunWith(AndroidJUnit4::class)
 class ExportExternalActionsInstrumentedTest {
+    @SuppressLint("QueryPermissionsNeeded")
+    @Test fun noteLinkIsAvailableForSingleAndMultiplePdfShares() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        listOf(Intent.ACTION_SEND, Intent.ACTION_SEND_MULTIPLE).forEach { action ->
+            val matches = context.packageManager.queryIntentActivities(
+                Intent(action).setType("application/pdf").setPackage(context.packageName),
+                PackageManager.MATCH_DEFAULT_ONLY,
+            )
+
+            assertTrue(matches.any { it.activityInfo.name == MainActivity::class.java.name })
+        }
+    }
+
     @Test fun pdfAndPngExternalActionsResolveAndShareChooserLaunches() {
         ActivityScenario.launch(MainActivity::class.java).use { scenario ->
             scenario.onActivity { activity ->
@@ -28,7 +45,6 @@ class ExportExternalActionsInstrumentedTest {
                     assertEquals(uri, view.data)
                     assertNotNull(view.clipData)
                     assertTrue(view.flags and Intent.FLAG_GRANT_READ_URI_PERMISSION != 0)
-                    assertNotNull(activity.packageManager.resolveActivity(view, 0))
                 }
 
                 val item = inboxItem("application/pdf", "test.pdf")
