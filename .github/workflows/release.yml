@@ -40,6 +40,10 @@ jobs:
         shell: pwsh
         run: ./.github/scripts/test-release-tag.ps1
 
+      - name: Test full changelog generator
+        shell: pwsh
+        run: ./.github/scripts/test-full-changelog.ps1
+
       - name: Validate tag and resolve commit
         id: release
         shell: pwsh
@@ -316,3 +320,77 @@ jobs:
               --generate-notes `
               --title $title
           }
+
+  update-changelog:
+    name: Update full changelog
+    needs: [prepare, publish]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    concurrency:
+      group: full-changelog
+      cancel-in-progress: false
+      queue: max
+    steps:
+      - name: Check out latest main with complete history
+        uses: actions/checkout@v6.0.2
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Fetch all release tags
+        shell: bash
+        run: git fetch --force --tags origin
+
+      - name: Generate full changelog from published releases
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $releaseTags = @(
+            gh api `
+              --paginate `
+              "repos/$env:GH_REPO/releases?per_page=100" `
+              --jq '.[] | select(.draft == false) | .tag_name'
+          )
+          if ($LASTEXITCODE -ne 0) { throw 'Could not list GitHub releases.' }
+
+          $publishedTags = @(
+            $releaseTags |
+              Where-Object { $_ -match '^(note|notelink)-v[0-9]+\.[0-9]+\.[0-9]+$' } |
+              Select-Object -Unique
+          )
+          if ($publishedTags -notcontains $env:RELEASE_TAG) {
+            throw "Published release '$env:RELEASE_TAG' was not returned by the GitHub Releases API."
+          }
+
+          ./.github/scripts/generate-full-changelog.ps1 `
+            -RepositoryPath $PWD `
+            -OutputPath 'FULL_CHANGELOG.md' `
+            -Tags $publishedTags
+
+      - name: Commit and push changelog when changed
+        shell: pwsh
+        env:
+          RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          git add -- FULL_CHANGELOG.md
+          git diff --cached --quiet
+          if ($LASTEXITCODE -eq 0) {
+            Write-Output 'FULL_CHANGELOG.md is already up to date.'
+            exit 0
+          }
+          if ($LASTEXITCODE -ne 1) { throw 'Could not inspect the staged changelog.' }
+
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit `
+            -m "chore(changelog): update for $env:RELEASE_TAG" `
+            -m 'Changelog-Generated: true'
+          if ($LASTEXITCODE -ne 0) { throw 'Could not commit FULL_CHANGELOG.md.' }
+          git push origin HEAD:main
+          if ($LASTEXITCODE -ne 0) { throw 'Could not push FULL_CHANGELOG.md to main.' }
