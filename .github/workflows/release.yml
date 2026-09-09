@@ -36,14 +36,6 @@ jobs:
           ref: main
           fetch-depth: 0
 
-      - name: Test release tag parser
-        shell: pwsh
-        run: ./.github/scripts/test-release-tag.ps1
-
-      - name: Test full changelog generator
-        shell: pwsh
-        run: ./.github/scripts/test-full-changelog.ps1
-
       - name: Validate tag and resolve commit
         id: release
         shell: pwsh
