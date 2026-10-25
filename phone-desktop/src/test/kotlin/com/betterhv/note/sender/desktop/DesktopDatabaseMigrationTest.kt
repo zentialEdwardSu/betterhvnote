@@ -1,6 +1,7 @@
 package com.betterhv.note.sender.desktop
 
 import com.betterhv.transfer.core.ContentKind
+import com.betterhv.transfer.core.SendOutcome
 import java.io.File
 import java.sql.DriverManager
 import java.util.UUID
@@ -9,9 +10,11 @@ import kotlin.test.Test
 import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
 
 class DesktopDatabaseMigrationTest {
-  @Test fun readsExistingVersionOneQueueAndInboxDatabases() {
+  @Test
+  fun readsExistingVersionOneQueueAndInboxDatabases() {
     val root = createTempDirectory("notelink-v1-").toFile()
     try {
       val paths = DesktopPaths(root)
@@ -38,7 +41,33 @@ class DesktopDatabaseMigrationTest {
     }
   }
 
-  @Test fun queueCountsAndLeasesAreIsolatedByDestination() {
+  @Test
+  fun historyDatabaseIsCreatedBesideExistingQueueData() {
+    val root = createTempDirectory("notelink-history-").toFile()
+    try {
+      val paths = DesktopPaths(root)
+      createQueueV1(paths.queueDatabase, UUID.randomUUID(), ByteArray(32))
+      DesktopQueueRepository(paths).use { queue ->
+        val item = queue.enqueueText("history text", null)
+        val lease = requireNotNull(queue.leaseNext(ContentKind.TEXT, "note"))
+        lease.commit()
+
+        assertTrue(paths.historyDatabase.isFile)
+        val entry = queue.historyFlow.value.single()
+        assertEquals(SendOutcome.SUCCEEDED, entry.outcome)
+        assertEquals("history text", entry.text)
+        assertEquals(item.id, entry.queueItemId)
+
+        val requeued = requireNotNull(queue.requeueHistory(entry.id, "note", setOf("note")))
+        assertEquals(1, queue.items().count { it.id == requeued })
+      }
+    } finally {
+      root.deleteRecursively()
+    }
+  }
+
+  @Test
+  fun queueCountsAndLeasesAreIsolatedByDestination() {
     val root = createTempDirectory("notelink-multi-queue-").toFile()
     try {
       val paths = DesktopPaths(root)
@@ -77,23 +106,24 @@ class DesktopDatabaseMigrationTest {
                 payload_path TEXT, text_content TEXT)"""
         )
       }
-      connection.prepareStatement("INSERT INTO queue_items VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)").use {
-        it.setString(1, id.toString());
-        it.setString(2, null);
-        it.setString(3, "IMAGE")
-        it.setString(4, "image/png");
-        it.setLong(5, 42);
-        it.setBytes(6, hash);
-        it.setLong(7, 10)
-        it.setLong(8, 0);
-        it.setString(9, "PENDING");
-        it.setString(10, "legacy.png")
-        it.setObject(11, null);
-        it.setObject(12, null);
-        it.setString(13, "outbox/$id.bin");
-        it.setObject(14, null)
-        it.executeUpdate()
-      }
+      connection.prepareStatement("INSERT INTO queue_items VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)")
+        .use {
+          it.setString(1, id.toString());
+          it.setString(2, null);
+          it.setString(3, "IMAGE")
+          it.setString(4, "image/png");
+          it.setLong(5, 42);
+          it.setBytes(6, hash);
+          it.setLong(7, 10)
+          it.setLong(8, 0);
+          it.setString(9, "PENDING");
+          it.setString(10, "legacy.png")
+          it.setObject(11, null);
+          it.setObject(12, null);
+          it.setString(13, "outbox/$id.bin");
+          it.setObject(14, null)
+          it.executeUpdate()
+        }
     }
   }
 

@@ -600,7 +600,7 @@ class PhoneTransferClient(context: Context) :
       )
     }
     val resolvedNegotiation = negotiation ?: negotiate(session, pairedPhoneId, key)
-    val canLan = !fastLanAttempted && resolvedNegotiation.ssidMatch == SsidMatch.MATCH && lanEndpoint != null &&
+    val canLan = !fastLanAttempted && resolvedNegotiation.ssidMatch != SsidMatch.MISMATCH && lanEndpoint != null &&
       TransferModes.contains(local.modes, TransferMode.LAN) &&
       TransferModes.contains(resolvedNegotiation.remote.modes, TransferMode.LAN)
     if (canLan) {
@@ -645,7 +645,8 @@ class PhoneTransferClient(context: Context) :
     throw firstFailure ?: TransferChannelException(
       TransferFailure(
         TransferErrorCode.UNSUPPORTED_MODE,
-        "No large-file channel is available",
+        "No large-file channel is available (SSID ${resolvedNegotiation.ssidMatch}, " +
+          "remote ${TransferModes.describe(resolvedNegotiation.remote.modes)}, LAN ${lanEndpoint != null})",
         false,
       )
     )
@@ -724,7 +725,7 @@ class PhoneTransferClient(context: Context) :
       context.pairingKey,
     )
     val remoteLan = resolvedNegotiation.remote.lanEndpoint
-    val canLan = resolvedNegotiation.ssidMatch == SsidMatch.MATCH && remoteLan != null &&
+    val canLan = resolvedNegotiation.ssidMatch != SsidMatch.MISMATCH && remoteLan != null &&
       remoteLan != fastLanEndpoint &&
       TransferModes.contains(local.modes, TransferMode.LAN) &&
       TransferModes.contains(resolvedNegotiation.remote.modes, TransferMode.LAN)
@@ -755,7 +756,8 @@ class PhoneTransferClient(context: Context) :
       throw firstFailure ?: TransferChannelException(
         TransferFailure(
           TransferErrorCode.UNSUPPORTED_MODE,
-          "No large-file channel is available",
+          "No large-file channel is available (SSID ${resolvedNegotiation.ssidMatch}, " +
+            "remote ${TransferModes.describe(resolvedNegotiation.remote.modes)}, LAN ${remoteLan != null})",
           false,
         )
       )
@@ -828,6 +830,12 @@ class PhoneTransferClient(context: Context) :
       remoteModes = negotiation.remote.modes,
       ssidMatch = negotiation.ssidMatch,
       wifiDirectGroupReady = negotiation.remote.wifiDirectEndpoint != null,
+    )
+    Log.i(
+      TAG,
+      "negotiation ssid=${negotiation.ssidMatch} localKnown=${local.ssidFingerprint != null} " +
+        "remoteKnown=${negotiation.remote.ssidFingerprint != null} remoteModes=" +
+        TransferModes.describe(negotiation.remote.modes),
     )
     emitEvent(TransferEvent.CapabilityNegotiated(local.modes, negotiation.remote.modes, negotiation.ssidMatch))
     return negotiation

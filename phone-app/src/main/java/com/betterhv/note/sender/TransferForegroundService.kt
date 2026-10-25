@@ -37,8 +37,15 @@ class TransferForegroundService : Service() {
 
   override fun onCreate() {
     super.onCreate()
-    queue = PhoneQueueRepository(this)
     pairing = AndroidPairingController(this)
+    val settings = NoteLinkSettings(this)
+    queue = PhoneQueueRepository(
+      this,
+      sendOrder = { settings.sendOrder },
+      deviceName = { id ->
+        id?.let { deviceId -> pairing.pairedClients.firstOrNull { it.id == deviceId }?.name }
+      },
+    )
     inbox = ExportInboxRepository(this)
     highBandwidth = HighBandwidthSessionManager(this, serviceScope).also { it.start() }
     processor = PhoneCommandProcessor(this, queue, inbox, pairing, highBandwidth, ::refreshOrStop)
@@ -84,8 +91,6 @@ class TransferForegroundService : Service() {
         queue,
         { _, bytes -> processor.handle(bytes) },
       ).also(AndroidSenderEndpoint::start)
-    } else {
-      endpoint?.refreshAdvertisement()
     }
     return START_STICKY
   }
@@ -140,13 +145,17 @@ class TransferForegroundService : Service() {
     val phaseText = when (transfer.phase) {
       TransferPhase.IDLE -> null
 
-      TransferPhase.TRANSFERRING -> "${transfer.mode?.name ?: noteLinkText(
-        "网络",
-        "Network",
-      )} · ${transfer.bytesTransferred}/${transfer.totalBytes} ${noteLinkText(
-        "字节",
-        "bytes",
-      )} · ${transfer.bytesPerSecond} B/s"
+      TransferPhase.TRANSFERRING -> "${
+        transfer.mode?.name ?: noteLinkText(
+          "网络",
+          "Network",
+        )
+      } · ${transfer.bytesTransferred}/${transfer.totalBytes} ${
+        noteLinkText(
+          "字节",
+          "bytes",
+        )
+      } · ${transfer.bytesPerSecond} B/s"
 
       TransferPhase.FAILED -> transfer.lastFailure?.let {
         "${it.code}: ${it.message}"
@@ -156,22 +165,40 @@ class TransferForegroundService : Service() {
     }
     val groupText = when (group) {
       is HostedGroupState.Ready -> noteLinkText("Wi-Fi Direct 已准备", "Wi-Fi Direct ready")
-      is HostedGroupState.Preparing -> noteLinkText("正在准备 Wi-Fi Direct", "Preparing Wi-Fi Direct")
+      is HostedGroupState.Preparing -> noteLinkText(
+        "正在准备 Wi-Fi Direct",
+        "Preparing Wi-Fi Direct"
+      )
+
       is HostedGroupState.Unavailable -> "Wi-Fi Direct unavailable"
       HostedGroupState.Stopped -> noteLinkText("Wi-Fi Direct 已停止", "Wi-Fi Direct stopped")
     }
     val diagnostic = buildList {
       add(phaseText ?: noteLinkText("等待传输", "Waiting for transfer"))
       add(
-        "SSID ${transfer.ssidMatch} · ${noteLinkText(
-          "本端",
-          "local",
-        )} modes=${transfer.localModes} · ${noteLinkText("对端", "remote")} modes=${transfer.remoteModes}",
+        "SSID ${transfer.ssidMatch} · ${
+          noteLinkText(
+            "本端",
+            "local",
+          )
+        } modes=${transfer.localModes} · ${
+          noteLinkText(
+            "对端",
+            "remote"
+          )
+        } modes=${transfer.remoteModes}",
       )
       transfer.endpoint?.let { add("${it.host}:${it.port}") }
       add("Wi-Fi Direct $groupText · attempt=${transfer.attempt} · fallback=${transfer.fallbackCount}")
       transfer.etaMillis?.let {
-        add("${noteLinkText("平均", "Average")} ${transfer.averageBytesPerSecond} B/s · ETA ${it / 1000}s")
+        add(
+          "${
+            noteLinkText(
+              "平均",
+              "Average"
+            )
+          } ${transfer.averageBytesPerSecond} B/s · ETA ${it / 1000}s"
+        )
       }
       transfer.lastFailure?.let { add("${it.code} · recoverable=${it.recoverable}") }
     }.joinToString("\n")
@@ -191,7 +218,11 @@ class TransferForegroundService : Service() {
       .setStyle(NotificationCompat.BigTextStyle().bigText(diagnostic))
       .setContentIntent(open).setOngoing(true)
       .addAction(0, noteLinkText("暂停等待", "Pause"), pause)
-    if (transfer.canCancel) builder.addAction(0, noteLinkText("取消传输", "Cancel transfer"), cancel)
+    if (transfer.canCancel) builder.addAction(
+      0,
+      noteLinkText("取消传输", "Cancel transfer"),
+      cancel
+    )
     val notification = builder.build()
     ServiceCompat.startForeground(
       this,
@@ -203,7 +234,11 @@ class TransferForegroundService : Service() {
 
   private fun createChannel() {
     getSystemService(NotificationManager::class.java).createNotificationChannel(
-      NotificationChannel(CHANNEL, noteLinkText("Note 传输", "Note transfers"), NotificationManager.IMPORTANCE_LOW),
+      NotificationChannel(
+        CHANNEL,
+        noteLinkText("Note 传输", "Note transfers"),
+        NotificationManager.IMPORTANCE_LOW
+      ),
     )
   }
 
@@ -229,7 +264,8 @@ class TransferForegroundService : Service() {
     }
 
     fun setReceiveEnabled(context: Context, enabled: Boolean) {
-      context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit { putBoolean(KEY_RECEIVE, enabled) }
+      context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        .edit { putBoolean(KEY_RECEIVE, enabled) }
     }
 
     fun settingsChanged(context: Context, hasItems: Boolean) {

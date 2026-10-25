@@ -17,8 +17,11 @@ class DebugControlReceiver : BroadcastReceiver() {
             val pairing = AndroidPairingController(context)
             when (intent.action) {
                 ACTION_PAIR -> pairing.confirmManual(
-                    "betterhv-note", "N10Pro", requireNotNull(intent.getStringExtra(EXTRA_CODE))
+                    intent.getStringExtra(EXTRA_CLIENT_ID) ?: "betterhv-note",
+                    intent.getStringExtra(EXTRA_NAME) ?: "N10Pro",
+                    requireNotNull(intent.getStringExtra(EXTRA_CODE))
                 )
+                ACTION_UNPAIR -> pairing.unpair(requireNotNull(intent.getStringExtra(EXTRA_CLIENT_ID)))
                 ACTION_TEXT -> queue.enqueueText(
                     intent.getStringExtra(EXTRA_TEXT) ?: "BetterHv BLE debug text",
                     pairing.pairedDevice?.id
@@ -56,11 +59,14 @@ class DebugControlReceiver : BroadcastReceiver() {
 
     companion object {
         const val ACTION_PAIR = "com.betterhv.note.sender.debug.PAIR"
+        const val ACTION_UNPAIR = "com.betterhv.note.sender.debug.UNPAIR"
         const val ACTION_TEXT = "com.betterhv.note.sender.debug.TEXT"
         const val ACTION_IMAGE = "com.betterhv.note.sender.debug.IMAGE"
         const val ACTION_DELETE_DEBUG = "com.betterhv.note.sender.debug.DELETE_IMAGE"
         const val ACTION_CLEAR = "com.betterhv.note.sender.debug.CLEAR"
         const val EXTRA_CODE = "code"
+        const val EXTRA_CLIENT_ID = "clientId"
+        const val EXTRA_NAME = "name"
         const val EXTRA_TEXT = "text"
         const val EXTRA_IMAGE_BYTES = "imageBytes"
         const val EXTRA_MOVE_TO_FRONT = "moveToFront"

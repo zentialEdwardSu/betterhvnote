@@ -7,15 +7,24 @@ import android.database.sqlite.SQLiteOpenHelper
 import android.graphics.BitmapFactory
 import android.net.Uri
 import android.provider.OpenableColumns
+import android.util.Log
 import androidx.core.database.sqlite.transaction
 import com.betterhv.transfer.android.SenderContentProvider
 import com.betterhv.transfer.android.SenderLease
 import com.betterhv.transfer.core.ContentCounts
 import com.betterhv.transfer.core.ContentKind
+import com.betterhv.transfer.core.HistoryRetentionPolicy
 import com.betterhv.transfer.core.QueueCoordinator
 import com.betterhv.transfer.core.QueueItem
 import com.betterhv.transfer.core.QueueState
 import com.betterhv.transfer.core.QueueStore
+import com.betterhv.transfer.core.RequeueDecision
+import com.betterhv.transfer.core.RequeueSource
+import com.betterhv.transfer.core.SendHistoryEntry
+import com.betterhv.transfer.core.SendHistoryRecorder
+import com.betterhv.transfer.core.SendOrder
+import com.betterhv.transfer.core.SendOrderSelector
+import com.betterhv.transfer.core.SendOutcome
 import com.betterhv.transfer.core.TransferLimits
 import com.betterhv.transfer.core.TransferOffer
 import com.betterhv.update.NotePackageDescriptor
@@ -24,21 +33,33 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import java.io.File
 import java.io.FileInputStream
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption
 import java.security.MessageDigest
 import java.util.UUID
 
-class PhoneQueueRepository(context: Context) :
+class PhoneQueueRepository(
+  context: Context,
+  sendOrder: () -> SendOrder = { SendOrder.QUEUE },
+  private val deviceName: (String?) -> String? = { null },
+) :
   QueueStore,
   SenderContentProvider,
   AutoCloseable {
   internal val appContext = context.applicationContext
   private val db = QueueDatabase(appContext)
   private val outboxDir = File(appContext.filesDir, "outbox").also(File::mkdirs)
-  private val coordinator = QueueCoordinator(this)
+  private val coordinator = QueueCoordinator(this, order = sendOrder)
+  private val history = PhoneSendHistoryStore(appContext)
+  private val retention = HistoryRetentionPolicy()
+  private val recorder = SendHistoryRecorder(history, policy = retention)
   val itemFlow: StateFlow<List<QueueItem>> = sharedItems
+  val historyFlow: StateFlow<List<SendHistoryEntry>> = sharedHistory
 
   init {
     publish()
+    publishHistory()
+    reconcileHistory()
   }
 
   fun enqueueImage(uri: Uri, destinationDeviceId: String?): QueueItem {
@@ -137,8 +158,16 @@ class PhoneQueueRepository(context: Context) :
       check(temp.renameTo(target)) { "Could not save queued PDF" }
       val now = System.currentTimeMillis()
       val item = QueueItem(
-        id, destinationDeviceId, ContentKind.PDF, "application/pdf", target.length(), sha256(target),
-        now, nextPosition(), QueueState.PENDING, displayName ?: "文档.pdf",
+        id,
+        destinationDeviceId,
+        ContentKind.PDF,
+        "application/pdf",
+        target.length(),
+        sha256(target),
+        now,
+        nextPosition(),
+        QueueState.PENDING,
+        displayName ?: "文档.pdf",
       )
       insertWithPayload(item, target.relativeTo(appContext.filesDir).path, null)
       return item
@@ -149,8 +178,148 @@ class PhoneQueueRepository(context: Context) :
     }
   }
 
+  /** Enqueues an image that ShareIntake already copied and classified from its bytes. */
   @Synchronized
-  fun enqueueAppPackage(source: File, descriptor: NotePackageDescriptor, destinationDeviceId: String): QueueItem {
+  fun enqueueImageFile(
+    source: File,
+    mimeType: String,
+    displayName: String?,
+    destinationDeviceId: String?,
+  ): QueueItem {
+    require(source.isFile) { "Shared image is missing" }
+    require(mimeType.startsWith("image/")) { "Only images are supported" }
+    require(source.length() in 1..TransferLimits.MAX_IMAGE_BYTES) {
+      "Image must be non-empty and cannot exceed 64 MiB"
+    }
+    return enqueueFile(
+      source,
+      ContentKind.IMAGE,
+      mimeType,
+      displayName ?: "图片",
+      destinationDeviceId,
+    )
+  }
+
+  /** Enqueues a PDF that ShareIntake already copied and classified from its bytes. */
+  @Synchronized
+  fun enqueuePdfFile(source: File, displayName: String?, destinationDeviceId: String?): QueueItem {
+    require(source.isFile) { "Shared PDF is missing" }
+    require(source.length() in 1..TransferLimits.MAX_PDF_BYTES) {
+      "PDF must be non-empty and cannot exceed 512 MiB"
+    }
+    require(isPdf(source)) { "File is not a valid PDF" }
+    return enqueueFile(
+      source,
+      ContentKind.PDF,
+      "application/pdf",
+      displayName ?: "文档.pdf",
+      destinationDeviceId,
+    )
+  }
+
+  private fun enqueueFile(
+    source: File,
+    kind: ContentKind,
+    mimeType: String,
+    displayName: String,
+    destinationDeviceId: String?,
+  ): QueueItem {
+    val id = UUID.randomUUID()
+    val target = File(outboxDir, "$id.bin")
+    moveFile(source, target)
+    return try {
+      val item = QueueItem(
+        id, destinationDeviceId, kind, mimeType, target.length(), sha256(target),
+        System.currentTimeMillis(), nextPosition(), QueueState.PENDING, displayName,
+      )
+      insertWithPayload(item, target.relativeTo(appContext.filesDir).path, null)
+      item
+    } catch (error: Throwable) {
+      target.delete()
+      throw error
+    }
+  }
+
+  private fun moveFile(source: File, target: File) {
+    val moved = runCatching {
+      Files.move(source.toPath(), target.toPath(), StandardCopyOption.REPLACE_EXISTING)
+    }.isSuccess || source.renameTo(target)
+    if (!moved) {
+      source.copyTo(target, overwrite = true)
+      source.delete()
+    }
+  }
+
+  /** Whether a retained payload or text payload is still available for re-sending. */
+  fun canResend(entry: SendHistoryEntry): Boolean =
+    entry.text != null || (entry.payloadPath != null && history.payloadExists(entry))
+
+  /**
+   * Re-queues a history entry without consuming it. The original destination wins while it is still
+   * paired; otherwise the current selection becomes the destination.
+   */
+  @Synchronized
+  fun requeueHistory(
+    historyId: UUID,
+    currentDeviceId: String?,
+    pairedDeviceIds: Set<String>,
+  ): UUID? {
+    val entry = history.find(historyId) ?: return null
+    val payload = entry.payloadPath?.let(history::resolvePayload)
+    val decision =
+      recorder.requeueDecision(entry, payload?.isFile == true, pairedDeviceIds, currentDeviceId)
+    if (decision !is RequeueDecision.Ready) return null
+    val destination = decision.plan.destinationDeviceId
+    return when (val source = decision.plan.source) {
+      is RequeueSource.Text -> enqueueText(source.value, destination).id
+      is RequeueSource.Payload -> requeuePayload(entry, source.path, destination)
+    }
+  }
+
+  @Synchronized
+  fun deleteHistory(historyId: UUID): Boolean {
+    history.find(historyId)?.let(history::deletePayload)
+    val removed = history.delete(historyId)
+    publishHistory()
+    return removed
+  }
+
+  @Synchronized
+  fun clearHistory() {
+    history.entries().forEach(history::deletePayload)
+    history.clear()
+    publishHistory()
+  }
+
+  private fun requeuePayload(entry: SendHistoryEntry, path: String, destination: String?): UUID? {
+    val source = history.resolvePayload(path)?.takeIf(File::isFile) ?: return null
+    val temp = File(appContext.cacheDir, "requeue-${UUID.randomUUID()}.bin")
+    return runCatching {
+      source.copyTo(temp, overwrite = true)
+      when (entry.kind) {
+        ContentKind.PDF -> enqueuePdfFile(temp, entry.displayName, destination).id
+        else -> enqueueImageFile(temp, entry.mimeType, entry.displayName, destination).id
+      }
+    }.also { temp.delete() }.getOrNull()
+  }
+
+  private fun isPdf(file: File): Boolean = file.inputStream().use { input ->
+    val header = ByteArray(PDF_MAGIC.size)
+    var read = 0
+    while (read < header.size) {
+      val count = input.read(header, read, header.size - read)
+      if (count < 0) break
+      read += count
+    }
+    read == header.size && header.contentEquals(PDF_MAGIC)
+  }
+
+  @Synchronized
+  fun enqueueAppPackage(
+    source: File,
+    descriptor: NotePackageDescriptor,
+    destinationDeviceId: String,
+  ): QueueItem {
     require(source.isFile && source.length() == descriptor.apk.byteLength)
     require(sha256(source).contentEquals(descriptor.expectedSha256))
     items().filter {
@@ -173,9 +342,12 @@ class PhoneQueueRepository(context: Context) :
     }
   }
 
+  @Synchronized
   fun delete(id: UUID): Boolean {
+    find(id)?.takeIf { it.state == QueueState.FAILED }?.let(::recordFailure)
     payloadFile(id)?.delete()
     val removed = remove(id)
+    if (removed) pruneHistory()
     publish()
     return removed
   }
@@ -186,6 +358,7 @@ class PhoneQueueRepository(context: Context) :
       it.state == QueueState.PENDING || it.state == QueueState.FAILED
     }
     if (removable.isEmpty()) return 0
+    removable.filter { it.state == QueueState.FAILED }.forEach(::recordFailure)
     val payloads = removable.mapNotNull { payloadFile(it.id) }
     val database = writable()
     database.transaction {
@@ -197,6 +370,7 @@ class PhoneQueueRepository(context: Context) :
       }
     }
     payloads.forEach(File::delete)
+    pruneHistory()
     publish()
     return removable.size
   }
@@ -262,7 +436,8 @@ class PhoneQueueRepository(context: Context) :
     return PhoneSenderLease(item)
   }
 
-  @Synchronized override fun items(): List<QueueItem> = readable().query(
+  @Synchronized
+  override fun items(): List<QueueItem> = readable().query(
     "queue_items",
     ITEM_COLUMNS,
     null,
@@ -272,7 +447,8 @@ class PhoneQueueRepository(context: Context) :
     "position ASC, created_at ASC",
   ).use { cursor -> buildList { while (cursor.moveToNext()) add(cursor.item()) } }
 
-  @Synchronized override fun find(id: UUID): QueueItem? = readable().query(
+  @Synchronized
+  override fun find(id: UUID): QueueItem? = readable().query(
     "queue_items",
     ITEM_COLUMNS,
     "id=?",
@@ -282,29 +458,36 @@ class PhoneQueueRepository(context: Context) :
     null,
   ).use { if (it.moveToFirst()) it.item() else null }
 
-  @Synchronized override fun next(kind: ContentKind, destinationDeviceId: String?, now: Long): QueueItem? {
+  @Synchronized
+  override fun next(
+    kind: ContentKind,
+    destinationDeviceId: String?,
+    now: Long,
+    order: SendOrder,
+  ): QueueItem? {
     releaseExpiredInternal(now)
-    return items().firstOrNull {
-      it.kind == kind && it.state == QueueState.PENDING &&
-        (it.destinationDeviceId == null || it.destinationDeviceId == destinationDeviceId)
-    }
+    return SendOrderSelector.nextPending(items(), kind, destinationDeviceId, order)
   }
 
-  @Synchronized override fun insert(item: QueueItem) = insertWithPayload(item, null, null)
+  @Synchronized
+  override fun insert(item: QueueItem) = insertWithPayload(item, null, null)
 
-  @Synchronized override fun update(item: QueueItem) {
+  @Synchronized
+  override fun update(item: QueueItem) {
     val values = itemValues(item)
     check(writable().update("queue_items", values, "id=?", arrayOf(item.id.toString())) == 1)
     publish()
   }
 
-  @Synchronized override fun remove(id: UUID): Boolean {
+  @Synchronized
+  override fun remove(id: UUID): Boolean {
     val result = writable().delete("queue_items", "id=?", arrayOf(id.toString())) > 0
     publish()
     return result
   }
 
-  @Synchronized override fun reorder(idsInOrder: List<UUID>) {
+  @Synchronized
+  override fun reorder(idsInOrder: List<UUID>) {
     require(idsInOrder.toSet() == items().map(QueueItem::id).toSet())
     val database = writable()
     database.transaction {
@@ -317,12 +500,14 @@ class PhoneQueueRepository(context: Context) :
             arrayOf(id.toString()),
           )
         }
-      } finally { }
+      } finally {
+      }
     }
     publish()
   }
 
-  @Synchronized override fun releaseExpired(now: Long): Int = releaseExpiredInternal(
+  @Synchronized
+  override fun releaseExpired(now: Long): Int = releaseExpiredInternal(
     now,
   ).also { if (it > 0) publish() }
 
@@ -365,7 +550,10 @@ class PhoneQueueRepository(context: Context) :
     put("position", item.position)
     put("state", item.state.name)
     put("display_name", item.displayName)
-    if (item.leaseExpiresAt == null) putNull("lease_expires_at") else put("lease_expires_at", item.leaseExpiresAt)
+    if (item.leaseExpiresAt == null) putNull("lease_expires_at") else put(
+      "lease_expires_at",
+      item.leaseExpiresAt,
+    )
     put("failure_reason", item.failureReason)
   }
 
@@ -403,13 +591,89 @@ class PhoneQueueRepository(context: Context) :
   ).use { if (it.moveToFirst()) it.getString(0) else null }
 
   private fun nextPosition(): Long = (items().maxOfOrNull(QueueItem::position) ?: -1L) + 1L
+
   private fun publish() {
     sharedItems.value = items()
   }
+
+  private fun publishHistory() {
+    sharedHistory.value = history.entries(retention.maxEntries)
+  }
+
+  /**
+   * Commit sequence: keep a copy of the payload, record the history row, then drop the queue row.
+   * [reconcileHistory] completes the sequence if the process dies between these steps.
+   */
+  private fun recordSuccess(item: QueueItem) {
+    val text = if (item.kind == ContentKind.TEXT) textValue(item.id) else null
+    val entry = recorder.record(
+      item,
+      deviceName(item.destinationDeviceId),
+      SendOutcome.SUCCEEDED,
+      text = text,
+    )
+    val payload = payloadFile(item.id)
+    if (payload != null && payload.isFile) {
+      history.retainPayload(payload, entry.id)?.let { recorder.attachPayload(entry, it) }
+    }
+    Log.i(TAG, "history.success kind=${item.kind} bytes=${item.byteLength}")
+    publishHistory()
+  }
+
+  private fun recordFailure(item: QueueItem) {
+    runCatching {
+      recorder.record(
+        item,
+        deviceName(item.destinationDeviceId),
+        SendOutcome.FAILED,
+        failureReason = item.failureReason,
+      )
+    }
+    Log.i(TAG, "history.failure kind=${item.kind}")
+    publishHistory()
+  }
+
+  private fun pruneHistory() {
+    val plan = runCatching { recorder.retentionPlan() }.getOrNull() ?: return
+    if (plan.isEmpty) return
+    plan.payloadFilesToDelete.forEach(history::deletePayload)
+    plan.deleteEntries.forEach { history.delete(it.id) }
+    plan.clearPayloads.forEach { history.updatePayloadPath(it.id, null) }
+    Log.i(
+      TAG,
+      "history.prune rows=${plan.deleteEntries.size} payloads=${plan.payloadFilesToDelete.size}",
+    )
+    publishHistory()
+  }
+
+  private fun reconcileHistory() {
+    val entries = history.entries()
+    val referenced =
+      entries.mapNotNull { it.payloadPath?.let(history::resolvePayload)?.absolutePath }.toSet()
+    val orphans = history.payloadFiles().filterValues { it.absolutePath !in referenced }.keys
+    val missing = entries.filter { it.payloadPath != null && !history.payloadExists(it) }
+      .map(SendHistoryEntry::id)
+    val plan = recorder.reconcile(
+      queueItems = items(),
+      queuePayloadPresent = { payloadFile(it.id)?.isFile == true },
+      history = entries,
+      missingHistoryPayloadIds = missing,
+      orphanPayloadIds = orphans,
+    )
+    plan.completedQueueItemIds.forEach { remove(it) }
+    plan.orphanPayloadIds.forEach(history::deletePayloadById)
+    plan.prunedHistoryIds.forEach { history.updatePayloadPath(it, null) }
+    if (plan.completedQueueItemIds.isNotEmpty()) publish()
+    if (plan.completedQueueItemIds.isNotEmpty() || plan.prunedHistoryIds.isNotEmpty()) publishHistory()
+  }
+
   private fun readable() = db.readableDatabase
   private fun writable() = db.writableDatabase
 
-  override fun close() = db.close()
+  override fun close() {
+    history.close()
+    db.close()
+  }
 
   private inner class PhoneSenderLease(item: QueueItem) : SenderLease {
     override var offer = TransferOffer(item)
@@ -423,25 +687,32 @@ class PhoneQueueRepository(context: Context) :
       }
       publish()
     }
+
     override fun markTransferring() {
       if (!finished) {
         offer = offer.copy(item = coordinator.transition(offer.item.id, QueueState.TRANSFERRING))
       }
       publish()
     }
+
     override fun markAwaitingCommit() {
       if (!finished) {
         offer = offer.copy(item = coordinator.transition(offer.item.id, QueueState.AWAITING_COMMIT))
       }
       publish()
     }
+
     override fun commit() {
       if (finished) return
-      payloadFile?.delete()
-      coordinator.commit(offer.item.id)
+      val item = offer.item
+      runCatching { recordSuccess(item) }
+      payloadFile(item.id)?.delete()
+      coordinator.commit(item.id)
+      pruneHistory()
       finished = true
       publish()
     }
+
     override fun release() {
       if (!finished) {
         coordinator.release(offer.item.id)
@@ -465,13 +736,15 @@ class PhoneQueueRepository(context: Context) :
     digest()
   }
 
-  private class QueueDatabase(context: Context) : SQLiteOpenHelper(context, "sender_queue.db", null, 1) {
+  private class QueueDatabase(context: Context) :
+    SQLiteOpenHelper(context, "sender_queue.db", null, 1) {
     override fun onConfigure(db: SQLiteDatabase) {
       db.setForeignKeyConstraintsEnabled(
         true,
       )
       db.enableWriteAheadLogging()
     }
+
     override fun onCreate(db: SQLiteDatabase) {
       db.execSQL(
         """CREATE TABLE queue_items(
@@ -485,11 +758,15 @@ class PhoneQueueRepository(context: Context) :
       )
       db.execSQL("CREATE INDEX queue_position ON queue_items(position)")
     }
+
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) = Unit
   }
 
   private companion object {
+    const val TAG = "NoteLink"
     val sharedItems = MutableStateFlow<List<QueueItem>>(emptyList())
+    val sharedHistory = MutableStateFlow<List<SendHistoryEntry>>(emptyList())
+    val PDF_MAGIC = "%PDF-".encodeToByteArray()
     val ITEM_COLUMNS = arrayOf(
       "id", "destination_device_id", "kind", "mime_type", "byte_length", "sha256",
       "created_at", "position", "state", "display_name", "lease_expires_at", "failure_reason",

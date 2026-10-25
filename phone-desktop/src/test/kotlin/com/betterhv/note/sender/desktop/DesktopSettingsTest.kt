@@ -1,6 +1,7 @@
 package com.betterhv.note.sender.desktop
 
 import com.betterhv.note.sender.shared.NoteLinkLanguage
+import com.betterhv.transfer.core.SendOrder
 import com.betterhv.transfer.windows.WindowsCapabilities
 import com.betterhv.transfer.windows.WindowsNativeApi
 import kotlin.io.path.createTempDirectory
@@ -40,6 +41,23 @@ class DesktopSettingsTest {
       settings.showRecentTransferEvents = false
 
       assertEquals(false, DesktopSettings(paths, native).showRecentTransferEvents)
+    } finally {
+      root.deleteRecursively()
+    }
+  }
+
+  @Test
+  fun sendOrderDefaultsToQueueAndPersists() {
+    val root = createTempDirectory("notelink-settings-order-").toFile()
+    try {
+      val paths = DesktopPaths(root)
+      val native = PassthroughNativeApi()
+      val settings = DesktopSettings(paths, native)
+      assertEquals(SendOrder.QUEUE, settings.sendOrder)
+
+      settings.sendOrder = SendOrder.STACK
+
+      assertEquals(SendOrder.STACK, DesktopSettings(paths, native).sendOrder)
     } finally {
       root.deleteRecursively()
     }
@@ -97,12 +115,21 @@ class DesktopSettingsTest {
   private class PassthroughNativeApi : WindowsNativeApi {
     override fun initialize() = Unit
     override fun capabilities() = WindowsCapabilities(true, true, true)
-    override fun startBle(deviceId: String, deviceName: String, imageCount: Int, textCount: Int, pdfCount: Int) = Unit
+    override fun startBle(
+      deviceId: String,
+      deviceName: String,
+      imageCount: Int,
+      textCount: Int,
+      pdfCount: Int
+    ) = Unit
+
     override fun updateBleCounts(imageCount: Int, textCount: Int, pdfCount: Int) = Unit
     override fun pollBleCommand(timeoutMillis: Int): ByteArray? = null
     override fun respondBle(value: ByteArray) = Unit
     override fun stopBle() = Unit
-    override fun lanInfo() = com.betterhv.transfer.windows.WindowsLanInfo("192.168.1.10", "Test WiFi")
+    override fun lanInfo() =
+      com.betterhv.transfer.windows.WindowsLanInfo("192.168.1.10", "Test WiFi")
+
     override fun protect(value: ByteArray) = value.copyOf()
     override fun unprotect(value: ByteArray) = value.copyOf()
     override fun close() = Unit

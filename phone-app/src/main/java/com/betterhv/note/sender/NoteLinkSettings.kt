@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.core.content.edit
 import com.betterhv.note.sender.shared.NoteLinkI18n
 import com.betterhv.note.sender.shared.NoteLinkLanguage
+import com.betterhv.transfer.core.SendOrder
 
 class NoteLinkSettings(context: Context) {
   private val preferences = context.applicationContext.getSharedPreferences(PREFERENCES, Context.MODE_PRIVATE)
@@ -22,6 +23,12 @@ class NoteLinkSettings(context: Context) {
     get() = preferences.getBoolean(KEY_SHOW_RECENT_TRANSFER_EVENTS, true)
     set(value) = preferences.edit { putBoolean(KEY_SHOW_RECENT_TRANSFER_EVENTS, value) }
 
+  var sendOrder: SendOrder
+    get() = SendOrder.fromStorageId(preferences.getString(KEY_SEND_ORDER, null))
+    set(value) {
+      preferences.edit { putString(KEY_SEND_ORDER, value.name) }
+    }
+
   var language: NoteLinkLanguage
     get() = NoteLinkLanguage.fromStorageId(preferences.getString(KEY_LANGUAGE, null))
     set(value) {
@@ -35,6 +42,7 @@ class NoteLinkSettings(context: Context) {
     private const val PREFERENCES = "notelink_settings"
     private const val KEY_DISPLAY_NAME = "display_name"
     private const val KEY_SHOW_RECENT_TRANSFER_EVENTS = "show_recent_transfer_events"
+    private const val KEY_SEND_ORDER = "send_order"
     private const val KEY_LANGUAGE = "language"
 
     fun validateDisplayName(value: String): String {

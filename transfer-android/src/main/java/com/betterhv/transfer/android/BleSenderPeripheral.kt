@@ -14,6 +14,8 @@ import android.bluetooth.le.AdvertiseCallback
 import android.bluetooth.le.AdvertiseData
 import android.bluetooth.le.AdvertiseSettings
 import android.content.Context
+import android.os.Handler
+import android.os.Looper
 import android.os.ParcelUuid
 import android.util.Log
 import com.betterhv.transfer.core.BleTransportFrameCodec
@@ -43,6 +45,10 @@ class BleSenderPeripheral(
   private val negotiatedMtus = mutableMapOf<String, Int>()
   private val pendingNotifications = mutableMapOf<String, ArrayDeque<ByteArray>>()
   private val notificationInFlight = mutableSetOf<String>()
+  private val mainHandler = Handler(Looper.getMainLooper())
+  private var lastAdvertisement: ByteArray? = null
+  private var advertiseGeneration = 0
+  private var closed = false
 
   private val callback = object : BluetoothGattServerCallback() {
     override fun onConnectionStateChange(device: BluetoothDevice, status: Int, newState: Int) {
@@ -179,13 +185,33 @@ class BleSenderPeripheral(
       addCharacteristic(response)
     }
     server = manager.openGattServer(appContext, callback).also { it.addService(service) }
+    synchronized(this) {
+      closed = false
+      lastAdvertisement = null
+      advertiseGeneration++
+    }
     startAdvertisement()
   }
 
   @SuppressLint("MissingPermission")
   fun refreshAdvertisement() {
-    adapter.bluetoothLeAdvertiser?.stopAdvertising(advertiseCallback)
-    startAdvertisement()
+    val bytes = advertisementBytes()
+    if (lastAdvertisement?.contentEquals(bytes) == true) return
+    synchronized(this) {
+      if (closed) return
+      advertiseGeneration++
+      val generation = advertiseGeneration
+      adapter.bluetoothLeAdvertiser?.stopAdvertising(advertiseCallback)
+      // A stop is asynchronous. Restarting immediately can leave the old advertising set
+      // running beside the new one; on some ROMs each set also gets a fresh random address,
+      // which invalidates an address a paired peer has just scanned.
+      mainHandler.postDelayed({
+        synchronized(this) {
+          if (closed || generation != advertiseGeneration) return@synchronized
+          startAdvertisement()
+        }
+      }, ADVERTISE_RESTART_DELAY_MILLIS)
+    }
   }
 
   @SuppressLint("MissingPermission")
@@ -271,9 +297,15 @@ class BleSenderPeripheral(
 
   @SuppressLint("MissingPermission")
   override fun close() {
+    synchronized(this) {
+      closed = true
+      advertiseGeneration++
+    }
+    mainHandler.removeCallbacksAndMessages(null)
     runCatching { adapter.bluetoothLeAdvertiser?.stopAdvertising(advertiseCallback) }
     subscribed.clear()
     synchronized(this) {
+      lastAdvertisement = null
       commandReassemblers.clear()
       framedPeers.clear()
       negotiatedMtus.clear()
@@ -286,6 +318,7 @@ class BleSenderPeripheral(
 
   private val advertiseCallback = object : AdvertiseCallback() {
     override fun onStartSuccess(settingsInEffect: AdvertiseSettings) {
+      lastAdvertisement = advertisementBytes()
       Log.i(TAG, "BLE advertising started")
     }
 
@@ -296,6 +329,7 @@ class BleSenderPeripheral(
 
   private companion object {
     const val TAG = "BetterHvBle"
+    const val ADVERTISE_RESTART_DELAY_MILLIS = 400L
     val NEXT_MESSAGE_ID = AtomicInteger(1)
   }
 }

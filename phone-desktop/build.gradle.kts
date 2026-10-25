@@ -66,6 +66,10 @@ sqldelight {
             packageName.set("com.betterhv.note.sender.shared.db.inbox")
             srcDirs(rootProject.file("phone-app/src/commonMain/sqldelight/inbox"))
         }
+        create("SendHistoryDatabase") {
+            packageName.set("com.betterhv.note.sender.shared.db.history")
+            srcDirs(rootProject.file("phone-app/src/commonMain/sqldelight/history"))
+        }
     }
 }
 

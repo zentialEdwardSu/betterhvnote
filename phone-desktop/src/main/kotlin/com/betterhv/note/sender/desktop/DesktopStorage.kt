@@ -10,11 +10,20 @@ import com.betterhv.note.sender.shared.db.queue.SenderQueueDatabase
 import com.betterhv.note.sender.shared.noteLinkText
 import com.betterhv.transfer.core.ContentCounts
 import com.betterhv.transfer.core.ContentKind
+import com.betterhv.transfer.core.ContentSniffer
 import com.betterhv.transfer.core.ExportTransferOffer
+import com.betterhv.transfer.core.HistoryRetentionPolicy
 import com.betterhv.transfer.core.QueueCoordinator
 import com.betterhv.transfer.core.QueueItem
 import com.betterhv.transfer.core.QueueState
 import com.betterhv.transfer.core.QueueStore
+import com.betterhv.transfer.core.RequeueDecision
+import com.betterhv.transfer.core.RequeueSource
+import com.betterhv.transfer.core.SendHistoryEntry
+import com.betterhv.transfer.core.SendHistoryRecorder
+import com.betterhv.transfer.core.SendOrder
+import com.betterhv.transfer.core.SendOrderSelector
+import com.betterhv.transfer.core.SendOutcome
 import com.betterhv.transfer.core.TransferCrypto
 import com.betterhv.transfer.core.TransferLimits
 import com.betterhv.update.NotePackageDescriptor
@@ -37,6 +46,8 @@ class DesktopPaths(root: File = defaultRoot()) {
   val inbox = File(this.root, "inbox").also(File::mkdirs)
   val queueDatabase = File(this.root, "sender_queue.db")
   val inboxDatabase = File(this.root, "export_inbox.db")
+  val historyDatabase = File(this.root, "send_history.db")
+  val history = File(this.root, "history").also(File::mkdirs)
   val settings = File(this.root, "settings.properties")
   val updateCache = File(this.root, "updates").also(File::mkdirs)
 
@@ -68,17 +79,23 @@ class DesktopSettings(private val paths: DesktopPaths, private val native: Windo
     }
   }
 
-  val localDeviceId: String get() = synchronized(lock) {
-    values.getProperty(KEY_LOCAL_ID) ?: UUID.randomUUID().toString().also {
-      values.setProperty(KEY_LOCAL_ID, it)
-      persist()
+  val localDeviceId: String
+    get() = synchronized(lock) {
+      values.getProperty(KEY_LOCAL_ID) ?: UUID.randomUUID().toString().also {
+        values.setProperty(KEY_LOCAL_ID, it)
+        persist()
+      }
     }
-  }
 
   var displayName: String
     get() = synchronized(
       lock,
-    ) { values.getProperty(KEY_DISPLAY_NAME, "NoteLink-${System.getenv("COMPUTERNAME") ?: "Windows"}") }
+    ) {
+      values.getProperty(
+        KEY_DISPLAY_NAME,
+        "NoteLink-${System.getenv("COMPUTERNAME") ?: "Windows"}"
+      )
+    }
     set(value) = synchronized(lock) {
       val normalized = value.trim()
       require(normalized.isNotBlank() && normalized.encodeToByteArray().size <= 48) {
@@ -89,14 +106,18 @@ class DesktopSettings(private val paths: DesktopPaths, private val native: Windo
     }
 
   var receiveEnabled: Boolean
-    get() = synchronized(lock) { values.getProperty(KEY_RECEIVE, "true").toBooleanStrictOrNull() ?: true }
+    get() = synchronized(lock) {
+      values.getProperty(KEY_RECEIVE, "true").toBooleanStrictOrNull() ?: true
+    }
     set(value) = synchronized(lock) {
       values.setProperty(KEY_RECEIVE, value.toString());
       persist()
     }
 
   var showRecentTransferEvents: Boolean
-    get() = synchronized(lock) { values.getProperty(KEY_SHOW_RECENT_EVENTS, "true").toBooleanStrictOrNull() ?: true }
+    get() = synchronized(lock) {
+      values.getProperty(KEY_SHOW_RECENT_EVENTS, "true").toBooleanStrictOrNull() ?: true
+    }
     set(value) = synchronized(lock) {
       values.setProperty(KEY_SHOW_RECENT_EVENTS, value.toString());
       persist()
@@ -110,22 +131,36 @@ class DesktopSettings(private val paths: DesktopPaths, private val native: Windo
       persist()
     }
 
+  var sendOrder: SendOrder
+    get() = synchronized(lock) { SendOrder.fromStorageId(values.getProperty(KEY_SEND_ORDER)) }
+    set(value) = synchronized(lock) {
+      values.setProperty(KEY_SEND_ORDER, value.name)
+      persist()
+    }
+
   val pairings: List<DesktopPairing> get() = synchronized(lock) { pairingsLocked() }
 
   val pairing: DesktopPairing? get() = pairings.maxByOrNull(DesktopPairing::lastUsedAt)
 
   /** Owner-side pairing used while the N10Pro enters the code shown by NoteLink. */
-  val ownerPairing: DesktopPairing get() = synchronized(lock) {
-    val code = ownerPairingCodeLocked()
-    DesktopPairing(ownerPairingPendingIdLocked(), "N10Pro", derivePairingKey(code))
-  }
+  val ownerPairing: DesktopPairing
+    get() = synchronized(lock) {
+      val code = ownerPairingCodeLocked()
+      DesktopPairing(ownerPairingPendingIdLocked(), "N10Pro", derivePairingKey(code))
+    }
 
   val ownerPairingCode: String get() = synchronized(lock) { ownerPairingCodeLocked() }
-  val pendingOwnerPairingCode: String? get() = synchronized(lock) { values.getProperty(KEY_OWNER_CODE) }
-  val pendingOwnerPairing: DesktopPairing? get() = synchronized(lock) {
-    val code = values.getProperty(KEY_OWNER_CODE) ?: return@synchronized null
-    DesktopPairing(ownerPairingPendingIdLocked(), "N10Pro", derivePairingKey(code))
-  }
+  val pendingOwnerPairingCode: String?
+    get() = synchronized(lock) {
+      values.getProperty(
+        KEY_OWNER_CODE
+      )
+    }
+  val pendingOwnerPairing: DesktopPairing?
+    get() = synchronized(lock) {
+      val code = values.getProperty(KEY_OWNER_CODE) ?: return@synchronized null
+      DesktopPairing(ownerPairingPendingIdLocked(), "N10Pro", derivePairingKey(code))
+    }
 
   fun beginOwnerPairing() = synchronized(lock) {
     values.remove(KEY_OWNER_CODE)
@@ -134,7 +169,11 @@ class DesktopSettings(private val paths: DesktopPaths, private val native: Windo
     persist()
   }
 
-  fun pairWithCode(code: String, deviceId: String = "betterhv-note", deviceName: String = "N10Pro") {
+  fun pairWithCode(
+    code: String,
+    deviceId: String = "betterhv-note",
+    deviceName: String = "N10Pro"
+  ) {
     require(
       code.length == 6 && code.all(Char::isDigit),
     ) { "Pairing code must contain six digits" }
@@ -171,7 +210,10 @@ class DesktopSettings(private val paths: DesktopPaths, private val native: Windo
 
   fun markLastUsed(deviceId: String) = synchronized(lock) {
     val pairing = pairingsLocked().firstOrNull { it.deviceId == deviceId } ?: return@synchronized
-    savePairingLocked(pairing.copy(lastUsedAt = nextLastUsedLocked()), native.protect(pairing.sharedKey))
+    savePairingLocked(
+      pairing.copy(lastUsedAt = nextLastUsedLocked()),
+      native.protect(pairing.sharedKey)
+    )
   }
 
   fun resolveIdentity(oldDeviceId: String, deviceId: String): DesktopPairing = synchronized(lock) {
@@ -223,7 +265,8 @@ class DesktopSettings(private val paths: DesktopPaths, private val native: Windo
   private fun pairingsLocked(): List<DesktopPairing> = pairingIdsLocked().mapNotNull { id ->
     val token = pairingToken(id)
     val encoded = values.getProperty("$PAIRING_PREFIX$token.secret") ?: return@mapNotNull null
-    val protected = runCatching { Base64.getDecoder().decode(encoded) }.getOrNull() ?: return@mapNotNull null
+    val protected =
+      runCatching { Base64.getDecoder().decode(encoded) }.getOrNull() ?: return@mapNotNull null
     val secret = runCatching { native.unprotect(protected) }.getOrNull() ?: return@mapNotNull null
     DesktopPairing(
       id,
@@ -238,12 +281,19 @@ class DesktopSettings(private val paths: DesktopPaths, private val native: Windo
       runCatching { Base64.getUrlDecoder().decode(token).decodeToString() }.getOrNull()
     }
 
-  private fun savePairingLocked(pairing: DesktopPairing, protected: ByteArray, persist: Boolean = true) {
+  private fun savePairingLocked(
+    pairing: DesktopPairing,
+    protected: ByteArray,
+    persist: Boolean = true
+  ) {
     val ids = (pairingIdsLocked().filterNot { it == pairing.deviceId } + pairing.deviceId)
     values.setProperty(KEY_PAIRING_IDS, ids.joinToString(",") { pairingToken(it) })
     val token = pairingToken(pairing.deviceId)
     values.setProperty("$PAIRING_PREFIX$token.name", pairing.deviceName)
-    values.setProperty("$PAIRING_PREFIX$token.secret", Base64.getEncoder().encodeToString(protected))
+    values.setProperty(
+      "$PAIRING_PREFIX$token.secret",
+      Base64.getEncoder().encodeToString(protected)
+    )
     values.setProperty("$PAIRING_PREFIX$token.lastUsed", pairing.lastUsedAt.toString())
     if (persist) persist()
   }
@@ -301,6 +351,7 @@ class DesktopSettings(private val paths: DesktopPaths, private val native: Windo
     const val KEY_DISPLAY_NAME = "displayName"
     const val KEY_RECEIVE = "receiveEnabled"
     const val KEY_SHOW_RECENT_EVENTS = "showRecentTransferEvents"
+    const val KEY_SEND_ORDER = "sendOrder"
     const val KEY_LANGUAGE = "language"
     const val KEY_PEER_ID = "peerDeviceId"
     const val KEY_PEER_NAME = "peerDeviceName"
@@ -324,55 +375,86 @@ interface DesktopSenderLease : AutoCloseable {
   override fun close() = release()
 }
 
-class DesktopQueueRepository(private val paths: DesktopPaths) :
+class DesktopQueueRepository(
+  private val paths: DesktopPaths,
+  sendOrder: () -> SendOrder = { SendOrder.QUEUE },
+  private val deviceName: (String?) -> String? = { null },
+) :
   QueueStore,
   AutoCloseable {
   private val databaseExisted = paths.queueDatabase.isFile && paths.queueDatabase.length() > 0
   private val driver = JdbcSqliteDriver("jdbc:sqlite:${paths.queueDatabase.absolutePath}")
   private val database = SenderQueueDatabase(driver)
   private val queries = database.queueItemQueries
-  private val coordinator = QueueCoordinator(this)
+  private val coordinator = QueueCoordinator(this, order = sendOrder)
+  private val history = DesktopSendHistoryStore(paths)
+  private val retention = HistoryRetentionPolicy()
+  private val recorder = SendHistoryRecorder(history, policy = retention)
   private val mutableItems = MutableStateFlow<List<QueueItem>>(emptyList())
+  private val mutableHistory = MutableStateFlow<List<SendHistoryEntry>>(emptyList())
   val itemFlow: StateFlow<List<QueueItem>> = mutableItems
+  val historyFlow: StateFlow<List<SendHistoryEntry>> = mutableHistory
 
   init {
     if (!databaseExisted) SenderQueueDatabase.Schema.create(driver)
     driver.execute(null, "PRAGMA journal_mode=WAL", 0)
     driver.execute(null, "PRAGMA busy_timeout=5000", 0)
     publish()
+    publishHistory()
+    reconcileHistory()
   }
 
-  @Synchronized fun enqueueFiles(files: List<File>, destinationDeviceId: String?): List<QueueItem> = files.map {
+  @Synchronized
+  fun enqueueFiles(files: List<File>, destinationDeviceId: String?): List<QueueItem> = files.map {
       source,
     ->
     require(source.isFile) { "File does not exist: ${source.name}" }
-    val isPdf = source.extension.equals("pdf", ignoreCase = true) ||
-      Files.probeContentType(source.toPath()) == "application/pdf"
-    val limit = if (isPdf) TransferLimits.MAX_PDF_BYTES else TransferLimits.MAX_IMAGE_BYTES
-    require(source.length() <= limit) { if (isPdf) "PDF cannot exceed 512 MiB" else "Image cannot exceed 64 MiB" }
-    val mime = if (isPdf) {
-      "application/pdf"
-    } else {
-      Files.probeContentType(source.toPath())?.takeIf { it.startsWith("image/") }
-        ?: when (source.extension.lowercase()) {
-          "png" -> "image/png";
-          "jpg", "jpeg" -> "image/jpeg";
-          else -> error("Only images and PDF files are supported")
-        }
+    val header = ByteArray(ContentSniffer.HEADER_BYTES)
+    val read = source.inputStream().use { input ->
+      var total = 0
+      while (total < header.size) {
+        val count = input.read(header, total, header.size - total)
+        if (count < 0) break
+        total += count
+      }
+      total
     }
+    val sniffed = ContentSniffer.sniff(
+      Files.probeContentType(source.toPath()),
+      source.name,
+      header.copyOf(read),
+    ) ?: error("Only images and PDF files are supported: ${source.name}")
+    val limit = if (sniffed.kind == ContentKind.PDF) {
+      TransferLimits.MAX_PDF_BYTES
+    } else {
+      TransferLimits.MAX_IMAGE_BYTES
+    }
+    require(source.length() <= limit) {
+      if (sniffed.kind == ContentKind.PDF) "PDF cannot exceed 512 MiB" else "Image cannot exceed 64 MiB"
+    }
+    enqueueFile(source, sniffed.kind, sniffed.mimeType, source.name, destinationDeviceId)
+  }.also { publish() }
+
+  private fun enqueueFile(
+    source: File,
+    kind: ContentKind,
+    mimeType: String,
+    displayName: String?,
+    destinationDeviceId: String?,
+  ): QueueItem {
     val id = UUID.randomUUID()
     val target = File(paths.outbox, "$id.bin")
     val temporary = File(paths.outbox, "$id.tmp")
     source.copyTo(temporary, overwrite = true)
     Files.move(temporary.toPath(), target.toPath(), StandardCopyOption.REPLACE_EXISTING)
-    QueueItem(
-      id, destinationDeviceId, if (isPdf) ContentKind.PDF else ContentKind.IMAGE,
-      mime, target.length(), sha256(target),
-      System.currentTimeMillis(), nextPosition(), displayName = source.name,
+    return QueueItem(
+      id, destinationDeviceId, kind, mimeType, target.length(), sha256(target),
+      System.currentTimeMillis(), nextPosition(), displayName = displayName,
     ).also { insertWithPayload(it, target.absolutePath, null) }
-  }.also { publish() }
+  }
 
-  @Synchronized fun enqueueText(text: String, destinationDeviceId: String?): QueueItem {
+  @Synchronized
+  fun enqueueText(text: String, destinationDeviceId: String?): QueueItem {
     val value = text.trim()
     require(value.isNotBlank()) { "Text cannot be empty" }
     val bytes = value.encodeToByteArray()
@@ -390,7 +472,8 @@ class DesktopQueueRepository(private val paths: DesktopPaths) :
     }
   }
 
-  @Synchronized fun enqueueAppPackage(
+  @Synchronized
+  fun enqueueAppPackage(
     source: File,
     descriptor: NotePackageDescriptor,
     destinationDeviceId: String,
@@ -413,11 +496,13 @@ class DesktopQueueRepository(private val paths: DesktopPaths) :
     ).also { insertWithPayload(it, target.absolutePath, null); publish() }
   }
 
-  @Synchronized fun counts(): ContentCounts = items().filter { it.state == QueueState.PENDING }.let { available ->
+  @Synchronized
+  fun counts(): ContentCounts = items().filter { it.state == QueueState.PENDING }.let { available ->
     available.contentCounts()
   }
 
-  @Synchronized fun counts(destinationDeviceId: String): ContentCounts = items().filter {
+  @Synchronized
+  fun counts(destinationDeviceId: String): ContentCounts = items().filter {
     it.state == QueueState.PENDING &&
       (it.destinationDeviceId == null || it.destinationDeviceId == destinationDeviceId)
   }.let { available ->
@@ -431,34 +516,47 @@ class DesktopQueueRepository(private val paths: DesktopPaths) :
     count { it.kind == ContentKind.APP_PACKAGE },
   )
 
-  @Synchronized fun leaseNext(kind: ContentKind, destinationDeviceId: String): DesktopSenderLease? {
+  @Synchronized
+  fun leaseNext(kind: ContentKind, destinationDeviceId: String): DesktopSenderLease? {
     val leased = coordinator.leaseNext(kind, destinationDeviceId) ?: return null
     publish()
     return Lease(leased)
   }
 
-  @Synchronized fun delete(id: UUID): Boolean {
+  @Synchronized
+  fun delete(id: UUID): Boolean {
+    find(id)?.takeIf { it.state == QueueState.FAILED }?.let(::recordFailure)
     payloadPath(id)?.let(::File)?.delete()
-    return remove(id)
+    val removed = remove(id)
+    if (removed) pruneHistory()
+    return removed
   }
 
-  @Synchronized override fun items(): List<QueueItem> = queries.selectAll().executeAsList().map(Queue_items::queueItem)
+  @Synchronized
+  override fun items(): List<QueueItem> =
+    queries.selectAll().executeAsList().map(Queue_items::queueItem)
 
-  @Synchronized override fun find(id: UUID): QueueItem? = queries.selectById(
+  @Synchronized
+  override fun find(id: UUID): QueueItem? = queries.selectById(
     id.toString(),
   ).executeAsOneOrNull()?.queueItem()
 
-  @Synchronized override fun next(kind: ContentKind, destinationDeviceId: String?, now: Long): QueueItem? {
+  @Synchronized
+  override fun next(
+    kind: ContentKind,
+    destinationDeviceId: String?,
+    now: Long,
+    order: SendOrder,
+  ): QueueItem? {
     releaseExpired(now)
-    return items().firstOrNull {
-      it.kind == kind && it.state == QueueState.PENDING &&
-        (it.destinationDeviceId == null || it.destinationDeviceId == destinationDeviceId)
-    }
+    return SendOrderSelector.nextPending(items(), kind, destinationDeviceId, order)
   }
 
-  @Synchronized override fun insert(item: QueueItem) = insertWithPayload(item, null, null)
+  @Synchronized
+  override fun insert(item: QueueItem) = insertWithPayload(item, null, null)
 
-  @Synchronized override fun update(item: QueueItem) {
+  @Synchronized
+  override fun update(item: QueueItem) {
     require(find(item.id) != null) { "Unknown queue item ${item.id}" }
     queries.updateItem(
       item.destinationDeviceId, item.kind.name, item.mimeType, item.byteLength, item.sha256,
@@ -468,20 +566,28 @@ class DesktopQueueRepository(private val paths: DesktopPaths) :
     publish()
   }
 
-  @Synchronized override fun remove(id: UUID): Boolean = (find(id) != null).also {
+  @Synchronized
+  override fun remove(id: UUID): Boolean = (find(id) != null).also {
     queries.deleteById(id.toString());
     publish()
   }
 
-  @Synchronized override fun reorder(idsInOrder: List<UUID>) {
+  @Synchronized
+  override fun reorder(idsInOrder: List<UUID>) {
     require(idsInOrder.toSet() == items().map(QueueItem::id).toSet())
     database.transaction {
-      idsInOrder.forEachIndexed { index, id -> queries.updatePosition(index.toLong(), id.toString()) }
+      idsInOrder.forEachIndexed { index, id ->
+        queries.updatePosition(
+          index.toLong(),
+          id.toString()
+        )
+      }
     }
     publish()
   }
 
-  @Synchronized override fun releaseExpired(now: Long): Int {
+  @Synchronized
+  override fun releaseExpired(now: Long): Int {
     val count = queries.countExpired(now).executeAsOne().toInt()
     if (count > 0) {
       queries.releaseExpired(now);
@@ -501,12 +607,135 @@ class DesktopQueueRepository(private val paths: DesktopPaths) :
   private fun payloadPath(id: UUID): String? = queries.selectPayloadPath(
     id.toString(),
   ).executeAsOneOrNull()?.payload_path
-  private fun text(id: UUID): String? = queries.selectText(id.toString()).executeAsOneOrNull()?.text_content
+
+  private fun text(id: UUID): String? =
+    queries.selectText(id.toString()).executeAsOneOrNull()?.text_content
+
   private fun nextPosition() = (items().maxOfOrNull(QueueItem::position) ?: -1L) + 1
   private fun publish() {
     mutableItems.value = items()
   }
-  override fun close() = driver.close()
+
+  private fun publishHistory() {
+    mutableHistory.value = history.entries(retention.maxEntries)
+  }
+
+  private fun recordSuccess(item: QueueItem) {
+    val text = if (item.kind == ContentKind.TEXT) text(item.id) else null
+    val entry = recorder.record(
+      item,
+      deviceName(item.destinationDeviceId),
+      SendOutcome.SUCCEEDED,
+      text = text
+    )
+    val payload = payloadPath(item.id)?.let(::File)
+    if (payload != null && payload.isFile) {
+      history.retainPayload(payload, entry.id)?.let { recorder.attachPayload(entry, it) }
+    }
+    DesktopLog.info("history.success", "kind=${item.kind} bytes=${item.byteLength}")
+    publishHistory()
+  }
+
+  private fun recordFailure(item: QueueItem) {
+    runCatching {
+      recorder.record(
+        item,
+        deviceName(item.destinationDeviceId),
+        SendOutcome.FAILED,
+        failureReason = item.failureReason,
+      )
+    }
+    DesktopLog.info("history.failure", "kind=${item.kind}")
+    publishHistory()
+  }
+
+  private fun pruneHistory() {
+    val plan = runCatching { recorder.retentionPlan() }.getOrNull() ?: return
+    if (plan.isEmpty) return
+    plan.payloadFilesToDelete.forEach(history::deletePayload)
+    plan.deleteEntries.forEach { history.delete(it.id) }
+    plan.clearPayloads.forEach { history.updatePayloadPath(it.id, null) }
+    DesktopLog.info(
+      "history.prune",
+      "rows=${plan.deleteEntries.size} payloads=${plan.payloadFilesToDelete.size}",
+    )
+    publishHistory()
+  }
+
+  private fun reconcileHistory() {
+    val entries = history.entries()
+    val referenced =
+      entries.mapNotNull { it.payloadPath?.let(history::resolvePayload)?.absolutePath }.toSet()
+    val orphans = history.payloadFiles().filterValues { it.absolutePath !in referenced }.keys
+    val missing = entries.filter { it.payloadPath != null && !history.payloadExists(it) }
+      .map(SendHistoryEntry::id)
+    val plan = recorder.reconcile(
+      queueItems = items(),
+      queuePayloadPresent = { payloadPath(it.id)?.let(::File)?.isFile == true },
+      history = entries,
+      missingHistoryPayloadIds = missing,
+      orphanPayloadIds = orphans,
+    )
+    plan.completedQueueItemIds.forEach { remove(it) }
+    plan.orphanPayloadIds.forEach(history::deletePayloadById)
+    plan.prunedHistoryIds.forEach { history.updatePayloadPath(it, null) }
+    if (plan.completedQueueItemIds.isNotEmpty()) publish()
+    if (plan.completedQueueItemIds.isNotEmpty() || plan.prunedHistoryIds.isNotEmpty()) publishHistory()
+  }
+
+  /** Whether a retained payload or text payload is still available for re-sending. */
+  fun canResend(entry: SendHistoryEntry): Boolean =
+    entry.text != null || (entry.payloadPath != null && history.payloadExists(entry))
+
+  /**
+   * Re-queues a history entry without consuming it. The original destination wins while it is still
+   * paired; otherwise the current selection becomes the destination.
+   */
+  @Suppress("ReturnCount")
+  @Synchronized
+  fun requeueHistory(
+    historyId: UUID,
+    currentDeviceId: String?,
+    pairedDeviceIds: Set<String>
+  ): UUID? {
+    val entry = history.find(historyId) ?: return null
+    val payload = entry.payloadPath?.let(history::resolvePayload)
+    val decision =
+      recorder.requeueDecision(entry, payload?.isFile == true, pairedDeviceIds, currentDeviceId)
+    if (decision !is RequeueDecision.Ready) return null
+    val destination = decision.plan.destinationDeviceId
+    val requeued = when (val source = decision.plan.source) {
+      is RequeueSource.Text -> enqueueText(source.value, destination).id
+      is RequeueSource.Payload -> requeuePayload(entry, source.path, destination)
+    }
+    if (requeued != null) publish()
+    return requeued
+  }
+
+  @Synchronized
+  fun deleteHistory(historyId: UUID): Boolean {
+    history.find(historyId)?.let(history::deletePayload)
+    val removed = history.delete(historyId)
+    publishHistory()
+    return removed
+  }
+
+  @Synchronized
+  fun clearHistory() {
+    history.entries().forEach(history::deletePayload)
+    history.clear()
+    publishHistory()
+  }
+
+  private fun requeuePayload(entry: SendHistoryEntry, path: String, destination: String?): UUID? {
+    val source = history.resolvePayload(path)?.takeIf(File::isFile) ?: return null
+    return enqueueFile(source, entry.kind, entry.mimeType, entry.displayName, destination).id
+  }
+
+  override fun close() {
+    history.close()
+    driver.close()
+  }
 
   private inner class Lease(initial: QueueItem) : DesktopSenderLease {
     override var item = initial
@@ -518,24 +747,30 @@ class DesktopQueueRepository(private val paths: DesktopPaths) :
         item = coordinator.heartbeat(item.id)
       }
     }
+
     override fun markTransferring() {
       if (!finished) {
         item = coordinator.transition(item.id, QueueState.TRANSFERRING)
       }
     }
+
     override fun markAwaitingCommit() {
       if (!finished) {
         item = coordinator.transition(item.id, QueueState.AWAITING_COMMIT)
       }
     }
+
     override fun commit() {
       if (!finished) {
+        runCatching { recordSuccess(item) }
         file?.delete()
         coordinator.commit(item.id)
+        pruneHistory()
         finished = true
         publish()
       }
     }
+
     override fun release() {
       if (!finished) {
         coordinator.release(item.id)
@@ -560,6 +795,7 @@ data class DesktopInboxItem(
   val receivedAt: Long?,
   val error: String?,
 )
+
 sealed interface DesktopInboxBegin {
   data class Receive(
     val partial: File,
@@ -582,7 +818,8 @@ class DesktopInboxRepository(private val paths: DesktopPaths) : AutoCloseable {
     publish()
   }
 
-  @Synchronized fun begin(sourceId: String, offer: ExportTransferOffer): DesktopInboxBegin {
+  @Synchronized
+  fun begin(sourceId: String, offer: ExportTransferOffer): DesktopInboxBegin {
     find(offer.artifactId)?.takeIf {
       it.state == DesktopInboxState.COMPLETE && it.sourceDeviceId == sourceId &&
         it.sha256.contentEquals(offer.sha256) && it.file.isFile
@@ -598,7 +835,8 @@ class DesktopInboxRepository(private val paths: DesktopPaths) : AutoCloseable {
     return DesktopInboxBegin.Receive(File(paths.inbox, "${offer.artifactId}.part"))
   }
 
-  @Synchronized fun complete(id: UUID, partial: File) {
+  @Synchronized
+  fun complete(id: UUID, partial: File) {
     val item = requireNotNull(find(id))
     require(partial.length() == item.byteLength && sha256(partial).contentEquals(item.sha256)) {
       "File length or checksum does not match"
@@ -607,9 +845,11 @@ class DesktopInboxRepository(private val paths: DesktopPaths) : AutoCloseable {
     updateState(id, DesktopInboxState.COMPLETE, null, System.currentTimeMillis())
   }
 
-  @Synchronized fun fail(id: UUID, message: String) = updateState(id, DesktopInboxState.FAILED, message, null)
+  @Synchronized
+  fun fail(id: UUID, message: String) = updateState(id, DesktopInboxState.FAILED, message, null)
 
-  @Synchronized fun delete(id: UUID) {
+  @Synchronized
+  fun delete(id: UUID) {
     find(
       id,
     )?.file?.delete();
@@ -618,16 +858,22 @@ class DesktopInboxRepository(private val paths: DesktopPaths) : AutoCloseable {
     publish()
   }
 
-  @Synchronized fun find(id: UUID) = items().firstOrNull { it.artifactId == id }
+  @Synchronized
+  fun find(id: UUID) = items().firstOrNull { it.artifactId == id }
 
-  @Synchronized fun items(): List<DesktopInboxItem> = queries.selectAll().executeAsList().map(Inbox_exports::inboxItem)
+  @Synchronized
+  fun items(): List<DesktopInboxItem> =
+    queries.selectAll().executeAsList().map(Inbox_exports::inboxItem)
+
   private fun updateState(id: UUID, state: DesktopInboxState, error: String?, receivedAt: Long?) {
     queries.updateState(state.name, receivedAt, error, id.toString())
     publish()
   }
+
   private fun publish() {
     mutableItems.value = items()
   }
+
   override fun close() = driver.close()
   private fun safeName(name: String) = name.replace(
     Regex("[\\\\/:*?\"<>|]"),
@@ -636,8 +882,18 @@ class DesktopInboxRepository(private val paths: DesktopPaths) : AutoCloseable {
 }
 
 private fun Queue_items.queueItem() = QueueItem(
-  UUID.fromString(id), destination_device_id, ContentKind.valueOf(kind), mime_type, byte_length, sha256,
-  created_at, position, QueueState.valueOf(state), display_name, lease_expires_at, failure_reason,
+  UUID.fromString(id),
+  destination_device_id,
+  ContentKind.valueOf(kind),
+  mime_type,
+  byte_length,
+  sha256,
+  created_at,
+  position,
+  QueueState.valueOf(state),
+  display_name,
+  lease_expires_at,
+  failure_reason,
 )
 
 private fun Inbox_exports.inboxItem() = DesktopInboxItem(

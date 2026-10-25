@@ -9,6 +9,7 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.net.wifi.WifiManager
 import android.os.Bundle
+import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
@@ -67,6 +68,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
@@ -87,7 +89,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
-import androidx.core.content.IntentCompat
 import androidx.core.net.toUri
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -102,6 +103,10 @@ import com.betterhv.transfer.core.ContentKind
 import com.betterhv.transfer.core.PairedDevice
 import com.betterhv.transfer.core.QueueItem
 import com.betterhv.transfer.core.QueueState
+import com.betterhv.transfer.core.SendHistoryEntry
+import com.betterhv.transfer.core.SendOrder
+import com.betterhv.transfer.core.SendOrderSelector
+import com.betterhv.transfer.core.SendOutcome
 import com.betterhv.transfer.core.TransferLogEntry
 import com.betterhv.transfer.core.TransferLogLevel
 import com.betterhv.transfer.core.TransferModes
@@ -167,15 +172,24 @@ class MainActivity : ComponentActivity() {
   private lateinit var queue: PhoneQueueRepository
   private lateinit var inbox: ExportInboxRepository
   private lateinit var pairing: AndroidPairingController
+  private lateinit var shareIntake: ShareIntake
   private val notice = mutableStateOf<String?>(null)
 
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
-    queue = PhoneQueueRepository(this)
-    inbox = ExportInboxRepository(this)
     pairing = AndroidPairingController(this)
+    val settings = NoteLinkSettings(this)
+    queue = PhoneQueueRepository(
+      this,
+      sendOrder = { settings.sendOrder },
+      deviceName = { id ->
+        id?.let { deviceId -> pairing.pairedClients.firstOrNull { it.id == deviceId }?.name }
+      },
+    )
+    inbox = ExportInboxRepository(this)
+    shareIntake = ShareIntake(this, queue)
     ShareShortcutPublisher.update(this, pairing.pairedDevice)
-    consumeShareIntent(intent)
+    if (savedInstanceState == null) consumeShareIntent(intent)
     setContent { BetterHvSendApp(queue, inbox, pairing, notice.value) { notice.value = it } }
     startWaiting()
   }
@@ -195,65 +209,64 @@ class MainActivity : ComponentActivity() {
   private fun consumeShareIntent(intent: Intent?) {
     val action = intent?.action ?: return
     if (action != Intent.ACTION_SEND && action != Intent.ACTION_SEND_MULTIPLE) return
+    val sharedIntent = Intent(intent)
     lifecycleScope.launch {
       runCatching {
-        val added = withContext(Dispatchers.IO) {
-          enqueueSharedIntent(this@MainActivity, intent, queue, pairing.pairedDevice?.id)
+        val result = withContext(Dispatchers.IO) {
+          shareIntake.accept(sharedIntent, pairing.pairedDevice?.id)
         }
-        startWaiting()
-        ShareUndoNotifier.show(this@MainActivity, added)
-        notice.value = "已加入发送队列"
-      }.onFailure { notice.value = "Could not add to queue: ${it.message}" }
+        if (result.accepted.isNotEmpty()) {
+          startWaiting()
+          ShareUndoNotifier.show(this@MainActivity, result.accepted)
+        }
+        shareNotice(result)?.let { notice.value = it }
+      }.onFailure {
+        notice.value = noteLinkText(
+          "无法导入分享内容：${it.message}",
+          "Could not import shared content: ${it.message}",
+        )
+      }
     }
     intent.action = null
+    setIntent(Intent(this, MainActivity::class.java))
+  }
+
+  private fun shareNotice(result: ShareIntakeResult): String? {
+    if (result.openedOnly) return null
+    if (result.accepted.isEmpty() && result.rejected.isEmpty()) return null
+    val accepted = result.accepted.size
+    if (result.rejected.isEmpty()) {
+      return noteLinkText("已加入 $accepted 项", "Added $accepted item(s)")
+    }
+    val detail = result.rejected.joinToString(noteLinkText("；", "; ")) { rejection ->
+      val name = rejection.displayName ?: noteLinkText("未命名内容", "Unnamed content")
+      val type = rejection.detectedType ?: noteLinkText("未知类型", "unknown type")
+      val reason = when (rejection.reason) {
+        ShareRejectReason.UNSUPPORTED_TYPE -> noteLinkText("不支持的类型 $type", "unsupported type $type")
+        ShareRejectReason.TOO_LARGE -> rejection.limitDescription?.let {
+          noteLinkText("超过 $it 上限", "exceeds the $it limit")
+        } ?: noteLinkText("超过大小上限", "exceeds the size limit")
+
+        ShareRejectReason.TOO_MANY_PIXELS -> noteLinkText("超过 1 亿像素", "exceeds 100 million pixels")
+        ShareRejectReason.EMPTY -> noteLinkText("内容为空", "empty content")
+        ShareRejectReason.UNREADABLE -> noteLinkText("无法读取", "unreadable")
+      }
+      "$name：$reason"
+    }
+    return if (accepted == 0) {
+      noteLinkText("未加入任何内容：$detail", "Nothing was added: $detail")
+    } else {
+      noteLinkText(
+        "已加入 $accepted 项；跳过 ${result.rejected.size} 项：$detail",
+        "Added $accepted; skipped ${result.rejected.size}: $detail",
+      )
+    }
   }
 
   private fun startWaiting() {
     runCatching { TransferForegroundService.sync(this, queue.items().isNotEmpty()) }
       .onFailure { notice.value = "Content was saved; grant Nearby devices permission to wait for sending" }
   }
-}
-
-internal enum class SharedStreamKind { IMAGE, PDF }
-
-internal fun enqueueSharedIntent(
-  context: Context,
-  intent: Intent,
-  queue: PhoneQueueRepository,
-  destinationDeviceId: String?,
-): List<UUID> {
-  val action = intent.action
-  require(action == Intent.ACTION_SEND || action == Intent.ACTION_SEND_MULTIPLE) { "Unsupported share action" }
-  val uris = when (action) {
-    Intent.ACTION_SEND -> listOfNotNull(
-      IntentCompat.getParcelableExtra(intent, Intent.EXTRA_STREAM, Uri::class.java),
-    )
-    else -> IntentCompat.getParcelableArrayListExtra(intent, Intent.EXTRA_STREAM, Uri::class.java).orEmpty()
-  }
-  return buildList {
-    uris.forEach { uri ->
-      val resolvedMimeType = context.contentResolver.getType(uri)
-      when (classifySharedStream(resolvedMimeType, intent.type)) {
-        SharedStreamKind.IMAGE -> add(queue.enqueueImage(uri, destinationDeviceId).id)
-        SharedStreamKind.PDF -> add(queue.enqueuePdf(uri, destinationDeviceId).id)
-        null -> throw IllegalArgumentException(
-          "Unsupported shared file type: ${resolvedMimeType ?: intent.type ?: "unknown"}",
-        )
-      }
-    }
-    intent.getCharSequenceExtra(Intent.EXTRA_TEXT)?.toString()?.takeIf(String::isNotBlank)
-      ?.let { add(queue.enqueueText(it, destinationDeviceId).id) }
-  }
-}
-
-/** Resolves a shared stream from its provider MIME type, falling back to the intent declaration. */
-internal fun classifySharedStream(resolvedMimeType: String?, intentMimeType: String?): SharedStreamKind? =
-  classifySharedMimeType(resolvedMimeType) ?: classifySharedMimeType(intentMimeType)
-
-private fun classifySharedMimeType(mimeType: String?): SharedStreamKind? = when {
-  mimeType.equals("application/pdf", ignoreCase = true) -> SharedStreamKind.PDF
-  mimeType?.startsWith("image/", ignoreCase = true) == true -> SharedStreamKind.IMAGE
-  else -> null
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -267,6 +280,7 @@ private fun BetterHvSendApp(
   showNotice: (String) -> Unit,
 ) {
   val items by queue.itemFlow.collectAsState()
+  val historyItems by queue.historyFlow.collectAsState()
   val inboxItems by inbox.items.collectAsState()
   val transfer by NoteLinkTransferRuntime.snapshot.collectAsState()
   val transferLog by NoteLinkTransferRuntime.eventHistory.collectAsState()
@@ -282,11 +296,19 @@ private fun BetterHvSendApp(
   var appDisplayName by remember { mutableStateOf(settings.displayName) }
   var showRecentTransferEvents by remember { mutableStateOf(settings.showRecentTransferEvents) }
   var language by remember { mutableStateOf(settings.language) }
+  var sendOrder by remember { mutableStateOf(settings.sendOrder) }
   var showSettings by remember { mutableStateOf(false) }
   var settingsMessage by remember { mutableStateOf<String?>(null) }
   var notePackageStatus by remember { mutableStateOf<String?>(null) }
   val pairedDevices = remember(statusRevision) { pairing.pairedClients }
   val selectedDevice = pairedDevices.maxByOrNull(PairedDevice::lastUsedAt)
+  val nextQueueId = remember(items, sendOrder, selectedDevice?.id) {
+    val pending = items.filter {
+      it.state == QueueState.PENDING &&
+        (it.destinationDeviceId == null || it.destinationDeviceId == selectedDevice?.id)
+    }
+    SendOrderSelector.ordered(pending, sendOrder).firstOrNull()?.id
+  }
   val updateChecker = remember { UpdateChecker() }
   var updateUiState by remember { mutableStateOf(UpdateUiState()) }
   val openRelease: (String) -> Unit = { url ->
@@ -641,11 +663,41 @@ private fun BetterHvSendApp(
           }
           initialNotice?.let { item { Text(it, color = MaterialTheme.colorScheme.primary) } }
           item {
-            Text(
-              noteLinkText("发送队列 · ${items.size} 项", "Send queue · ${items.size}"),
-              style = MaterialTheme.typography.titleLarge,
-              fontWeight = FontWeight.SemiBold,
-            )
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+              Text(
+                noteLinkText("发送队列 · ${items.size} 项", "Send queue · ${items.size}"),
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.weight(1f),
+              )
+              Text(noteLinkText("顺序", "Order"), style = MaterialTheme.typography.labelMedium)
+              TextButton(
+                onClick = {
+                  sendOrder = SendOrder.QUEUE
+                  settings.sendOrder = sendOrder
+                  Log.i("NoteLink", "queue.order=${sendOrder.name}")
+                  showNotice(noteLinkText("发送顺序：队列（最早优先）", "Send order: queue (oldest first)"))
+                },
+              ) {
+                Text(
+                  noteLinkText("队列", "Queue"),
+                  fontWeight = if (sendOrder == SendOrder.QUEUE) FontWeight.Bold else FontWeight.Normal,
+                )
+              }
+              TextButton(
+                onClick = {
+                  sendOrder = SendOrder.STACK
+                  settings.sendOrder = sendOrder
+                  Log.i("NoteLink", "queue.order=${sendOrder.name}")
+                  showNotice(noteLinkText("发送顺序：栈（最新优先）", "Send order: stack (newest first)"))
+                },
+              ) {
+                Text(
+                  noteLinkText("栈", "Stack"),
+                  fontWeight = if (sendOrder == SendOrder.STACK) FontWeight.Bold else FontWeight.Normal,
+                )
+              }
+            }
           }
           if (items.isEmpty()) {
             item {
@@ -660,12 +712,56 @@ private fun BetterHvSendApp(
           items(items, key = { it.id }) { item ->
             QueueCard(
               item,
+              isNext = item.id == nextQueueId,
               onUp = { queue.move(item.id, -1) },
               onDown = { queue.move(item.id, 1) },
               onDelete = {
                 queue.delete(item.id)
                 TransferForegroundService.sync(queueContext(queue), queue.items().isNotEmpty())
               },
+            )
+          }
+          item {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+              Text(
+                noteLinkText("发送历史 · ${historyItems.size} 项", "Send history · ${historyItems.size}"),
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.weight(1f),
+              )
+              if (historyItems.isNotEmpty()) {
+                TextButton(onClick = { queue.clearHistory() }) { Text(noteLinkText("清空", "Clear")) }
+              }
+            }
+          }
+          if (historyItems.isEmpty()) {
+            item {
+              Text(noteLinkText("成功发送或放弃的内容会记录在这里。", "Sent and abandoned items appear here."))
+            }
+          }
+          items(historyItems, key = { it.id }) { entry ->
+            HistoryCard(
+              entry = entry,
+              resendable = queue.canResend(entry),
+              onResend = {
+                scope.launch {
+                  val newId = withContext(Dispatchers.IO) {
+                    queue.requeueHistory(entry.id, selectedDevice?.id, pairedDevices.map { it.id }.toSet())
+                  }
+                  if (newId == null) {
+                    showNotice(
+                      noteLinkText(
+                        "历史内容已清理，无法重新发送",
+                        "The retained content was pruned; cannot send again",
+                      ),
+                    )
+                  } else {
+                    TransferForegroundService.sync(queueContext(queue), queue.items().isNotEmpty())
+                    showNotice(noteLinkText("已重新加入发送队列", "Added back to the send queue"))
+                  }
+                }
+              },
+              onDelete = { queue.deleteHistory(entry.id) },
             )
           }
           item {
@@ -1395,24 +1491,79 @@ private fun DeviceDropdown(
   }
 }
 
-@Composable private fun QueueCard(item: QueueItem, onUp: () -> Unit, onDown: () -> Unit, onDelete: () -> Unit) {
+@Composable
+private fun QueueCard(
+  item: QueueItem,
+  isNext: Boolean,
+  onUp: () -> Unit,
+  onDown: () -> Unit,
+  onDelete: () -> Unit,
+) {
   Card(Modifier.fillMaxWidth()) {
     Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
       Column(Modifier.weight(1f)) {
-        Text(
-          when (item.kind) {
-            ContentKind.IMAGE -> noteLinkText("图片", "Image")
-            ContentKind.TEXT -> noteLinkText("文字", "Text")
-            ContentKind.PDF -> "PDF"
-            ContentKind.APP_PACKAGE -> noteLinkText("Note 安装包", "Note package")
-          },
-          fontWeight = FontWeight.Bold,
-        )
+        Row(verticalAlignment = Alignment.CenterVertically) {
+          Text(
+            when (item.kind) {
+              ContentKind.IMAGE -> noteLinkText("图片", "Image")
+              ContentKind.TEXT -> noteLinkText("文字", "Text")
+              ContentKind.PDF -> "PDF"
+              ContentKind.APP_PACKAGE -> noteLinkText("Note 安装包", "Note package")
+            },
+            fontWeight = FontWeight.Bold,
+          )
+          if (isNext) {
+            Text(
+              noteLinkText("下一个发送", "Next"),
+              color = MaterialTheme.colorScheme.primary,
+              style = MaterialTheme.typography.labelSmall,
+              modifier = Modifier.padding(start = 8.dp),
+            )
+          }
+        }
         Text(item.displayName.orEmpty(), maxLines = 2, overflow = TextOverflow.Ellipsis)
         Text("${item.state} · ${formatSize(item.byteLength)}", style = MaterialTheme.typography.bodySmall)
       }
       IconButton(onClick = onUp) { Icon(Icons.Default.KeyboardArrowUp, noteLinkText("上移", "Move up")) }
       IconButton(onClick = onDown) { Icon(Icons.Default.KeyboardArrowDown, noteLinkText("下移", "Move down")) }
+      IconButton(onClick = onDelete) { Icon(Icons.Default.Delete, noteLinkText("删除", "Delete")) }
+    }
+  }
+}
+
+@Composable
+private fun HistoryCard(
+  entry: SendHistoryEntry,
+  resendable: Boolean,
+  onResend: () -> Unit,
+  onDelete: () -> Unit,
+) {
+  val outcome = when (entry.outcome) {
+    SendOutcome.SUCCEEDED -> noteLinkText("已发送", "Sent")
+    SendOutcome.FAILED -> noteLinkText("发送失败", "Failed")
+  }
+  val device = entry.destinationName ?: entry.destinationDeviceId ?: noteLinkText("未指定设备", "No device")
+  val time = DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT).format(Date(entry.completedAt))
+  Card(Modifier.fillMaxWidth()) {
+    Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+      Column(Modifier.weight(1f)) {
+        Text(
+          entry.displayName ?: noteLinkText("未命名内容", "Unnamed content"),
+          maxLines = 1,
+          overflow = TextOverflow.Ellipsis,
+          fontWeight = FontWeight.Medium,
+        )
+        Text(
+          "$outcome · $device · ${formatSize(entry.byteLength)} · $time",
+          style = MaterialTheme.typography.bodySmall,
+        )
+        entry.failureReason?.let {
+          Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+        }
+      }
+      IconButton(onClick = onResend, enabled = resendable) {
+        Icon(Icons.Default.Refresh, noteLinkText("重新发送", "Send again"))
+      }
       IconButton(onClick = onDelete) { Icon(Icons.Default.Delete, noteLinkText("删除", "Delete")) }
     }
   }
