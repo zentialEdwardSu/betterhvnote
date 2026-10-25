@@ -1,9 +1,11 @@
 .gradle/
+.gradle-home/
 build/
 /.toolchain/
 /local.properties
 *.iml
 .idea/
+.dsh/
 /captures
 /output/
 .externalNativeBuild
