@@ -5,7 +5,12 @@ import java.util.UUID
 interface QueueStore {
   fun items(): List<QueueItem>
   fun find(id: UUID): QueueItem?
-  fun next(kind: ContentKind, destinationDeviceId: String?, now: Long): QueueItem?
+  fun next(
+    kind: ContentKind,
+    destinationDeviceId: String?,
+    now: Long,
+    order: SendOrder = SendOrder.QUEUE,
+  ): QueueItem?
   fun insert(item: QueueItem)
   fun update(item: QueueItem)
   fun remove(id: UUID): Boolean
@@ -22,12 +27,14 @@ class InMemoryQueueStore : QueueStore {
 
   @Synchronized override fun find(id: UUID): QueueItem? = values[id]
 
-  @Synchronized override fun next(kind: ContentKind, destinationDeviceId: String?, now: Long): QueueItem? {
+  @Synchronized override fun next(
+    kind: ContentKind,
+    destinationDeviceId: String?,
+    now: Long,
+    order: SendOrder,
+  ): QueueItem? {
     releaseExpired(now)
-    return items().firstOrNull {
-      it.kind == kind && it.state == QueueState.PENDING &&
-        (it.destinationDeviceId == null || it.destinationDeviceId == destinationDeviceId)
-    }
+    return SendOrderSelector.nextPending(items(), kind, destinationDeviceId, order)
   }
 
   @Synchronized override fun insert(item: QueueItem) {
@@ -67,10 +74,14 @@ class InMemoryQueueStore : QueueStore {
   }
 }
 
-class QueueCoordinator(private val store: QueueStore, private val clock: () -> Long = System::currentTimeMillis) {
+class QueueCoordinator(
+  private val store: QueueStore,
+  private val clock: () -> Long = System::currentTimeMillis,
+  private val order: () -> SendOrder = { SendOrder.QUEUE },
+) {
   @Synchronized fun leaseNext(kind: ContentKind, deviceId: String): QueueItem? {
     val now = clock()
-    val item = store.next(kind, deviceId, now) ?: return null
+    val item = store.next(kind, deviceId, now, order()) ?: return null
     return item.copy(
       destinationDeviceId = item.destinationDeviceId ?: deviceId,
       state = QueueState.LEASED,

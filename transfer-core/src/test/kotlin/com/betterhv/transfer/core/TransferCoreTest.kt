@@ -17,7 +17,7 @@ class TransferCoreTest {
     val image = item(ContentKind.IMAGE, 1)
     store.insert(text);
     store.insert(image)
-    val coordinator = QueueCoordinator(store) { now }
+    val coordinator = QueueCoordinator(store, clock = { now })
 
     assertEquals(image.id, coordinator.leaseNext(ContentKind.IMAGE, "note")!!.id)
     assertEquals(text.id, store.next(ContentKind.TEXT, "note", now)!!.id)
@@ -30,7 +30,7 @@ class TransferCoreTest {
   @Test fun `expired lease returns to pending`() {
     var now = 0L
     val store = InMemoryQueueStore().also { it.insert(item(ContentKind.IMAGE, 0)) }
-    val coordinator = QueueCoordinator(store) { now }
+    val coordinator = QueueCoordinator(store, clock = { now })
     val leased = coordinator.leaseNext(ContentKind.IMAGE, "note")!!
     now = TransferLimits.LEASE_TIMEOUT_MILLIS + 1
     assertEquals(1, store.releaseExpired(now))
@@ -134,7 +134,7 @@ class TransferCoreTest {
     org.junit.Assert.assertFalse(probe.contentEquals(file))
   }
 
-  @Test fun `route selector requires matching ssid and orders lan before wifi direct`() {
+  @Test fun `route selector prefers lan and tolerates an unknown ssid`() {
     val wifi = HighBandwidthEndpoint("12:34:56:78:9a:bc", "192.168.49.1", "DIRECT-BH", "password")
     val local = DeviceCapabilities(
       modes = TransferModes.ALL,
@@ -152,8 +152,12 @@ class TransferCoreTest {
       TransferRouteSelector.candidates(local, CapabilityNegotiation(remote, SsidMatch.MATCH)),
     )
     assertEquals(
-      listOf(TransferMode.WIFI_DIRECT),
+      listOf(TransferMode.LAN, TransferMode.WIFI_DIRECT),
       TransferRouteSelector.candidates(local, CapabilityNegotiation(remote, SsidMatch.UNKNOWN)),
+    )
+    assertEquals(
+      listOf(TransferMode.WIFI_DIRECT),
+      TransferRouteSelector.candidates(local, CapabilityNegotiation(remote, SsidMatch.MISMATCH)),
     )
   }
 

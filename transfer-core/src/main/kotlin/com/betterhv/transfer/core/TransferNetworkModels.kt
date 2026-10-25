@@ -158,10 +158,17 @@ object TransferNetworkSecurity {
 }
 
 object TransferRouteSelector {
-  /** Ordered candidates; callers may attempt the second route only after the LAN attempt fails. */
+  /**
+   * Ordered candidates; callers may attempt the second route only after the LAN attempt fails.
+   *
+   * A missing SSID fingerprint (UNKNOWN) no longer blocks LAN: one side may be on Ethernet, or the
+   * platform may redact its SSID. The LAN channel is still authenticated by the pairing-key probe,
+   * so an unknown network identity only costs a failed probe, while an explicit MISMATCH means the
+   * devices are on different networks and LAN is skipped.
+   */
   fun candidates(local: DeviceCapabilities, negotiation: CapabilityNegotiation): List<TransferMode> = buildList {
     val remote = negotiation.remote
-    if (negotiation.ssidMatch == SsidMatch.MATCH && local.lanEndpoint != null && remote.lanEndpoint != null &&
+    if (negotiation.ssidMatch != SsidMatch.MISMATCH && local.lanEndpoint != null && remote.lanEndpoint != null &&
       TransferModes.contains(local.modes, TransferMode.LAN) && TransferModes.contains(remote.modes, TransferMode.LAN)
     ) {
       add(TransferMode.LAN)
