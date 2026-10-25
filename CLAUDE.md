@@ -46,6 +46,14 @@ Locally, `./gradlew test` and `./gradlew assembleDebug` remain the baseline chec
 - `tools/elfsyms.py` — standalone ELF64 dynamic-symbol dumper (no deps) for inspecting the vendor `.so` files under `app/src/main/jniLibs/arm64-v8a/` when porting JNI bindings, to confirm exact exported symbol names before writing a Java/Kotlin wrapper.
 - `hvNote/` — decompiled reference material from the original vendor app (smali, extracted `.so`s, APK) used as the porting source. Read-only reference, not part of the build (excluded via `.gitignore`).
 
+### NoteLink queues, history, and Windows deployment
+
+- **Share intake** (`ShareIntake` + `ContentSniffer`): the provider MIME type is only a hint. Content is sniffed from magic bytes, then file name, then declared MIME, and each item is classified independently so one unsupported item never discards the batch. `MainActivity` is `singleTask`, consumes a share only on first creation, and treats a content-free `ACTION_SEND` as "open the app".
+- **Send history**: both platforms keep a separate `send_history.db` plus a `history/` payload directory; do not add history tables to the queue database. `SendHistoryRecorder` owns the 100-entry / 30-day / 512 MiB retention policy, the re-send decision and crash reconciliation. Commit order is "rename payload → insert history row → delete queue row"; `reconcileHistory()` finishes interrupted commits and removes orphaned payloads.
+- **Send order**: `SendOrder` (`QUEUE`/`STACK`) is a sender-side setting applied by `SendOrderSelector` through `QueueStore.next`; the BLE v3 protocol is unchanged, so older peers keep working.
+- **Windows single instance**: `SingleInstanceGuard` holds a file lock and answers `SHOW` on a loopback port, so a second launch fronts the running window instead of starting another receiver.
+- **Windows firewall**: `WindowsFirewallRuleChecker` trusts only `NOTELINK|...` ASCII markers printed by PowerShell and drains stdout on a reader thread; the installer and bundled scripts elevate through Base64 `-EncodedCommand`, so paths with spaces or non-ASCII characters never enter a command line. Keep new script output ASCII/UTF-8.
+
 ### The pen input pipeline (core data flow)
 
 ```
