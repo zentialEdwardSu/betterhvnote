@@ -51,9 +51,12 @@ class ExportViewModel(application: Application) : AndroidViewModel(application) 
   private val jobs = LinkedHashMap<UUID, Job>()
   private var clientChoice: CompletableDeferred<PairedDevice>? = null
 
+  private var maintenanceClosed = false
+
   init { refresh() }
 
   fun refresh() {
+    if (maintenanceClosed) return
     viewModelScope.launch {
       try {
         withContext(Dispatchers.IO) { engine.pruneOrphanFiles() }
@@ -211,12 +214,20 @@ class ExportViewModel(application: Application) : AndroidViewModel(application) 
 
   private class GenerationFailure(val result: ExportResult.Failure) : Exception(result.error)
 
-  override fun onCleared() {
+  suspend fun closeForMaintenance() {
+    if (maintenanceClosed) return
+    maintenanceClosed = true
     val pending = viewModelScope.coroutineContext[Job]?.children?.toList().orEmpty()
-    kotlinx.coroutines.CoroutineScope(Dispatchers.IO).launch {
-      pending.forEach { it.cancel(); it.join() }
+    pending.forEach { it.cancel() }
+    pending.forEach { it.join() }
+    withContext(Dispatchers.IO) {
       taskRepository.close()
       notebookRepository.close()
     }
+  }
+
+  override fun onCleared() {
+    if (maintenanceClosed) return
+    kotlinx.coroutines.CoroutineScope(Dispatchers.Main.immediate).launch { closeForMaintenance() }
   }
 }

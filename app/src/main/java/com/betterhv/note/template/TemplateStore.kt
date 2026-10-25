@@ -32,6 +32,10 @@ class TemplateStore private constructor(context: Context) : TemplateResolver {
 
   @Synchronized fun snapshot(): TemplateCatalogSnapshot = catalog
 
+  fun hasOfflineTemplates(): Boolean = lastManifest.isFile && snapshot().templates.any {
+    !it.id.startsWith(BUILTIN_ID_PREFIX) && it.assetFile?.isFile == true
+  }
+
   /** True only while the configured SAF tree still has persisted read/write access. */
   fun hasUsableDirectoryPermission(): Boolean {
     val uri = settings.templateDirectoryUri?.let(Uri::parse) ?: return false
@@ -94,7 +98,7 @@ class TemplateStore private constructor(context: Context) : TemplateResolver {
         loadLastManifest(errors)
       }
     } else {
-      emptyList()
+      loadLastManifest(errors)
     }
     val merged = LinkedHashMap<String, TemplateDefinition>()
     builtins.forEach { merged[it.id] = it }
@@ -341,6 +345,8 @@ class TemplateStore private constructor(context: Context) : TemplateResolver {
 
     @SuppressLint("StaticFieldLeak")
     @Volatile private var instance: TemplateStore? = null
+    fun resetAfterRestore() { synchronized(this) { instance = null } }
+
     fun get(context: Context): TemplateStore = instance ?: synchronized(this) {
       instance ?: TemplateStore(context.applicationContext).also { instance = it }
     }

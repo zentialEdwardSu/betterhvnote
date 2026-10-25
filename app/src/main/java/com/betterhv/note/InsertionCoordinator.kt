@@ -14,6 +14,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.util.UUID
 import kotlin.coroutines.resume
@@ -54,6 +55,14 @@ class InsertionCoordinator(private val phone: PhoneTransferClient) : AutoCloseab
   val state: StateFlow<InsertionState> = mutableState
   private var penView: PenDrawView? = null
   private var requestGeneration = 0L
+  private val assetImports = kotlinx.coroutines.sync.Mutex()
+
+  suspend fun awaitAssetImports() { assetImports.withLock { } }
+
+  private suspend fun importAsset(block: () -> ImportedImage): ImportedImage = assetImports.withLock {
+    // Keep the result available for generation-based cleanup even if its UI coroutine is cancelled.
+    withContext(Dispatchers.IO + kotlinx.coroutines.NonCancellable) { block() }
+  }
 
   fun attach(view: PenDrawView) {
     penView = view
@@ -85,7 +94,7 @@ class InsertionCoordinator(private val phone: PhoneTransferClient) : AutoCloseab
     cancel()
     val generation = requestGeneration
     val view = requireNotNull(penView)
-    runCatchingCancellable { withContext(Dispatchers.IO) { view.importImage(uri) } }
+    runCatchingCancellable { importAsset { view.importImage(uri) } }
       .onSuccess {
         if (generation == requestGeneration) {
           mutableState.value = InsertionState.ImageReady(it, null)
@@ -100,6 +109,24 @@ class InsertionCoordinator(private val phone: PhoneTransferClient) : AutoCloseab
           )
         }
       }
+  }
+
+  suspend fun clipboard(context: android.content.Context, kind: ContentKind): Result<Unit> {
+    choose(kind)
+    val generation = requestGeneration
+    return runCatchingCancellable {
+      when (val content = ClipboardSource.read(context, kind)) {
+        is ClipboardContent.Text -> {
+          if (generation == requestGeneration) mutableState.value = InsertionState.TextReady(content.text, null)
+        }
+        is ClipboardContent.Image -> {
+          val view = requireNotNull(penView)
+          val image = importAsset { view.importImage(content.uri) }
+          if (generation == requestGeneration) mutableState.value = InsertionState.ImageReady(image, null)
+          else view.discardImportedImage(image)
+        }
+      }
+    }
   }
 
   suspend fun remote(kind: ContentKind) {
@@ -151,7 +178,7 @@ class InsertionCoordinator(private val phone: PhoneTransferClient) : AutoCloseab
           }
           when (val payload = lease.payload) {
             is RemotePayload.Image -> {
-              val staged = withContext(Dispatchers.IO) {
+              val staged = importAsset {
                 requireNotNull(penView).stageRemoteImage(payload.stagedFile, payload.item.mimeType)
                   .also { payload.stagedFile.delete() }
               }

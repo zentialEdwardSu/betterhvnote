@@ -48,10 +48,15 @@ class AutosaveController(private val repository: NotebookRepository, private val
     false
   }
 
-  override fun close() {
-    flush()
+  override fun close() = close(verify = false)
+
+  fun closeForMaintenance() = close(verify = true)
+
+  private fun close(verify: Boolean) {
+    val saved = flush()
     executor.shutdown()
-    executor.awaitTermination(10, TimeUnit.SECONDS)
+    check(executor.awaitTermination(60, TimeUnit.SECONDS)) { "Storage worker did not stop" }
     repository.close()
+    if (verify) check(saved) { "Pending document writes could not be saved" }
   }
 }

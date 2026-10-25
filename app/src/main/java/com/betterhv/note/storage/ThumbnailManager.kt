@@ -272,6 +272,8 @@ class ThumbnailManager(cacheDir: File, private val documentsDir: File = cacheDir
 
   override fun close() {
     executor.shutdown()
+    check(executor.awaitTermination(60, java.util.concurrent.TimeUnit.SECONDS)) { "Thumbnail worker did not stop" }
+    mainHandler.removeCallbacksAndMessages(null)
   }
 
   companion object {

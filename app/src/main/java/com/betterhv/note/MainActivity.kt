@@ -10,6 +10,11 @@ import android.os.Build
 import android.os.Bundle
 import android.view.KeyEvent
 import android.view.MotionEvent
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.sync.withLock
+import com.betterhv.note.backup.BackupMaintenance
+import com.betterhv.note.backup.BackupManager
+import com.betterhv.note.backup.BackupScreen
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -109,21 +114,45 @@ class MainActivity : ComponentActivity() {
   private var releaseTransientInputGuards: (() -> Unit)? = null
   private var hardwareKeyHandler: ((HardwareKeyId) -> Unit)? = null
 
+  private var backupOpen by mutableStateOf(false)
+
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
     EventLog.log("MainActivity", "onCreate")
-    NativeSelfTest.run()
-    setContent {
-      AppRoot(
-        onView = { penView = it },
-        onTransientInputGuardReleaseReady = { releaseTransientInputGuards = it },
-        onHardwareKeyHandlerReady = { hardwareKeyHandler = it },
-        skipTemplateDirectoryPrompt = intent.getBooleanExtra(
-          EXTRA_SKIP_TEMPLATE_DIRECTORY_PROMPT,
-          false,
-        ),
-      )
+    backupOpen = savedInstanceState?.getBoolean("backupOpen") ?: false
+    lifecycleScope.launch {
+      val recovery = runCatching {
+        withContext(Dispatchers.IO) {
+          BackupMaintenance.mutex.withLock { BackupManager(applicationContext).recoverInterruptedRestore() }
+        }
+      }
+      NativeSelfTest.run()
+      setContent {
+        if (backupOpen || recovery.isFailure) {
+          BackupScreen(initialError = recovery.exceptionOrNull()?.message, onClose = {
+            TemplateStore.resetAfterRestore()
+            backupOpen = false
+          })
+        } else {
+          AppRoot(
+            onView = { penView = it },
+            onTransientInputGuardReleaseReady = { releaseTransientInputGuards = it },
+            onHardwareKeyHandlerReady = { hardwareKeyHandler = it },
+            onBackupReady = {
+              penView = null
+              viewModelStore.clear()
+              backupOpen = true
+            },
+            skipTemplateDirectoryPrompt = intent.getBooleanExtra(EXTRA_SKIP_TEMPLATE_DIRECTORY_PROMPT, false),
+          )
+        }
+      }
     }
+  }
+
+  override fun onSaveInstanceState(outState: Bundle) {
+    outState.putBoolean("backupOpen", backupOpen)
+    super.onSaveInstanceState(outState)
   }
 
   override fun dispatchTouchEvent(event: MotionEvent): Boolean {
@@ -247,6 +276,7 @@ private fun AppRoot(
   onTransientInputGuardReleaseReady: ((() -> Unit)?) -> Unit,
   onHardwareKeyHandlerReady: (((HardwareKeyId) -> Unit)?) -> Unit,
   skipTemplateDirectoryPrompt: Boolean,
+  onBackupReady: () -> Unit,
 ) {
   val context = LocalContext.current
   val exportViewModel: ExportViewModel = viewModel()
@@ -339,10 +369,9 @@ private fun AppRoot(
     var shortcutBindings by remember { mutableStateOf(appSettingsStore.loadHardwareShortcuts()) }
     var shortcutCaptureScene by remember { mutableStateOf<ShortcutScene?>(null) }
     var shortcutBindingRequest by remember { mutableStateOf<Pair<ShortcutScene, HardwareKeyId>?>(null) }
-    var pendingHardwareKey by remember { mutableStateOf<HardwareKeyId?>(null) }
-    var toolbarShortcutScene by remember { mutableStateOf<ShortcutScene?>(null) }
+    var toolbarMenu by remember { mutableStateOf<ToolbarMenuRequest?>(null) }
     var pageManagerOpen by rememberSaveable { mutableStateOf(false) }
-    var penSettingsOpen by remember { mutableStateOf(false) }
+    val penSettingsOpen = toolbarMenu != null
     var settingsOpen by rememberSaveable { mutableStateOf(false) }
     var documentSettingsOpen by rememberSaveable { mutableStateOf(false) }
     var templateChooserOpen by rememberSaveable { mutableStateOf(false) }
@@ -370,7 +399,6 @@ private fun AppRoot(
       onDispose { onTransientInputGuardReleaseReady(null) }
     }
     DisposableEffect(Unit) {
-      onHardwareKeyHandlerReady { pendingHardwareKey = it }
       onDispose { onHardwareKeyHandlerReady(null) }
     }
     var startupBehavior by remember { mutableStateOf(StartupBehavior.WORKING_COPY) }
@@ -696,7 +724,7 @@ private fun AppRoot(
     }
     LaunchedEffect(Unit) {
       val store = TemplateStore.get(context)
-      if (!skipTemplateDirectoryPrompt && !store.hasUsableDirectoryPermission()) {
+      if (!skipTemplateDirectoryPrompt && !store.hasUsableDirectoryPermission() && !store.hasOfflineTemplates()) {
         val previous = appSettingsStore.templateDirectoryUri
           ?.let { runCatching { it.toUri() }.getOrNull() }
         templateDirectoryPicker.launch(previous)
@@ -723,6 +751,7 @@ private fun AppRoot(
     )
     LaunchedEffect(penView, uiInputBlockState, docVersion) {
       penView?.setUiInputBlocked(uiInputBlockState.blocked)
+      penView?.setEraserInputBlocked(uiInputBlockState.eraserBlocked || pendingLinkedNoteRequest != null)
     }
 
     BackHandler(
@@ -798,437 +827,199 @@ private fun AppRoot(
     val canUndo = gen.let { penView?.canUndo() ?: false }
     val canRedo = gen.let { penView?.canRedo() ?: false }
     val hasSelection = gen.let { penView?.currentSelection()?.isEmpty?.not() ?: false }
-    var requestedToolbarItem by remember { mutableStateOf<ToolbarItem?>(null) }
-    var pendingFlyoutShortcutAction by remember { mutableStateOf<ShortcutAction?>(null) }
+    LaunchedEffect(gen, hasSelection) {
+      if (!hasSelection && pendingPdfRegion?.selectedObjectIds?.isNotEmpty() == true) pendingPdfRegion = null
+    }
+    val hasPdf = gen.let { penView?.hasPdfPages() == true }
     var shortcutDeletePageId by remember { mutableStateOf<UUID?>(null) }
     var shortcutDeleteAt by remember { mutableLongStateOf(0L) }
-
-    val invokeToolbarItem: (ToolbarItem) -> Unit = { item ->
-      when (item) {
-        ToolbarItem.PEN_1, ToolbarItem.PEN_2, ToolbarItem.PEN_3 -> {
-          val slot = item.ordinal
-          penToolbarSettings = penToolbarSettings.selectSlot(slot)
-          penSettingsStore.save(penToolbarSettings)
-          toolKind = ToolKind.PEN
-          penView?.setTool(ToolKind.PEN)
-        }
-
-        ToolbarItem.TAIL_ERASER -> {
-          toolbarHidden = false
-          appSettingsStore.toolbarHidden = false
-          requestedToolbarItem = item
-        }
-
-        ToolbarItem.LASSO -> {
-          toolKind = ToolKind.LASSO
-          penView?.setTool(ToolKind.LASSO)
-        }
-
-        ToolbarItem.NAVIGATION -> {
-          toolKind = ToolKind.NAVIGATION
-          penView?.setTool(ToolKind.NAVIGATION)
-        }
-
-        ToolbarItem.INSERT, ToolbarItem.MENU -> {
-          toolbarHidden = false
-          appSettingsStore.toolbarHidden = false
-          requestedToolbarItem = item
-        }
-
-        ToolbarItem.UNDO -> penView?.undo()
-
-        ToolbarItem.REDO -> penView?.redo()
-
-        ToolbarItem.DELETE -> penView?.deleteSelection()
-
-        ToolbarItem.PAGES -> {
-          pageManagerOpen = !pageManagerOpen
-          notebookManagerOpen = false
-          settingsOpen = false
-        }
-
-        ToolbarItem.NOTEBOOKS -> {
-          notebookManagerOpen = !notebookManagerOpen
-          settingsOpen = false
-          pageManagerOpen = false
-        }
-
-        ToolbarItem.EXPORT -> {
-          exportPanelOpen = !exportPanelOpen
-          if (exportPanelOpen) {
-            exportInitialNotebookId = penView?.currentNotebookId()
-            exportViewModel.refresh()
-          }
-          notebookManagerOpen = false
-          settingsOpen = false
-          pageManagerOpen = false
-        }
+    LaunchedEffect(hasPdf) {
+      if (!hasPdf) {
+        if (toolbarMenu?.id == "navigation") toolbarMenu = null
+        if (toolKind == ToolKind.NAVIGATION) { toolKind = ToolKind.PEN; penView?.setTool(ToolKind.PEN) }
       }
     }
-
-    LaunchedEffect(pendingHardwareKey) {
-      val key = pendingHardwareKey ?: return@LaunchedEffect
-      pendingHardwareKey = null
-      shortcutCaptureScene?.let { scene ->
-        shortcutBindingRequest = scene to key
-        shortcutCaptureScene = null
-        return@LaunchedEffect
-      }
-      if (penView?.isInputGestureActive() == true) return@LaunchedEffect
-      val modalWithoutShortcuts = penSettingsOpen || settingsOpen || documentSettingsOpen ||
-        templateChooserOpen || notebookManagerOpen || exportPanelOpen ||
-        textEditorRequest != null || pendingNotebookCreation != null || notebookBusy
-      val scene = when {
-        pageManagerOpen -> ShortcutScene.PAGE_MANAGER
-
-        insertionState is InsertionState.ChoosingSource ||
-          insertionState is InsertionState.ChoosingClient -> ShortcutScene.INSERT
-
-        toolbarShortcutScene != null -> toolbarShortcutScene
-
-        modalWithoutShortcuts -> null
-
-        else -> ShortcutScene.EDITOR
-      }
-      val action = scene?.let { shortcutBindings.action(it, key) } ?: return@LaunchedEffect
-      when (scene) {
-        ShortcutScene.EDITOR -> when (action) {
-          ShortcutAction.EDITOR_PEN_1 -> invokeToolbarItem(ToolbarItem.PEN_1)
-
-          ShortcutAction.EDITOR_PEN_2 -> invokeToolbarItem(ToolbarItem.PEN_2)
-
-          ShortcutAction.EDITOR_PEN_3 -> invokeToolbarItem(ToolbarItem.PEN_3)
-
-          ShortcutAction.EDITOR_TAIL_ERASER -> invokeToolbarItem(ToolbarItem.TAIL_ERASER)
-
-          ShortcutAction.EDITOR_LASSO -> invokeToolbarItem(ToolbarItem.LASSO)
-
-          ShortcutAction.EDITOR_INSERT -> invokeToolbarItem(ToolbarItem.INSERT)
-
-          ShortcutAction.EDITOR_UNDO -> invokeToolbarItem(ToolbarItem.UNDO)
-
-          ShortcutAction.EDITOR_REDO -> invokeToolbarItem(ToolbarItem.REDO)
-
-          ShortcutAction.EDITOR_DELETE -> invokeToolbarItem(ToolbarItem.DELETE)
-
-          ShortcutAction.EDITOR_PAGES -> invokeToolbarItem(ToolbarItem.PAGES)
-
-          ShortcutAction.EDITOR_NOTEBOOKS -> invokeToolbarItem(ToolbarItem.NOTEBOOKS)
-
-          ShortcutAction.EDITOR_EXPORT -> invokeToolbarItem(ToolbarItem.EXPORT)
-
-          ShortcutAction.EDITOR_MENU -> invokeToolbarItem(ToolbarItem.MENU)
-
-          ShortcutAction.EDITOR_TOGGLE_TOOLBAR -> {
-            toolbarHidden = !toolbarHidden
-            appSettingsStore.toolbarHidden = toolbarHidden
-          }
-
-          else -> Unit
+    val commandScene = when {
+      pageManagerOpen -> ShortcutScene.PAGE_MANAGER
+      toolbarMenu?.id == "insert" || insertionState is InsertionState.ChoosingSource ||
+        insertionState is InsertionState.ChoosingClient -> ShortcutScene.INSERT
+      else -> ShortcutScene.EDITOR
+    }
+    val commandsBlocked = settingsOpen || documentSettingsOpen || templateChooserOpen || notebookManagerOpen ||
+      exportPanelOpen || textEditorRequest != null || pendingNotebookCreation != null || notebookBusy ||
+      pendingLinkedNoteRequest != null || penView?.hasPendingLinkedNotePlacement() == true ||
+      (insertionState !is InsertionState.Idle && insertionState !is InsertionState.ChoosingSource &&
+        insertionState !is InsertionState.ChoosingClient)
+    val commandContext = CommandContext(
+      scene = commandScene, blocked = commandsBlocked, hasPdf = hasPdf,
+      pdfPage = penView?.isPdfSourcePage() == true, selection = hasSelection, canUndo = canUndo, canRedo = canRedo,
+      labels = mapOf(
+        "insert.local" to if ((insertionState as? InsertionState.ChoosingSource)?.kind == ContentKind.TEXT) {
+          noteText("手动输入", "Enter manually")
+        } else noteText("从系统文件选择", "Choose system file"),
+        "editor.tail_eraser" to if (eraserMode == EraserMode.POINT) "局部擦除 · 点击切换" else "整笔擦除 · 点击切换",
+        "editor.debug" to if (debugMode) "关闭 Debug" else "开启 Debug",
+        "pdf.mode" to if (penView?.isStudyNavigation() == true) "学习模式" else "阅读模式",
+      ),
+      selected = buildSet {
+        if (toolKind == ToolKind.PEN) add("editor.pen_${penToolbarSettings.activeSlot + 1}")
+        if (toolKind == ToolKind.LASSO) add("editor.lasso")
+        if (toolKind == ToolKind.NAVIGATION) add("editor.navigation")
+        if (pageManagerOpen) add("editor.pages")
+        if (toolbarMenu != null) add("editor.${toolbarMenu!!.id}")
+      },
+    )
+    fun changePen(binding: CommandBinding) {
+      val slot = binding.arguments["slot"]?.toIntOrNull() ?: penToolbarSettings.activeSlot
+      val settings = penToolbarSettings.settingsFor(slot)
+      val value = binding.arguments.getValue("value")
+      val updated = when (binding.commandId) {
+        "pen.type" -> settings.selectType(requireNotNull(PenProfiles.typeFromStableId(value)))
+        "pen.width" -> settings.updateActivePreset { it.copy(widthLevel = value.toInt()) }
+        else -> settings.updateActivePreset { preset ->
+          preset.copy(colorIndex = PenPalette.colors.indexOfFirst { color -> color.id == value })
         }
-
-        ShortcutScene.PAGE_MANAGER -> PageManagerShortcutContext { pageAction ->
-          val pv = penView ?: return@PageManagerShortcutContext false
-          when (pageAction) {
-            ShortcutAction.PAGE_PREVIOUS -> {
-              if (!pv.navigatePage(-1)) showNotice(noteText("已经是第一页", "Already at the first page"))
-            }
-
-            ShortcutAction.PAGE_NEXT -> {
-              if (!pv.navigatePage(1)) showNotice(noteText("已经是最后一页", "Already at the last page"))
-            }
-
-            ShortcutAction.PAGE_ADD -> {
-              pv.addPageAfter(pv.pageIds()[pv.currentPageIndex()], activate = true)
-              showNotice(noteText("已新增第 ${pv.currentPageIndex() + 1} 页", "Added page ${pv.currentPageIndex() + 1}"))
-            }
-
-            ShortcutAction.PAGE_DELETE -> {
-              val id = pv.pageIds().getOrNull(pv.currentPageIndex()) ?: return@PageManagerShortcutContext false
-              val now = android.os.SystemClock.uptimeMillis()
-              if (shortcutDeletePageId == id && now - shortcutDeleteAt <= 3_000L) {
-                if (!pv.canDeletePage()) {
-                  showNotice(
-                    noteText("最后一页不能删除", "The last page cannot be deleted"),
-                  )
-                } else {
-                  pv.deletePage(id)
-                }
-                shortcutDeletePageId = null
-              } else {
-                shortcutDeletePageId = id
-                shortcutDeleteAt = now
-                showNotice(noteText("再次按删除键确认删除当前页", "Press Delete again to confirm"))
-              }
-            }
-
-            ShortcutAction.PAGE_BOOKMARK -> {
-              val value = pv.toggleCurrentPageBookmark()
-              showNotice(if (value) noteText("已添加书签", "Bookmark added") else noteText("已取消书签", "Bookmark removed"))
-            }
-
-            ShortcutAction.PAGE_CLOSE -> pageManagerOpen = false
-
-            else -> return@PageManagerShortcutContext false
+      }
+      penToolbarSettings = penToolbarSettings.updateSlot(slot, updated)
+      penSettingsStore.save(penToolbarSettings)
+    }
+    fun clipboard(kind: ContentKind) {
+      toolbarMenu = null
+      appScope.launch {
+        insertion.clipboard(context, kind).onFailure { showNotice(it.message ?: "Clipboard import failed") }
+      }
+    }
+    val dispatcher = CommandDispatcher(
+      context = { commandContext.copy(blocked = commandsBlocked || penView?.isInputGestureActive() == true) },
+      execute = { binding ->
+        val id = binding.commandId
+        if (id !in setOf("pen.type", "pen.width", "pen.color")) toolbarMenu = null
+        when (id) {
+          "editor.pen_1", "editor.pen_2", "editor.pen_3" -> {
+            penToolbarSettings = penToolbarSettings.selectSlot(id.last().digitToInt() - 1)
+            penSettingsStore.save(penToolbarSettings)
+            toolKind = ToolKind.PEN; penView?.setTool(ToolKind.PEN)
           }
-          true
-        }.perform(action)
-
-        ShortcutScene.INSERT -> {
-          val handled = InsertShortcutContext { insertAction ->
-            when (insertAction) {
-              ShortcutAction.INSERT_IMAGE -> beginInsertion(ContentKind.IMAGE)
-
-              ShortcutAction.INSERT_TEXT -> beginInsertion(ContentKind.TEXT)
-
-              ShortcutAction.INSERT_LOCAL -> {
-                val choosing = insertion.state.value as? InsertionState.ChoosingSource
-                  ?: return@InsertShortcutContext false
-                if (choosing.kind == ContentKind.IMAGE) {
-                  insertion.cancel()
-                  imagePicker.launch(arrayOf("image/*"))
-                } else {
-                  insertion.manualText()
-                  showNotice(noteText("请点击页面确定文字位置", "Tap the page to place the text"))
-                }
-              }
-
-              ShortcutAction.INSERT_NOTELINK -> {
-                val choosing = insertion.state.value as? InsertionState.ChoosingSource
-                  ?: return@InsertShortcutContext false
-                val missing = TransferPermissions.missingNotePermissions(context)
-                if (missing.isEmpty()) {
-                  appScope.launch { insertion.remote(choosing.kind) }
-                } else {
-                  permissionRemoteKind = choosing.kind
-                  permissionRemoteAuto = false
-                  transferPermissionLauncher.launch(missing)
-                }
-              }
-
-              ShortcutAction.INSERT_CANCEL -> insertion.cancel()
-
-              else -> return@InsertShortcutContext false
+          "pen.settings" -> {
+            val slot = binding.arguments["slot"]?.toIntOrNull() ?: penToolbarSettings.activeSlot
+            penToolbarSettings = penToolbarSettings.selectSlot(slot)
+            penSettingsStore.save(penToolbarSettings)
+            toolKind = ToolKind.PEN; penView?.setTool(ToolKind.PEN)
+            toolbarHidden = false; toolbarMenu = ToolbarMenuRequest("pen", slot)
+          }
+          "pen.type", "pen.width", "pen.color" -> changePen(binding)
+          "editor.tail_eraser", "eraser.mode" -> {
+            eraserMode = if (id == "eraser.mode") EraserMode.valueOf(binding.arguments.getValue("value"))
+            else if (eraserMode == EraserMode.POINT) EraserMode.WHOLE_STROKE else EraserMode.POINT
+            penView?.setEraserMode(eraserMode)
+          }
+          "editor.lasso" -> { toolKind = ToolKind.LASSO; penView?.setTool(ToolKind.LASSO) }
+          "editor.navigation" -> {
+            toolKind = ToolKind.NAVIGATION; penView?.setTool(ToolKind.NAVIGATION)
+            toolbarHidden = false; toolbarMenu = ToolbarMenuRequest("navigation")
+          }
+          "pdf.fit" -> penView?.fitPdf()
+          "pdf.mode" -> penView?.toggleStudyNavigation()
+          "editor.undo" -> penView?.undo()
+          "editor.redo" -> penView?.redo()
+          "editor.delete" -> { penView?.deleteSelection(); pendingPdfRegion = null }
+          "editor.insert", "editor.menu" -> {
+            toolbarHidden = false; toolbarMenu = ToolbarMenuRequest(id.substringAfter('.'))
+          }
+          "insert.image" -> beginInsertion(ContentKind.IMAGE)
+          "insert.text" -> beginInsertion(ContentKind.TEXT)
+          "clipboard.image" -> clipboard(ContentKind.IMAGE)
+          "clipboard.text" -> clipboard(ContentKind.TEXT)
+          "insert.clipboard" -> (insertion.state.value as? InsertionState.ChoosingSource)?.let { clipboard(it.kind) }
+          "insert.local" -> (insertion.state.value as? InsertionState.ChoosingSource)?.let { choosing ->
+            if (choosing.kind == ContentKind.IMAGE) { insertion.cancel(); imagePicker.launch(arrayOf("image/*")) }
+            else { insertion.manualText(); showNotice(noteText("请点击页面确定文字位置", "Tap the page to place text")) }
+          }
+          "insert.notelink" -> (insertion.state.value as? InsertionState.ChoosingSource)?.let { choosing ->
+            val missing = TransferPermissions.missingNotePermissions(context)
+            if (missing.isEmpty()) appScope.launch { insertion.remote(choosing.kind) }
+            else {
+              permissionRemoteKind = choosing.kind; permissionRemoteAuto = false
+              transferPermissionLauncher.launch(missing)
             }
-            true
-          }.perform(action)
-          if (handled) pendingFlyoutShortcutAction = action
+          }
+          "insert.cancel" -> insertion.cancel()
+          "editor.pages" -> { pageManagerOpen = !pageManagerOpen; notebookManagerOpen = false }
+          "page.close" -> pageManagerOpen = false
+          "page.previous", "page.next" -> {
+            if (penView?.navigatePage(if (id == "page.next") 1 else -1) != true) {
+              showNotice(noteText("没有更多页面", "No more pages"))
+            }
+          }
+          "page.add" -> penView?.addPage()
+          "page.bookmark" -> penView?.toggleCurrentPageBookmark()
+          "page.delete" -> penView?.let { pv ->
+            val pageId = pv.pageIds().getOrNull(pv.currentPageIndex())
+            val now = android.os.SystemClock.uptimeMillis()
+            if (pageId != null && shortcutDeletePageId == pageId && now - shortcutDeleteAt in 0..3_000L) {
+              if (pv.canDeletePage()) pv.deletePage(pageId) else showNotice("最后一页不能删除")
+              shortcutDeletePageId = null
+            } else {
+              shortcutDeletePageId = pageId; shortcutDeleteAt = now
+              showNotice(noteText("再次按删除键确认删除当前页", "Press Delete again to confirm"))
+            }
+          }
+          "editor.notebooks" -> { notebookManagerOpen = true; pageManagerOpen = false }
+          "notebook.current", "notebook.remaining" -> penView?.let { pv ->
+            val ids = if (id == "notebook.current") setOfNotNull(pv.pageIds().getOrNull(pv.currentPageIndex()))
+            else pv.currentPageToEndIds()
+            if (ids.isNotEmpty()) pendingNotebookCreation = NotebookCreationRequest.Transfer(ids)
+            pageManagerOpen = false
+          }
+          "editor.export" -> {
+            exportInitialNotebookId = penView?.currentNotebookId(); exportViewModel.refresh()
+            exportPanelOpen = true; pageManagerOpen = false
+          }
+          "settings.document" -> {
+            templateCatalog = penView?.refreshTemplates() ?: templateCatalog
+            documentSettingsOpen = true; pageManagerOpen = false
+          }
+          "settings.app" -> { settingsOpen = true; pageManagerOpen = false }
+          "editor.debug" -> debugMode = !debugMode
+          "editor.toggle_toolbar" -> { toolbarHidden = !toolbarHidden; appSettingsStore.toolbarHidden = toolbarHidden }
+        }
+      },
+    )
+    androidx.compose.runtime.SideEffect {
+      onHardwareKeyHandlerReady { key ->
+        val scene = shortcutCaptureScene
+        if (scene != null) {
+          shortcutBindingRequest = scene to key; shortcutCaptureScene = null
+        } else {
+          shortcutBindings.command(commandScene, key)?.let { dispatcher.dispatch(it) }
         }
       }
     }
     EditorToolbar(
       modifier = Modifier.fillMaxSize(),
-      state = EditorToolbarState(
-        dockEdge = dockEdge,
-        dockFraction = dockFraction,
-        toolbarHidden = toolbarHidden,
-        visibleItems = visibleToolbarItems,
-        requestedItem = requestedToolbarItem,
-        hardwareShortcutAction = pendingFlyoutShortcutAction,
-        toolKind = toolKind,
-        pdfStudyMode = gen.let { penView?.isStudyNavigation() ?: true },
-        eraserMode = eraserMode,
-        canUndo = canUndo,
-        canRedo = canRedo,
-        hasSelection = hasSelection,
-        insertionActive = insertionState !is InsertionState.Idle,
-        pageManagerOpen = pageManagerOpen,
-        notebookManagerOpen = notebookManagerOpen,
-        exportPanelOpen = exportPanelOpen,
-        settingsOpen = settingsOpen,
-        documentSettingsOpen = documentSettingsOpen,
-        debugMode = debugMode,
-        penToolbarSettings = penToolbarSettings,
-      ),
+      state = EditorToolbarState(dockEdge, dockFraction, toolbarHidden, visibleToolbarItems, hasPdf,
+        eraserMode, penToolbarSettings, toolbarMenu, dispatcher),
       actions = EditorToolbarActions(
-        onDockEdgeChange = {
-          dockEdge = it
-          appSettingsStore.toolbarDockEdge = it
-        },
-        onDockFractionChange = {
-          dockFraction = it
-          appSettingsStore.toolbarDockFraction = it
-        },
-        onToolbarHiddenChange = {
-          toolbarHidden = it
-          appSettingsStore.toolbarHidden = it
-        },
-        onRequestedItemConsumed = { requestedToolbarItem = null },
-        onHardwareShortcutConsumed = { pendingFlyoutShortcutAction = null },
-        onShortcutSceneChange = { toolbarShortcutScene = it },
-        onToolSelected = { kind ->
-          toolKind = kind
-          penView?.setTool(kind)
-        },
-        onPdfFit = {
-          if (penView?.fitPdf() != true) {
-            showNotice(
-              noteText("当前页不是 PDF 源页", "The current page is not a PDF source page"),
-            )
-          }
-        },
-        onPdfNavigationModeToggle = {
-          val study = penView?.toggleStudyNavigation() ?: true
-          showNotice(
-            if (study) {
-              noteText(
-                "学习模式：翻页包含夹纸",
-                "Study mode: navigation includes linked notes",
-              )
-            } else {
-              noteText("阅读模式：翻页跳过夹纸", "Reading mode: navigation skips linked notes")
-            },
-          )
-        },
-        onEraserModeToggle = {
-          eraserMode = if (eraserMode == EraserMode.WHOLE_STROKE) EraserMode.POINT else EraserMode.WHOLE_STROKE
-          penView?.setEraserMode(eraserMode)
-        },
-        onUndo = { penView?.undo() },
-        onRedo = { penView?.redo() },
-        onDelete = { penView?.deleteSelection() },
-        onInsert = beginInsertion,
-        onPageManagerToggle = {
-          pageManagerOpen = !pageManagerOpen
-          notebookManagerOpen = false
-          settingsOpen = false
-        },
-        onPageAdd = {
-          penView?.let { pv ->
-            pv.addPage()
-            showNotice(noteText("已新增第 ${pv.currentPageIndex() + 1} 页", "Added page ${pv.currentPageIndex() + 1}"))
-          }
-        },
-        onPreviousPage = {
-          if (penView?.navigatePage(-1) != true) showNotice(noteText("已经是第一页", "Already at the first page"))
-        },
-        onNextPage = {
-          if (penView?.navigatePage(1) != true) showNotice(noteText("已经是最后一页", "Already at the last page"))
-        },
-        onNotebookManagerToggle = {
-          notebookManagerOpen = !notebookManagerOpen
-          settingsOpen = false
-          pageManagerOpen = false
-        },
-        onNotebookCurrentPage = {
-          penView?.pageIds()?.getOrNull(penView?.currentPageIndex() ?: -1)?.let { pageId ->
-            pendingNotebookCreation = NotebookCreationRequest.Transfer(setOf(pageId))
-            notebookManagerOpen = false
-            settingsOpen = false
-            pageManagerOpen = false
-          }
-        },
-        onNotebookCurrentToEnd = {
-          penView?.currentPageToEndIds()?.takeIf(Set<UUID>::isNotEmpty)?.let { ids ->
-            pendingNotebookCreation = NotebookCreationRequest.Transfer(ids)
-            notebookManagerOpen = false
-            settingsOpen = false
-            pageManagerOpen = false
-          }
-        },
-        onExportPanelToggle = {
-          exportPanelOpen = !exportPanelOpen
-          if (exportPanelOpen) {
-            exportInitialNotebookId = penView?.currentNotebookId()
-            exportViewModel.refresh()
-          }
-          notebookManagerOpen = false
-          settingsOpen = false
-          pageManagerOpen = false
-        },
-        onDocumentSettingsOpen = {
-          templateCatalog = penView?.refreshTemplates() ?: templateCatalog
-          documentSettingsOpen = true
-          settingsOpen = false
-          notebookManagerOpen = false
-          pageManagerOpen = false
-        },
-        onSettingsOpen = {
-          settingsOpen = true
-          notebookManagerOpen = false
-          pageManagerOpen = false
-        },
-        onDebugToggle = {
-          debugMode = !debugMode
-          showNotice(
-            if (debugMode) noteText("调试模式已开启", "Debug mode enabled") else noteText("调试模式已关闭", "Debug mode disabled"),
-          )
-        },
-        onPenSlotSelected = { slot ->
-          penToolbarSettings = penToolbarSettings.selectSlot(slot)
-          penSettingsStore.save(penToolbarSettings)
-        },
-        onPenSettingsChange = { slot, updated ->
-          penToolbarSettings = penToolbarSettings.updateSlot(slot, updated)
-          penSettingsStore.save(penToolbarSettings)
-        },
-        onPenPanelVisibilityChange = { visible ->
-          penSettingsOpen = visible
-        },
-        onToolbarDragStateChange = { active ->
-          penView?.setToolbarDragActive(active)
-        },
+        onDockEdgeChange = { dockEdge = it; appSettingsStore.toolbarDockEdge = it },
+        onDockFractionChange = { dockFraction = it; appSettingsStore.toolbarDockFraction = it },
+        onToolbarHiddenChange = { toolbarHidden = it; appSettingsStore.toolbarHidden = it },
+        onMenuDismiss = { toolbarMenu = null },
+        onToolbarDragStateChange = { penView?.setToolbarDragActive(it) },
         onInteractionBlockChange = { toolbarInteractionBlocked = it },
       ),
     )
 
     (insertionState as? InsertionState.ChoosingSource)?.let { choosing ->
-      EinkModalOverlay(
-        onDismissRequest = insertion::cancel,
-        position = EinkModalPosition.TOP,
-      ) {
-        Column(
-          Modifier.fillMaxWidth().padding(20.dp),
-        ) {
+      EinkModalOverlay(onDismissRequest = insertion::cancel, position = EinkModalPosition.TOP) {
+        Column(Modifier.fillMaxWidth().padding(20.dp)) {
           Text(
             noteText("插入${contentKindLabel(choosing.kind)}", "Insert ${contentKindLabel(choosing.kind)}"),
             fontSize = 24.sp,
           )
-          Button(
-            onClick = {
-              val missing = TransferPermissions.missingNotePermissions(context)
-              if (missing.isEmpty()) {
-                permissionRemoteAuto = false
-                appScope.launch { insertion.remote(choosing.kind) }
-              } else {
-                permissionRemoteKind = choosing.kind
-                permissionRemoteAuto = false
-                transferPermissionLauncher.launch(missing)
-              }
-            },
-            modifier = Modifier.fillMaxWidth().padding(top = 16.dp),
-            shape = RectangleShape,
-          ) {
-            Text(
-              noteText(
-                "从手机取下一项${contentKindLabel(choosing.kind)}",
-                "Get next ${contentKindLabel(choosing.kind)} from phone",
-              ),
-            )
-          }
-          Button(
-            onClick = {
-              if (choosing.kind == ContentKind.IMAGE) {
-                insertion.cancel();
-                imagePicker.launch(arrayOf("image/*"))
-              } else {
-                insertion.manualText();
-                showNotice(noteText("请点击页面确定文字位置", "Tap the page to place the text"))
-              }
-            },
-            modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-            shape = RectangleShape,
-          ) {
-            Text(
-              if (choosing.kind == ContentKind.TEXT) {
-                noteText(
-                  "手动输入",
-                  "Enter manually",
-                )
-              } else {
-                noteText("从系统文件选择", "Choose system file")
-              },
-            )
+          CommandRegistry.menus.getValue("sources").forEach { id ->
+            val command = CommandBinding(id)
+            Button(onClick = { dispatcher.dispatch(command) }, modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+              shape = RectangleShape, enabled = dispatcher.enabled(command)) { Text(dispatcher.title(command)) }
           }
         }
       }
@@ -1375,7 +1166,8 @@ private fun AppRoot(
     }
 
     pendingLinkedNoteRequest?.let { request ->
-      val targets = penView?.linkedNoteTargetsForCurrentPdfSource().orEmpty()
+      val targets = gen.let { penView?.pageUiItems().orEmpty() }
+        .filter { it.kind == com.betterhv.note.doc.PageKind.LINKED_NOTE }
       val prepare: (UUID?) -> Unit = { targetPageId ->
         pendingLinkedNoteRequest = null
         notebookBusy = true
@@ -1392,22 +1184,17 @@ private fun AppRoot(
           }
         }
       }
-      EinkChoiceOverlay(
-        onDismissRequest = { pendingLinkedNoteRequest = null },
-        title = noteText("选择夹纸", "Choose linked note"),
-        description = noteText(
-          "新建一张夹纸，或放入当前 PDF 页已有夹纸。",
-          "Create a linked note or use one already attached to this PDF page.",
-        ),
-        choices = buildList {
-          add(noteText("新建夹纸", "New linked note") to { prepare(null) })
-          targets.forEach { target ->
-            add(
-              noteText("夹纸 ${target.ordinal}", "Linked note ${target.ordinal}") to { prepare(target.pageId) },
-            )
+      EinkModalOverlay(onDismissRequest = { pendingLinkedNoteRequest = null }) {
+        Column(Modifier.fillMaxWidth().fillMaxHeight(0.8f).padding(16.dp)) {
+          Text("选择夹页", fontSize = 24.sp)
+          Row {
+            Button(onClick = { prepare(null) }) { Text("新建夹页") }
+            TextButton(onClick = { pendingLinkedNoteRequest = null }) { Text("取消") }
           }
-        },
-      )
+          PageSelectionGrid(targets, emptySet(), { penView?.pageThumbnail(it) }, { prepare(it) },
+            modifier = Modifier.weight(1f), requestThumbnail = { penView?.requestThumbnails(listOf(it)) })
+        }
+      }
     }
 
     if (penView?.hasPendingLinkedNotePlacement() == true) {
@@ -1461,27 +1248,28 @@ private fun AppRoot(
     }
 
     if (pageManagerOpen && penView != null) {
+      val laneCount = if (hasLinkedPageLane(pages)) 2 else 1
       val managerModifier = when (dockEdge) {
         DockEdge.START -> Modifier.align(Alignment.CenterStart)
           .padding(start = 52.dp, top = 8.dp, bottom = 8.dp)
-          .width(thumbnailSize.width + PAGE_MANAGER_SIDE_EXTRA_WIDTH).fillMaxHeight()
+          .width((thumbnailSize.width + PAGE_MANAGER_SIDE_EXTRA_WIDTH) * laneCount).fillMaxHeight()
 
         DockEdge.END -> Modifier.align(Alignment.CenterEnd)
           .padding(end = 52.dp, top = 8.dp, bottom = 8.dp)
-          .width(thumbnailSize.width + PAGE_MANAGER_SIDE_EXTRA_WIDTH).fillMaxHeight()
+          .width((thumbnailSize.width + PAGE_MANAGER_SIDE_EXTRA_WIDTH) * laneCount).fillMaxHeight()
 
         DockEdge.TOP -> Modifier.align(Alignment.TopCenter)
           .padding(start = 8.dp, end = 8.dp, top = 52.dp)
           .fillMaxWidth().height(
-            PAGE_MANAGER_HEADER_HEIGHT + thumbnailSize.height +
-              PAGE_MANAGER_CONTENT_PADDING * 2 + 2.dp,
+            (PAGE_MANAGER_HEADER_HEIGHT + thumbnailSize.height + PAGE_MANAGER_CONTENT_PADDING * 2 + 2.dp) * laneCount +
+              if (laneCount == 2) PAGE_MANAGER_TAB_RAIL_WIDTH else 0.dp,
           )
 
         DockEdge.BOTTOM -> Modifier.align(Alignment.BottomCenter)
           .padding(start = 8.dp, end = 8.dp, bottom = 52.dp)
           .fillMaxWidth().height(
-            PAGE_MANAGER_HEADER_HEIGHT + thumbnailSize.height +
-              PAGE_MANAGER_CONTENT_PADDING * 2 + 2.dp,
+            (PAGE_MANAGER_HEADER_HEIGHT + thumbnailSize.height + PAGE_MANAGER_CONTENT_PADDING * 2 + 2.dp) * laneCount +
+              if (laneCount == 2) PAGE_MANAGER_TAB_RAIL_WIDTH else 0.dp,
           )
       }
       PageManagerPanel(
@@ -1670,8 +1458,8 @@ private fun AppRoot(
           onStartShortcutCapture = { shortcutCaptureScene = it },
           onShortcutBindingRequestConsumed = { shortcutBindingRequest = null },
           onShortcutBind = { scene, key, action ->
-            shortcutBindings = shortcutBindings.bind(scene, key, action)
-            appSettingsStore.saveHardwareShortcut(scene, key, action)
+            shortcutBindings = shortcutBindings.bindCommand(scene, key, action)
+            appSettingsStore.saveCommandBinding(scene, key, action)
           },
           onShortcutSceneClear = { scene ->
             shortcutBindings = shortcutBindings.clear(scene)
@@ -1744,6 +1532,26 @@ private fun AppRoot(
           onCheckUpdate = { checkForUpdates(true) },
           onOpenRelease = openRelease,
           onUpdateViaNoteLink = updateViaNoteLink,
+          onOpenBackup = {
+            if (!notebookBusy) {
+              notebookBusy = true
+              appScope.launch {
+                runCatching {
+                  insertion.cancel()
+                  insertion.awaitAssetImports()
+                  penView?.setUiInputBlocked(true)
+                  penView?.setEraserInputBlocked(true)
+                  check(penView?.flushPersistenceForExport() == true) { "无法保存当前笔记" }
+                  exportViewModel.closeForMaintenance()
+                  penView?.closeForMaintenance()
+                  onBackupReady()
+                }.onFailure {
+                  notebookBusy = false
+                  showNotice("无法进入备份维护：${it.message}")
+                }
+              }
+            }
+          },
           onContinueNoteAppInstall = {
             runCatching { noteAppInstaller.launch() }
               .onFailure { noteAppUpdateState = NoteAppUpdateUiState.Failed(it.message ?: "Cannot open installer") }

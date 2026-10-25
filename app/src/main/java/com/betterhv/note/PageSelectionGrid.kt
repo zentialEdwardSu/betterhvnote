@@ -43,6 +43,7 @@ fun PageSelectionGrid(
   pageBitmap: (UUID) -> Bitmap?,
   onToggle: (UUID) -> Unit,
   modifier: Modifier = Modifier,
+  requestThumbnail: (UUID) -> Unit = {},
 ) {
   LazyVerticalGrid(
     columns = GridCells.Adaptive(116.dp),
@@ -51,6 +52,7 @@ fun PageSelectionGrid(
     verticalArrangement = Arrangement.spacedBy(12.dp),
   ) {
     items(pages, key = PageUiInfo::id) { page ->
+      androidx.compose.runtime.LaunchedEffect(page.id, page.contentRevision) { requestThumbnail(page.id) }
       SelectablePageCard(
         page = page,
         bitmap = pageBitmap(page.id),
@@ -84,7 +86,7 @@ private fun SelectablePageCard(page: PageUiInfo, bitmap: Bitmap?, selected: Bool
       )
     }
     Text(
-      page.pageNumber.toString(),
+      page.label,
       modifier = Modifier.align(Alignment.TopStart).background(Color.White).padding(4.dp),
     )
     if (selected) {

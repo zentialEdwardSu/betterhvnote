@@ -89,53 +89,18 @@ data class EditorToolbarState(
   val dockFraction: Float,
   val toolbarHidden: Boolean,
   val visibleItems: Set<ToolbarItem>,
-  val requestedItem: ToolbarItem?,
-  val hardwareShortcutAction: ShortcutAction?,
-  val toolKind: ToolKind,
-  val pdfStudyMode: Boolean,
+  val hasPdf: Boolean,
   val eraserMode: EraserMode,
-  val canUndo: Boolean,
-  val canRedo: Boolean,
-  val hasSelection: Boolean,
-  val insertionActive: Boolean,
-  val pageManagerOpen: Boolean,
-  val notebookManagerOpen: Boolean,
-  val exportPanelOpen: Boolean,
-  val settingsOpen: Boolean,
-  val documentSettingsOpen: Boolean,
-  val debugMode: Boolean,
   val penToolbarSettings: PenToolbarSettings,
+  val menu: ToolbarMenuRequest?,
+  val dispatcher: CommandDispatcher,
 )
 
 data class EditorToolbarActions(
   val onDockEdgeChange: (DockEdge) -> Unit,
   val onDockFractionChange: (Float) -> Unit,
   val onToolbarHiddenChange: (Boolean) -> Unit,
-  val onRequestedItemConsumed: () -> Unit,
-  val onHardwareShortcutConsumed: () -> Unit,
-  val onShortcutSceneChange: (ShortcutScene?) -> Unit,
-  val onToolSelected: (ToolKind) -> Unit,
-  val onPdfFit: () -> Unit,
-  val onPdfNavigationModeToggle: () -> Unit,
-  val onEraserModeToggle: () -> Unit,
-  val onUndo: () -> Unit,
-  val onRedo: () -> Unit,
-  val onDelete: () -> Unit,
-  val onInsert: (ContentKind) -> Unit,
-  val onPageManagerToggle: () -> Unit,
-  val onPageAdd: () -> Unit,
-  val onPreviousPage: () -> Unit,
-  val onNextPage: () -> Unit,
-  val onNotebookManagerToggle: () -> Unit,
-  val onNotebookCurrentPage: () -> Unit,
-  val onNotebookCurrentToEnd: () -> Unit,
-  val onExportPanelToggle: () -> Unit,
-  val onDocumentSettingsOpen: () -> Unit,
-  val onSettingsOpen: () -> Unit,
-  val onDebugToggle: () -> Unit,
-  val onPenSlotSelected: (Int) -> Unit,
-  val onPenSettingsChange: (Int, PenSettings) -> Unit,
-  val onPenPanelVisibilityChange: (Boolean) -> Unit,
+  val onMenuDismiss: () -> Unit,
   val onToolbarDragStateChange: (Boolean) -> Unit,
   val onInteractionBlockChange: (Boolean) -> Unit,
 )
@@ -146,51 +111,9 @@ fun EditorToolbar(modifier: Modifier = Modifier, state: EditorToolbarState, acti
   val dockEdge = state.dockEdge
   val dockFraction = state.dockFraction
   val toolbarHidden = state.toolbarHidden
-  val visibleItems = state.visibleItems
-  val requestedItem = state.requestedItem
-  val hardwareShortcutAction = state.hardwareShortcutAction
-  val toolKind = state.toolKind
-  val pdfStudyMode = state.pdfStudyMode
-  val eraserMode = state.eraserMode
-  val canUndo = state.canUndo
-  val canRedo = state.canRedo
-  val hasSelection = state.hasSelection
-  val insertionActive = state.insertionActive
-  val pageManagerOpen = state.pageManagerOpen
-  val notebookManagerOpen = state.notebookManagerOpen
-  val exportPanelOpen = state.exportPanelOpen
-  val settingsOpen = state.settingsOpen
-  val documentSettingsOpen = state.documentSettingsOpen
-  val debugMode = state.debugMode
-  val penToolbarSettings = state.penToolbarSettings
   val onDockEdgeChange = actions.onDockEdgeChange
   val onDockFractionChange = actions.onDockFractionChange
   val onToolbarHiddenChange = actions.onToolbarHiddenChange
-  val onRequestedItemConsumed = actions.onRequestedItemConsumed
-  val onHardwareShortcutConsumed = actions.onHardwareShortcutConsumed
-  val onShortcutSceneChange = actions.onShortcutSceneChange
-  val onToolSelected = actions.onToolSelected
-  val onPdfFit = actions.onPdfFit
-  val onPdfNavigationModeToggle = actions.onPdfNavigationModeToggle
-  val onEraserModeToggle = actions.onEraserModeToggle
-  val onUndo = actions.onUndo
-  val onRedo = actions.onRedo
-  val onDelete = actions.onDelete
-  val onInsert = actions.onInsert
-  val onPageManagerToggle = actions.onPageManagerToggle
-  val onPageAdd = actions.onPageAdd
-  val onPreviousPage = actions.onPreviousPage
-  val onNextPage = actions.onNextPage
-  val onNotebookManagerToggle = actions.onNotebookManagerToggle
-  val onNotebookCurrentPage = actions.onNotebookCurrentPage
-  val onNotebookCurrentToEnd = actions.onNotebookCurrentToEnd
-  val onExportPanelToggle = actions.onExportPanelToggle
-  val onDocumentSettingsOpen = actions.onDocumentSettingsOpen
-  val onSettingsOpen = actions.onSettingsOpen
-  val onDebugToggle = actions.onDebugToggle
-  val onPenSlotSelected = actions.onPenSlotSelected
-  val onPenSettingsChange = actions.onPenSettingsChange
-  val onPenPanelVisibilityChange = actions.onPenPanelVisibilityChange
   val onToolbarDragStateChange = actions.onToolbarDragStateChange
   val onInteractionBlockChange = actions.onInteractionBlockChange
   var containerSize by remember { mutableStateOf(IntSize.Zero) }
@@ -291,420 +214,104 @@ private fun ToolbarContent(
   onHandleDragEnd: () -> Unit,
   onHandleClick: () -> Unit,
 ) {
-  val dockEdge = state.dockEdge
-  val visibleItems = state.visibleItems
-  val requestedItem = state.requestedItem
-  val hardwareShortcutAction = state.hardwareShortcutAction
-  val toolKind = state.toolKind
-  val pdfStudyMode = state.pdfStudyMode
-  val eraserMode = state.eraserMode
-  val canUndo = state.canUndo
-  val canRedo = state.canRedo
-  val hasSelection = state.hasSelection
-  val insertionActive = state.insertionActive
-  val pageManagerOpen = state.pageManagerOpen
-  val notebookManagerOpen = state.notebookManagerOpen
-  val exportPanelOpen = state.exportPanelOpen
-  val settingsOpen = state.settingsOpen
-  val documentSettingsOpen = state.documentSettingsOpen
-  val debugMode = state.debugMode
-  val penToolbarSettings = state.penToolbarSettings
-  val onRequestedItemConsumed = actions.onRequestedItemConsumed
-  val onHardwareShortcutConsumed = actions.onHardwareShortcutConsumed
-  val onShortcutSceneChange = actions.onShortcutSceneChange
-  val onToolSelected = actions.onToolSelected
-  val onPdfFit = actions.onPdfFit
-  val onPdfNavigationModeToggle = actions.onPdfNavigationModeToggle
-  val onEraserModeToggle = actions.onEraserModeToggle
-  val onUndo = actions.onUndo
-  val onRedo = actions.onRedo
-  val onDelete = actions.onDelete
-  val onInsert = actions.onInsert
-  val onPageManagerToggle = actions.onPageManagerToggle
-  val onPageAdd = actions.onPageAdd
-  val onPreviousPage = actions.onPreviousPage
-  val onNextPage = actions.onNextPage
-  val onNotebookManagerToggle = actions.onNotebookManagerToggle
-  val onNotebookCurrentPage = actions.onNotebookCurrentPage
-  val onNotebookCurrentToEnd = actions.onNotebookCurrentToEnd
-  val onExportPanelToggle = actions.onExportPanelToggle
-  val onDocumentSettingsOpen = actions.onDocumentSettingsOpen
-  val onSettingsOpen = actions.onSettingsOpen
-  val onDebugToggle = actions.onDebugToggle
-  val onPenSlotSelected = actions.onPenSlotSelected
-  val onPenSettingsChange = actions.onPenSettingsChange
-  val onPenPanelVisibilityChange = actions.onPenPanelVisibilityChange
-  var editingPenSlot by remember { mutableStateOf<Int?>(null) }
-  var insertExpanded by remember { mutableStateOf(false) }
-  var quickPanelExpanded by remember { mutableStateOf(false) }
-  var eraserExpanded by remember { mutableStateOf(false) }
-  var navigationExpanded by remember { mutableStateOf(false) }
-  DisposableEffect(Unit) {
-    onDispose {
-      onPenPanelVisibilityChange(false)
-      onShortcutSceneChange(null)
-    }
+  val dispatcher = state.dispatcher
+  val entries = CommandRegistry.toolbar.filter { descriptor ->
+    descriptor.item != ToolbarItem.NAVIGATION || state.hasPdf
   }
-  fun closeFlyouts() {
-    editingPenSlot = null
-    insertExpanded = false
-    quickPanelExpanded = false
-    eraserExpanded = false
-    navigationExpanded = false
-  }
-  LaunchedEffect(editingPenSlot, insertExpanded, quickPanelExpanded, eraserExpanded, navigationExpanded) {
-    onPenPanelVisibilityChange(
-      editingPenSlot != null || insertExpanded || quickPanelExpanded || eraserExpanded || navigationExpanded,
-    )
-    onShortcutSceneChange(if (insertExpanded) ShortcutScene.INSERT else null)
-  }
-  LaunchedEffect(requestedItem) {
-    when (requestedItem) {
-      ToolbarItem.TAIL_ERASER -> {
-        closeFlyouts();
-        eraserExpanded = true
-      }
-      ToolbarItem.INSERT -> {
-        closeFlyouts();
-        insertExpanded = true
-      }
-      ToolbarItem.MENU -> {
-        closeFlyouts();
-        quickPanelExpanded = true
-      }
-      else -> Unit
-    }
-    if (requestedItem != null) onRequestedItemConsumed()
-  }
-  LaunchedEffect(hardwareShortcutAction) {
-    if (hardwareShortcutAction?.scene == ShortcutScene.INSERT) closeFlyouts()
-    if (hardwareShortcutAction != null) onHardwareShortcutConsumed()
-  }
-
   val buttons: @Composable () -> Unit = {
     ToolbarDragHandle(
-      dockEdge = dockEdge,
-      onDragStart = {
-        closeFlyouts()
-        onHandleDragStart()
-      },
-      onDrag = { delta ->
-        closeFlyouts();
-        onHandleDrag(delta)
-      },
+      dockEdge = state.dockEdge,
+      onDragStart = { actions.onMenuDismiss(); onHandleDragStart() },
+      onDrag = onHandleDrag,
       onDragEnd = onHandleDragEnd,
-      onClick = {
-        closeFlyouts();
-        onHandleClick()
-      },
+      onClick = { actions.onMenuDismiss(); onHandleClick() },
     )
-    repeat(PenToolbarSettings.SLOT_COUNT) { slot ->
-      val toolbarItem = ToolbarItem.entries[slot]
-      if (toolbarItem !in visibleItems) return@repeat
-      val slotSettings = penToolbarSettings.settingsFor(slot)
-      val selectSlot = {
-        onPenSlotSelected(slot)
-        onToolSelected(ToolKind.PEN)
-      }
+    entries.filter { it.item == ToolbarItem.MENU || it.item in state.visibleItems }.forEach { descriptor ->
+      val binding = descriptor.click
+      val perform: (CommandBinding?) -> Unit = { command -> command?.let { dispatcher.dispatch(it) } }
       Box {
-        SquarePainterButton(
-          icon = penTypeIcon(slotSettings.activeType),
-          contentDescription = "Pen slot ${slot + 1}: ${penTypeName(slotSettings.activeType)}; " +
-            "double tap for pen settings",
-          enabled = true,
-          selected = toolKind == ToolKind.PEN && penToolbarSettings.activeSlot == slot,
-          onClick = selectSlot,
-          onFunctionClick = {
-            closeFlyouts()
-            selectSlot()
-            editingPenSlot = slot
-          },
-          onDoubleClick = {
-            closeFlyouts()
-            selectSlot()
-            editingPenSlot = slot
-          },
-        )
-        PenSettingsMenu(
-          expanded = editingPenSlot == slot,
-          onDismiss = { editingPenSlot = null },
-          dockEdge = dockEdge,
-          settings = slotSettings,
-          onSettingsChange = { onPenSettingsChange(slot, it) },
-        )
-      }
-    }
-
-    val eraserIcon = when (eraserMode) {
-      EraserMode.WHOLE_STROKE -> Icons.Filled.Clear
-      EraserMode.POINT -> Icons.Filled.RemoveCircleOutline
-    }
-    val eraserDesc = when (eraserMode) {
-      EraserMode.WHOLE_STROKE -> "Tail eraser: whole-stroke (tap to switch to point)"
-      EraserMode.POINT -> "Tail eraser: point (tap to switch to whole-stroke)"
-    }
-    if (ToolbarItem.TAIL_ERASER in visibleItems) {
-      Box {
-        SquareIconButton(
-          eraserIcon,
-          eraserDesc,
-          enabled = true,
-          selected = eraserExpanded,
-          onClick = {
-            closeFlyouts();
-            eraserExpanded = true
-          },
-        )
-        TailEraserMenu(
-          expanded = eraserExpanded,
-          onDismiss = { eraserExpanded = false },
-          dockEdge = dockEdge,
-          eraserMode = eraserMode,
-          onToggle = onEraserModeToggle,
-        )
-      }
-    }
-    if (ToolbarItem.LASSO in visibleItems) {
-      SquareIconButton(
-        Icons.Filled.CropFree,
-        "Lasso select",
-        enabled = true,
-        selected = toolKind == ToolKind.LASSO,
-      ) {
-        closeFlyouts();
-        onToolSelected(ToolKind.LASSO)
-      }
-    }
-    if (ToolbarItem.NAVIGATION in visibleItems) {
-      Box {
-        SquareIconButton(
-          Icons.Filled.Navigation,
-          noteText("PDF 导航：Side1 平移；Side2 缩放", "PDF navigation: Side1 pans; Side2 zooms"),
-          enabled = true,
-          selected = toolKind == ToolKind.NAVIGATION || navigationExpanded,
-          onClick = {
-            closeFlyouts()
-            onToolSelected(ToolKind.NAVIGATION)
-            navigationExpanded = true
-          },
-        )
-        PdfNavigationMenu(
-          expanded = navigationExpanded,
-          onDismiss = { navigationExpanded = false },
-          dockEdge = dockEdge,
-          onFit = onPdfFit,
-          onModeToggle = onPdfNavigationModeToggle,
-          studyMode = pdfStudyMode,
-        )
-      }
-    }
-    if (ToolbarItem.INSERT in visibleItems) {
-      Box {
-        SquareIconButton(
-          Icons.Filled.PostAdd,
-          noteText("插入图片或文字", "Insert image or text"),
-          enabled = true,
-          selected = insertionActive,
-          onClick = {
-            closeFlyouts()
-            insertExpanded = true
-          },
-        )
-        InsertTypeMenu(
-          expanded = insertExpanded,
-          onDismiss = { insertExpanded = false },
-          dockEdge = dockEdge,
-          onSelect = { kind ->
-            insertExpanded = false;
-            onInsert(kind)
-          },
-        )
-      }
-    }
-    if (ToolbarItem.UNDO in visibleItems) {
-      SquareIconButton(
-        Icons.AutoMirrored.Filled.Undo,
-        "Undo",
-        enabled = canUndo,
-        selected = false,
-        onClick = {
-          closeFlyouts();
-          onUndo()
-        },
-      )
-    }
-    if (ToolbarItem.REDO in visibleItems) {
-      SquareIconButton(
-        Icons.AutoMirrored.Filled.Redo,
-        "Redo",
-        enabled = canRedo,
-        selected = false,
-        onClick = {
-          closeFlyouts();
-          onRedo()
-        },
-      )
-    }
-    if (ToolbarItem.DELETE in visibleItems) {
-      SquareIconButton(
-        Icons.Filled.Delete,
-        "Delete selection",
-        enabled = hasSelection,
-        selected = false,
-        onClick = {
-          closeFlyouts();
-          onDelete()
-        },
-      )
-    }
-    if (ToolbarItem.PAGES in visibleItems) {
-      SquareIconButton(
-        Icons.Filled.Layers,
-        "Pages: tap to manage; Side1 add; Side2 previous; Side3 next",
-        enabled = true,
-        selected = pageManagerOpen,
-        onFunctionClick = onPageAdd,
-        onSide2Click = onPreviousPage,
-        onSide3Click = onNextPage,
-        onClick = {
-          closeFlyouts();
-          onPageManagerToggle()
-        },
-      )
-    }
-    if (ToolbarItem.NOTEBOOKS in visibleItems) {
-      SquareIconButton(
-        NotebookBookIcon,
-        "Notebooks: tap to manage; Side1 current page; Side2 current to end",
-        enabled = true,
-        selected = notebookManagerOpen,
-        onFunctionClick = onNotebookCurrentPage,
-        onSide2Click = onNotebookCurrentToEnd,
-        onSide3Click = {},
-        onClick = {
-          closeFlyouts();
-          onNotebookManagerToggle()
-        },
-      )
-    }
-    if (ToolbarItem.EXPORT in visibleItems) {
-      SquareIconButton(
-        Icons.Filled.IosShare,
-        "Export: tap to open export panel",
-        enabled = true,
-        selected = exportPanelOpen,
-        onClick = {
-          closeFlyouts();
-          onExportPanelToggle()
-        },
-      )
-    }
-    Box {
-      SquareIconButton(
-        Icons.Filled.Menu,
-        "Settings: tap to open; Side1 opens quick panel",
-        enabled = true,
-        selected = settingsOpen || documentSettingsOpen || quickPanelExpanded,
-        onFunctionClick = {
-          closeFlyouts()
-          quickPanelExpanded = true
-        },
-        onClick = {
-          closeFlyouts();
-          quickPanelExpanded = true
-        },
-      )
-      QuickMenuPanel(
-        expanded = quickPanelExpanded,
-        onDismiss = { quickPanelExpanded = false },
-        dockEdge = dockEdge,
-        debugMode = debugMode,
-        hiddenItems = ToolbarItem.entries.filterNot { it in visibleItems || it == ToolbarItem.MENU },
-        onHiddenItem = { item ->
-          when (item) {
-            ToolbarItem.PEN_1, ToolbarItem.PEN_2, ToolbarItem.PEN_3 -> {
-              val slot = item.ordinal
-              onPenSlotSelected(slot)
-              onToolSelected(ToolKind.PEN)
-              quickPanelExpanded = false
-              editingPenSlot = slot
+        val penSlot = descriptor.item.ordinal.takeIf { it < PenToolbarSettings.SLOT_COUNT }
+        if (penSlot != null) {
+          SquarePainterButton(
+            icon = penTypeIcon(state.penToolbarSettings.settingsFor(penSlot).activeType),
+            contentDescription = CommandRegistry.title(binding),
+            enabled = dispatcher.enabled(binding), selected = dispatcher.selected(binding),
+            onClick = { perform(binding) }, onFunctionClick = { perform(descriptor.side1) },
+            onDoubleClick = { perform(descriptor.doubleClick) },
+          )
+        } else {
+          SquareIconButton(
+            icon = toolbarIcon(descriptor.item, state.eraserMode),
+            contentDescription = if (descriptor.item == ToolbarItem.TAIL_ERASER) {
+              if (state.eraserMode == EraserMode.POINT) "局部擦除 · 点击切换" else "整笔擦除 · 点击切换"
+            } else if (descriptor.item == ToolbarItem.MENU) {
+              "Settings: tap to open; Side1 opens quick panel"
+            } else dispatcher.title(binding),
+            enabled = dispatcher.enabled(binding), selected = dispatcher.selected(binding),
+            onClick = { perform(binding) }, onFunctionClick = { perform(descriptor.side1) },
+            onSide2Click = { perform(descriptor.side2) }, onSide3Click = { perform(descriptor.side3) },
+          )
+        }
+        val menu = state.menu
+        val attached = when (menu?.id) {
+          "pen" -> penSlot == menu.slot
+          "insert" -> descriptor.item == ToolbarItem.INSERT
+          "navigation" -> descriptor.item == ToolbarItem.NAVIGATION
+          "menu" -> descriptor.item == ToolbarItem.MENU
+          else -> false
+        }
+        // Hidden tools anchor their menus to Menu.
+        val hiddenAnchor = descriptor.item == ToolbarItem.MENU && when (menu?.id) {
+          "pen" -> ToolbarItem.entries[menu.slot] !in state.visibleItems
+          "insert" -> ToolbarItem.INSERT !in state.visibleItems
+          "navigation" -> ToolbarItem.NAVIGATION !in state.visibleItems
+          else -> false
+        }
+        if (menu != null && (attached || hiddenAnchor)) {
+          if (menu.id == "pen") {
+            PenSettingsMenu(true, actions.onMenuDismiss, state.dockEdge,
+              state.penToolbarSettings.settingsFor(menu.slot), menu.slot, dispatcher::dispatch)
+          } else {
+            val menuBindings = buildList {
+              if (menu.id == "menu") addAll(entries.filter {
+                it.item != ToolbarItem.MENU && it.item !in state.visibleItems
+              }.map { it.click })
+              addAll(CommandRegistry.menus[menu.id].orEmpty().map(::CommandBinding))
             }
-
-            ToolbarItem.TAIL_ERASER -> {
-              quickPanelExpanded = false;
-              eraserExpanded = true
+            AttachedToolbarFlyout("菜单", state.dockEdge, actions.onMenuDismiss) {
+              Column(Modifier.verticalScroll(rememberScrollState())) {
+                menuBindings.forEach { command ->
+                  androidx.compose.material3.TextButton(
+                    onClick = { dispatcher.dispatch(command) }, enabled = dispatcher.enabled(command),
+                    modifier = Modifier.semantics { contentDescription = dispatcher.title(command) },
+                  ) { Text(dispatcher.title(command)) }
+                }
+              }
             }
-
-            ToolbarItem.LASSO -> {
-              quickPanelExpanded = false;
-              onToolSelected(ToolKind.LASSO)
-            }
-
-            ToolbarItem.NAVIGATION -> {
-              quickPanelExpanded = false
-              onToolSelected(ToolKind.NAVIGATION)
-              navigationExpanded = true
-            }
-
-            ToolbarItem.INSERT -> {
-              quickPanelExpanded = false;
-              insertExpanded = true
-            }
-
-            ToolbarItem.UNDO -> {
-              quickPanelExpanded = false;
-              onUndo()
-            }
-
-            ToolbarItem.REDO -> {
-              quickPanelExpanded = false;
-              onRedo()
-            }
-
-            ToolbarItem.DELETE -> {
-              quickPanelExpanded = false;
-              onDelete()
-            }
-
-            ToolbarItem.PAGES -> {
-              quickPanelExpanded = false;
-              onPageManagerToggle()
-            }
-
-            ToolbarItem.NOTEBOOKS -> {
-              quickPanelExpanded = false;
-              onNotebookManagerToggle()
-            }
-
-            ToolbarItem.EXPORT -> {
-              quickPanelExpanded = false;
-              onExportPanelToggle()
-            }
-
-            ToolbarItem.MENU -> Unit
           }
-        },
-        onSettings = {
-          quickPanelExpanded = false
-          onSettingsOpen()
-        },
-        onDocumentSettings = {
-          quickPanelExpanded = false
-          onDocumentSettingsOpen()
-        },
-        onDebugToggle = {
-          quickPanelExpanded = false
-          onDebugToggle()
-        },
-      )
+        }
+      }
     }
   }
-
-  if (dockEdge == DockEdge.TOP || dockEdge == DockEdge.BOTTOM) {
+  if (state.dockEdge == DockEdge.TOP || state.dockEdge == DockEdge.BOTTOM) {
     Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) { buttons() }
   } else {
     Column(verticalArrangement = Arrangement.spacedBy(2.dp)) { buttons() }
   }
+}
+
+private fun toolbarIcon(item: ToolbarItem, mode: EraserMode): ImageVector = when (item) {
+  ToolbarItem.TAIL_ERASER -> if (mode == EraserMode.POINT) Icons.Filled.RemoveCircleOutline else Icons.Filled.Clear
+  ToolbarItem.LASSO -> Icons.Filled.CropFree
+  ToolbarItem.NAVIGATION -> Icons.Filled.Navigation
+  ToolbarItem.INSERT -> Icons.Filled.PostAdd
+  ToolbarItem.UNDO -> Icons.AutoMirrored.Filled.Undo
+  ToolbarItem.REDO -> Icons.AutoMirrored.Filled.Redo
+  ToolbarItem.DELETE -> Icons.Filled.Delete
+  ToolbarItem.PAGES -> Icons.Filled.Layers
+  ToolbarItem.NOTEBOOKS -> NotebookBookIcon
+  ToolbarItem.EXPORT -> Icons.Filled.IosShare
+  else -> Icons.Filled.Menu
 }
 
 @Composable
@@ -718,115 +325,6 @@ private fun penTypeName(type: PenType): String = when (type) {
   PenType.NormalPen -> "pen"
   PenType.Pencil -> "pencil"
   PenType.Marker -> "marker"
-}
-
-@Composable
-private fun InsertTypeMenu(
-  expanded: Boolean,
-  onDismiss: () -> Unit,
-  dockEdge: DockEdge,
-  onSelect: (ContentKind) -> Unit,
-) {
-  if (!expanded) return
-  AttachedToolbarFlyout(title = noteText("插入内容", "Insert"), dockEdge = dockEdge, onDismiss = onDismiss) {
-    Row(
-      modifier = Modifier.padding(4.dp),
-      horizontalArrangement = Arrangement.spacedBy(4.dp),
-    ) {
-      PopupIconButton(
-        icon = Icons.Filled.AddPhotoAlternate,
-        contentDescription = noteText("插入图片", "Insert image"),
-        onClick = { onSelect(ContentKind.IMAGE) },
-      )
-      PopupIconButton(
-        icon = Icons.Filled.TextFields,
-        contentDescription = noteText("插入文字", "Insert text"),
-        onClick = { onSelect(ContentKind.TEXT) },
-      )
-    }
-  }
-}
-
-@Composable
-private fun QuickMenuPanel(
-  expanded: Boolean,
-  onDismiss: () -> Unit,
-  dockEdge: DockEdge,
-  debugMode: Boolean,
-  hiddenItems: List<ToolbarItem>,
-  onHiddenItem: (ToolbarItem) -> Unit,
-  onDocumentSettings: () -> Unit,
-  onSettings: () -> Unit,
-  onDebugToggle: () -> Unit,
-) {
-  if (!expanded) return
-  AttachedToolbarFlyout(title = "Menu", dockEdge = dockEdge, onDismiss = onDismiss) {
-    val vertical = dockEdge == DockEdge.START || dockEdge == DockEdge.END
-    val entries: @Composable () -> Unit = {
-      hiddenItems.forEach { item ->
-        PopupTextButton(item.localizedLabel(), onClick = { onHiddenItem(item) })
-      }
-      PopupTextButton(noteText("文档设置", "Document settings"), onDocumentSettings)
-      PopupTextButton(noteText("应用设置", "App settings"), onSettings)
-      PopupTextButton(
-        if (debugMode) noteText("关闭 Debug", "Disable debug") else noteText("开启 Debug", "Enable debug"),
-        onDebugToggle,
-        debugMode,
-      )
-    }
-    if (vertical) {
-      Column(Modifier.verticalScroll(rememberScrollState())) { entries() }
-    } else {
-      Row(Modifier.horizontalScroll(rememberScrollState())) { entries() }
-    }
-  }
-}
-
-@Composable
-private fun TailEraserMenu(
-  expanded: Boolean,
-  onDismiss: () -> Unit,
-  dockEdge: DockEdge,
-  eraserMode: EraserMode,
-  onToggle: () -> Unit,
-) {
-  if (!expanded) return
-  AttachedToolbarFlyout(title = noteText("笔尾橡皮模式", "Tail eraser mode"), dockEdge = dockEdge, onDismiss = onDismiss) {
-    Row(Modifier.padding(4.dp)) {
-      PopupTextButton(
-        noteText("整笔擦除", "Whole stroke"),
-        onClick = { if (eraserMode != EraserMode.WHOLE_STROKE) onToggle() },
-        selected = eraserMode == EraserMode.WHOLE_STROKE,
-      )
-      PopupTextButton(
-        noteText("局部擦除", "Partial erase"),
-        onClick = { if (eraserMode != EraserMode.POINT) onToggle() },
-        selected = eraserMode == EraserMode.POINT,
-      )
-    }
-  }
-}
-
-@Composable
-private fun PdfNavigationMenu(
-  expanded: Boolean,
-  onDismiss: () -> Unit,
-  dockEdge: DockEdge,
-  onFit: () -> Unit,
-  onModeToggle: () -> Unit,
-  studyMode: Boolean,
-) {
-  if (!expanded) return
-  AttachedToolbarFlyout(title = noteText("PDF 导航", "PDF navigation"), dockEdge = dockEdge, onDismiss = onDismiss) {
-    Row(Modifier.padding(4.dp)) {
-      PopupTextButton(noteText("适合页面", "Fit page"), onClick = onFit)
-      PopupTextButton(
-        if (studyMode) noteText("学习模式", "Study mode") else noteText("阅读模式", "Reading mode"),
-        onClick = onModeToggle,
-        selected = true,
-      )
-    }
-  }
 }
 
 @Composable
@@ -951,8 +449,10 @@ private fun PenSettingsMenu(
   onDismiss: () -> Unit,
   dockEdge: DockEdge,
   settings: PenSettings,
-  onSettingsChange: (PenSettings) -> Unit,
+  slot: Int,
+  dispatch: (CommandBinding) -> Boolean,
 ) {
+  fun send(id: String, value: String) { dispatch(CommandBinding(id, mapOf("slot" to "$slot", "value" to value))) }
   if (!expanded) return
 
   AttachedToolbarFlyout(
@@ -969,21 +469,21 @@ private fun PenSettingsMenu(
           rememberVectorPainter(Icons.Filled.Edit),
           PenType.NormalPen,
           settings,
-          onSettingsChange,
+          { send("pen.type", PenProfiles.stableId(it.activeType)) },
         )
         BrushChoice(
           "Pencil",
           painterResource(R.drawable.ic_ink_pen),
           PenType.Pencil,
           settings,
-          onSettingsChange,
+          { send("pen.type", PenProfiles.stableId(it.activeType)) },
         )
         BrushChoice(
           "Marker",
           painterResource(R.drawable.ic_ink_highlighter),
           PenType.Marker,
           settings,
-          onSettingsChange,
+          { send("pen.type", PenProfiles.stableId(it.activeType)) },
         )
       }
 
@@ -995,9 +495,7 @@ private fun PenSettingsMenu(
             sampleWidthDp = sampleWidth,
             selected = settings.activePreset().widthLevel == level,
             onClick = {
-              onSettingsChange(
-                settings.updateActivePreset { it.copy(widthLevel = level) },
-              )
+              send("pen.width", "$level")
             },
           )
         }
@@ -1012,9 +510,7 @@ private fun PenSettingsMenu(
               choice = choice,
               selected = settings.activePreset().colorIndex == colorIndex,
               onClick = {
-                onSettingsChange(
-                  settings.updateActivePreset { it.copy(colorIndex = colorIndex) },
-                )
+                send("pen.color", choice.id)
               },
             )
           }

@@ -119,7 +119,15 @@ data class PdfRegionSelection(
  */
 enum class EraserMode { WHOLE_STROKE, POINT }
 
-data class PageUiInfo(val id: UUID, val pageNumber: Int, val bookmarked: Boolean, val contentRevision: Long)
+data class PageUiInfo(
+  val id: UUID, val pageNumber: Int, val bookmarked: Boolean, val contentRevision: Long,
+  val kind: PageKind = PageKind.BLANK, val parentPdfPageId: UUID? = null,
+  val sourcePageNumber: Int? = null, val linkedOrdinal: Int? = null,
+) {
+  val label: String get() = if (kind == PageKind.LINKED_NOTE) {
+    "PDF ${sourcePageNumber ?: "?"} · 夹页 ${linkedOrdinal ?: "?"}"
+  } else pageNumber.toString()
+}
 
 /**
  * Writing surface. The ROM's hvpen service paints live ink onto the hardware
@@ -151,6 +159,8 @@ class PenDrawView @JvmOverloads constructor(context: Context, attrs: AttributeSe
   private var initPenService = false
   private var romPenInkRequested = true
   private var uiInputBlocked = false
+  private var eraserInputBlocked = false
+  private var erasedSelectionThisGesture = false
   private var toolbarDragBlocked = false
 
   private val eink = EinkRefreshController(context)
@@ -1025,9 +1035,17 @@ class PenDrawView @JvmOverloads constructor(context: Context, attrs: AttributeSe
   fun pageCount(): Int = notebook.pageOrder.size
   fun currentPageIndex(): Int = notebook.pageOrder.indexOf(page.id).coerceAtLeast(0)
   fun pageIds(): List<UUID> = notebook.pageOrder.toList()
-  fun pageUiItems(): List<PageUiInfo> = notebook.pageOrder.mapIndexedNotNull { index, id ->
-    notebook.metadata(id)?.let { metadata ->
-      PageUiInfo(id, index + 1, metadata.bookmarked, metadata.contentRevision)
+  fun pageUiItems(): List<PageUiInfo> {
+    val metadata = notebook.allPageMetadata()
+    val byId = metadata.associateBy { it.id }
+    val ordinals = HashMap<UUID?, Int>()
+    return metadata.mapIndexed { index, item ->
+      val parent = byId[item.parentPdfPageId]
+      val ordinal = if (item.kind == PageKind.LINKED_NOTE) {
+        ((ordinals[item.parentPdfPageId] ?: 0) + 1).also { ordinals[item.parentPdfPageId] = it }
+      } else null
+      PageUiInfo(item.id, index + 1, item.bookmarked, item.contentRevision, item.kind,
+        item.parentPdfPageId, parent?.pdfSource?.sourcePageIndex?.plus(1), ordinal)
     }
   }
   fun pageThumbnail(id: UUID): Bitmap? = notebook.metadata(id)?.let { metadata ->
@@ -1252,6 +1270,9 @@ class PenDrawView @JvmOverloads constructor(context: Context, attrs: AttributeSe
   /** Updated by the Compose settings surface and read by page-turn overlays. */
   var autoCreatePageOnNextAtEnd: Boolean = false
   private var studyNavigation: Boolean = true
+
+  fun hasPdfPages(): Boolean = notebook.allPageMetadata().any { it.kind == PageKind.PDF_SOURCE }
+  fun isPdfSourcePage(): Boolean = page.kind == PageKind.PDF_SOURCE
 
   fun isStudyNavigation(): Boolean = studyNavigation
 
@@ -2325,6 +2346,20 @@ class PenDrawView @JvmOverloads constructor(context: Context, attrs: AttributeSe
 
   private fun activeEraserTool(): EraserTool = if (eraserMode == EraserMode.POINT) pointEraserTool else strokeEraserTool
 
+  fun setEraserInputBlocked(blocked: Boolean) {
+    eraserInputBlocked = blocked
+  }
+
+  fun beginTailErase(x: Float, y: Float): Boolean {
+    if (eraserInputBlocked) return false
+    val point = screenToPage(x, y)
+    val selection = currentSelection()
+    erasedSelectionThisGesture = tailErasesSelection(selection, point[0], point[1])
+    beginErase()
+    if (erasedSelectionThisGesture) deleteSelection()
+    return true
+  }
+
   /** Erase gesture starting: stop the ROM painting pen ink while erasing. */
   fun beginErase() {
     eraseGestureOpen = true
@@ -2347,6 +2382,7 @@ class PenDrawView @JvmOverloads constructor(context: Context, attrs: AttributeSe
    * state comment).
    */
   fun eraseMove(x: Float, y: Float) {
+    if (erasedSelectionThisGesture || eraserInputBlocked) return
     val point = screenToPage(x, y)
     activeEraserTool().eraseAt(point[0], point[1])
   }
@@ -2354,7 +2390,8 @@ class PenDrawView @JvmOverloads constructor(context: Context, attrs: AttributeSe
   /** Erase gesture ended: commit the accumulated erase as one undo step, let the ROM paint ink again. */
   fun endErase() {
     eraseGestureOpen = false
-    activeEraserTool().commit()
+    if (!erasedSelectionThisGesture) activeEraserTool().commit()
+    erasedSelectionThisGesture = false
     onDocChanged?.invoke()
     // Revert to quality mode before the final full repaint so it's a clean
     // flush, not an A2-mode partial (see finishGesture).
@@ -2518,6 +2555,12 @@ class PenDrawView @JvmOverloads constructor(context: Context, attrs: AttributeSe
       canvas.drawCircle(badgeX, badgeY, radius, anchorBadgeFillPaint)
       canvas.drawCircle(badgeX, badgeY, radius, anchorFramePaint)
       drawLinkIcon(canvas, badgeX, badgeY, radius, viewport)
+      val sourceNumber = notebook.metadata(anchor.sourcePageId)?.pdfSource?.sourcePageIndex?.plus(1)
+      val labelPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+        color = android.graphics.Color.BLACK
+        textSize = viewport.screenDistanceToPage(12f * density)
+      }
+      canvas.drawText("PDF ${sourceNumber ?: "?"}", badgeX + radius * 1.2f, badgeY, labelPaint)
     }
   }
 
@@ -2750,7 +2793,7 @@ class PenDrawView @JvmOverloads constructor(context: Context, attrs: AttributeSe
   fun linkedNoteTargetsForCurrentPdfSource(): List<LinkedNoteTarget> {
     if (page.kind != PageKind.PDF_SOURCE) return emptyList()
     return notebook.allPageMetadata()
-      .filter { it.kind == PageKind.LINKED_NOTE && it.parentPdfPageId == page.id }
+      .filter { it.kind == PageKind.LINKED_NOTE }
       .mapIndexed { index, metadata -> LinkedNoteTarget(metadata.id, index + 1) }
   }
 
@@ -2825,7 +2868,7 @@ class PenDrawView @JvmOverloads constructor(context: Context, attrs: AttributeSe
         linkedPageId = notePageId
         val loaded = repository.loadNotebook(sourceNotebookId) ?: error("Could not reload PDF notebook")
         val notePage = repository.loadPage(notePageId) ?: error("Could not load note page")
-        check(notePage.kind == PageKind.LINKED_NOTE && notePage.parentPdfPageId == sourcePageId) {
+        check(notePage.kind == PageKind.LINKED_NOTE && notePage.id in loaded.pageOrder) {
           "Selected note does not belong to the current PDF page"
         }
         loaded.attachPage(notePage)
@@ -2909,7 +2952,7 @@ class PenDrawView @JvmOverloads constructor(context: Context, attrs: AttributeSe
         val notePage = repository.loadPage(targetPageId) ?: error("Could not load target note page")
         check(
           notePage.kind == PageKind.LINKED_NOTE &&
-            notePage.parentPdfPageId == pending.sourcePageId,
+            notePage.id in loaded.pageOrder,
         ) { "Target note does not match the PDF anchor" }
         loaded.attachPage(notePage)
         val now = System.currentTimeMillis()
@@ -3141,7 +3184,21 @@ class PenDrawView @JvmOverloads constructor(context: Context, attrs: AttributeSe
     EventLog.log(TAG, "clear")
   }
 
+  private var tornDown = false
+
   fun teardown() {
+    if (!stopInputForTeardown()) return
+    closeStorageForTeardown(verify = false)
+  }
+
+  suspend fun closeForMaintenance() {
+    val closing = withContext(Dispatchers.Main.immediate) { stopInputForTeardown() }
+    if (closing) withContext(Dispatchers.IO) { closeStorageForTeardown(verify = true) }
+  }
+
+  private fun stopInputForTeardown(): Boolean {
+    if (tornDown) return false
+    tornDown = true
     handler.removeCallbacks(finishRunnable)
     pagePreRenderClosed = true
     if (gestureOpen) finishGesture()
@@ -3157,11 +3214,16 @@ class PenDrawView @JvmOverloads constructor(context: Context, attrs: AttributeSe
       }
     }
     initPenService = false
+    return true
+  }
+
+  private fun closeStorageForTeardown(verify: Boolean) {
     notebookOperations.shutdown()
-    notebookOperations.awaitTermination(10, TimeUnit.SECONDS)
+    check(notebookOperations.awaitTermination(60, TimeUnit.SECONDS)) { "Notebook operations did not stop" }
     pagePreRenderExecutor.shutdownNow()
-    autosave.close()
+    check(pagePreRenderExecutor.awaitTermination(60, TimeUnit.SECONDS)) { "Page renderer did not stop" }
     thumbnails.close()
+    if (verify) autosave.closeForMaintenance() else autosave.close()
   }
 
   /** UI "save": drain pending operations and checkpoint the WAL (spec §56). */
@@ -3169,7 +3231,7 @@ class PenDrawView @JvmOverloads constructor(context: Context, attrs: AttributeSe
     if (gestureOpen) finishGesture()
     if (!persistenceAvailable) return false
     scheduleSave(DocumentChange.fullPage(notebook, page, "manual:flush"))
-    return autosave.flush()
+    return autosave.flush() && persistenceAvailable
   }
 
   suspend fun flushPersistenceForExport(): Boolean {
@@ -3179,7 +3241,7 @@ class PenDrawView @JvmOverloads constructor(context: Context, attrs: AttributeSe
       scheduleSave(DocumentChange.fullPage(notebook, page, "export:flush"))
       true
     }
-    return ready && withContext(Dispatchers.IO) { autosave.flush() }
+    return ready && withContext(Dispatchers.IO) { autosave.flush() } && persistenceAvailable
   }
 
   companion object {

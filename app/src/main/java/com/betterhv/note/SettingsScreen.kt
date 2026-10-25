@@ -106,7 +106,7 @@ data class SettingsActions(
   val onResetToolbarItems: () -> Unit,
   val onStartShortcutCapture: (ShortcutScene) -> Unit,
   val onShortcutBindingRequestConsumed: () -> Unit,
-  val onShortcutBind: (ShortcutScene, HardwareKeyId, ShortcutAction?) -> Unit,
+  val onShortcutBind: (ShortcutScene, HardwareKeyId, CommandBinding?) -> Unit,
   val onShortcutSceneClear: (ShortcutScene) -> Unit,
   val onScanClients: () -> Unit,
   val onPairClient: (PhoneTransferClient.PairingCandidate, String) -> Unit,
@@ -119,6 +119,7 @@ data class SettingsActions(
   val onOpenRelease: (String) -> Unit,
   val onUpdateViaNoteLink: (String) -> Unit,
   val onContinueNoteAppInstall: () -> Unit,
+  val onOpenBackup: () -> Unit,
   val onClose: () -> Unit,
 )
 
@@ -270,6 +271,9 @@ fun SettingsScreen(state: SettingsState, actions: SettingsActions) {
               onUpdateViaNoteLink = onUpdateViaNoteLink,
               onContinueInstall = onContinueNoteAppInstall,
             )
+            SettingRow(noteText("备份与恢复", "Backup and restore"), onClick = actions.onOpenBackup) {
+              Text(noteText("导出 / 恢复 / 回滚", "Export / Restore / Roll back"), color = Color.DarkGray)
+            }
             SettingRow(noteText("开源许可", "Open-source licenses"), onClick = { showOpenSourceLicenses = true }) {
               Text("AGPL-3.0-or-later", color = Color.DarkGray)
             }
@@ -308,9 +312,7 @@ fun SettingsScreen(state: SettingsState, actions: SettingsActions) {
             }
           }
 
-          SettingsTab.SHORTCUTS -> Column(
-            Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp),
-          ) {
+          SettingsTab.SHORTCUTS -> Column(Modifier.fillMaxSize().padding(16.dp)) {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
               ShortcutScene.entries.forEach { scene ->
                 OutlinedButton(onClick = { shortcutScene = scene }) {
@@ -318,34 +320,13 @@ fun SettingsScreen(state: SettingsState, actions: SettingsActions) {
                 }
               }
             }
-            Row(
-              Modifier.fillMaxWidth().padding(vertical = 12.dp),
-              horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-              Button(
-                onClick = { onStartShortcutCapture(shortcutScene) },
-              ) { Text(noteText("按实体键识别", "Identify hardware key")) }
-              OutlinedButton(
-                onClick = { onShortcutSceneClear(shortcutScene) },
-              ) { Text(noteText("清空本场景", "Clear this context")) }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+              TextButton(onClick = { onStartShortcutCapture(shortcutScene) }) { Text("按实体键识别") }
+              TextButton(onClick = { onShortcutSceneClear(shortcutScene) }) { Text("清空本场景") }
             }
-            HardwareKeyId.entries.chunked(2).forEach { keys ->
-              Row(
-                Modifier.fillMaxWidth().padding(bottom = 8.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-              ) {
-                keys.forEach { key ->
-                  val action = shortcutBindings.action(shortcutScene, key)
-                  GridSettingCell("K${key.number}", Modifier.weight(1f), { shortcutKey = key }) {
-                    Text(
-                      action?.localizedLabel() ?: noteText("未绑定", "Unassigned"),
-                      color = Color.DarkGray,
-                      maxLines = 2,
-                    )
-                  }
-                }
-              }
-            }
+            HardwareBindingsPanel(shortcutScene, shortcutKey ?: HardwareKeyId.K1, shortcutBindings,
+              onKey = { shortcutKey = it },
+              onBind = { onShortcutBind(shortcutScene, shortcutKey ?: HardwareKeyId.K1, it) })
           }
 
           SettingsTab.NOTELINK -> Column(
@@ -484,35 +465,6 @@ fun SettingsScreen(state: SettingsState, actions: SettingsActions) {
       },
       dismissButton = {
         OutlinedButton(onClick = { renameTarget = null }) { Text(noteText("取消", "Cancel")) }
-      },
-    )
-  }
-
-  shortcutKey?.let { key ->
-    AlertDialog(
-      onDismissRequest = { shortcutKey = null },
-      title = { Text("${shortcutScene.localizedLabel()} · K${key.number}") },
-      text = {
-        Column(Modifier.heightIn(max = 460.dp).verticalScroll(rememberScrollState())) {
-          SettingRow(noteText("未绑定", "Unassigned"), onClick = {
-            onShortcutBind(shortcutScene, key, null)
-            shortcutKey = null
-          }) { RadioButton(selected = shortcutBindings.action(shortcutScene, key) == null, onClick = null) }
-          ShortcutAction.forScene(shortcutScene).forEach { action ->
-            SettingRow(action.localizedLabel(), onClick = {
-              onShortcutBind(shortcutScene, key, action)
-              shortcutKey = null
-            }) {
-              RadioButton(
-                selected = shortcutBindings.action(shortcutScene, key) == action,
-                onClick = null,
-              )
-            }
-          }
-        }
-      },
-      confirmButton = {
-        TextButton(onClick = { shortcutKey = null }) { Text(noteText("取消", "Cancel")) }
       },
     )
   }

@@ -18,6 +18,9 @@ internal data class UiInputBlockState(
   val pdfRegionDialogOpen: Boolean = false,
   val linkedNotePlacementOpen: Boolean = false,
 ) {
+  val eraserBlocked: Boolean
+    get() = copy(richObjectSelected = false, pdfRegionDialogOpen = false).blocked
+
   val blocked: Boolean
     get() = pageManagerOpen || toolbarPopupOpen || settingsOpen || notebookManagerOpen ||
       notebookNameOpen || insertionOpen || textEditorOpen || notebookBusy || exportPanelOpen ||

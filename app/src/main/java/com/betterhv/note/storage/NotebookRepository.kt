@@ -1078,7 +1078,7 @@ class NotebookRepository(context: Context) : AutoCloseable {
     require(source.first == note.first && source.second == PageKind.PDF_SOURCE) {
       "Anchor pages must share one PDF notebook"
     }
-    require(note.second == PageKind.LINKED_NOTE && parentPdfPageId(db, anchor.notePageId) == anchor.sourcePageId) {
+    require(note.second == PageKind.LINKED_NOTE) {
       "Anchor note page is not linked to its source page"
     }
     require(objectBelongsToPage(db, anchor.noteObjectId, anchor.notePageId)) {

@@ -33,13 +33,14 @@ class EraserOverlayView(context: Context, private val pen: PenDrawView) : View(c
   private var erasing = false
 
   override fun onTouchEvent(event: MotionEvent): Boolean {
+    if (event.pointerCount == 0) return false
     val isEraser = event.getToolType(0) == MotionEvent.TOOL_TYPE_ERASER
 
     when (event.actionMasked) {
       MotionEvent.ACTION_DOWN -> {
         if (!isEraser) return false // pen: let it reach PenDrawView/hvpen
-        erasing = true
-        pen.beginErase()
+        erasing = pen.beginTailErase(event.x, event.y)
+        if (!erasing) return true
         pen.eraseMove(event.x, event.y)
         return true
       }

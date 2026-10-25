@@ -76,11 +76,18 @@ class SelectionToolTest {
     page.addObject(text);
     page.addObject(image)
     val host = RecordingHost()
-    val tool = SelectionTool(page, CommandStack(), host) { 24f }
+    val commands = CommandStack()
+    val tool = SelectionTool(page, commands, host) { 24f }
 
     val selection = tool.selectRectangle(Bounds(10f, 10f, 100f, 100f))
 
     assertEquals(setOf(stroke.id, text.id, image.id), selection.objectIds.toSet())
+    tool.deleteSelection()
+    assertTrue(page.scene.all().isEmpty())
+    assertTrue(tool.currentSelection().isEmpty)
+    commands.undo()
+    assertEquals(setOf(stroke.id, text.id, image.id), page.scene.all().map { it.id }.toSet())
+    assertFalse(commands.canUndo)
   }
 
   @Test

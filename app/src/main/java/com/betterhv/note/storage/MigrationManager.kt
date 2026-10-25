@@ -4,7 +4,7 @@ import android.database.sqlite.SQLiteDatabase
 
 /** Explicit schema migrations; every semantic schema change increments VERSION. */
 object MigrationManager {
-  const val VERSION = 7
+  const val VERSION = 8
 
   fun create(db: SQLiteDatabase) {
     db.execSQL("CREATE TABLE metadata(key TEXT PRIMARY KEY, value TEXT NOT NULL)")
@@ -148,6 +148,8 @@ object MigrationManager {
       db.execSQL("UPDATE pages SET template_id='builtin.blank' WHERE kind!='PDF_SOURCE'")
       version = 7
     }
+    // v8 permits anchors to any linked page in the same notebook; no table layout change.
+    if (version == 7) version = 8
     require(version == newVersion) { "Incomplete migration $oldVersion -> $newVersion (at $version)" }
     // Future migrations are appended here, never by mutating v1 semantics.
     db.execSQL(

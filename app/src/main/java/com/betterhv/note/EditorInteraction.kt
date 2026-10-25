@@ -78,7 +78,19 @@ enum class ShortcutAction(val storageId: String, val label: String, val scene: S
   }
 }
 
-data class HardwareShortcutBindings(val values: Map<ShortcutScene, Map<HardwareKeyId, ShortcutAction>> = emptyMap()) {
+data class HardwareShortcutBindings(
+  val values: Map<ShortcutScene, Map<HardwareKeyId, ShortcutAction>> = emptyMap(),
+  val commands: Map<ShortcutScene, Map<HardwareKeyId, CommandBinding>> = emptyMap(),
+) {
+  fun command(scene: ShortcutScene, key: HardwareKeyId): CommandBinding? = commands[scene]?.get(key)
+    ?: values[scene]?.get(key)?.let { CommandBinding(it.storageId) }
+
+  fun bindCommand(scene: ShortcutScene, key: HardwareKeyId, binding: CommandBinding?): HardwareShortcutBindings {
+    val updated = commands[scene].orEmpty().toMutableMap()
+    if (binding == null) updated.remove(key) else updated[key] = binding
+    return copy(commands = commands + (scene to updated), values = values + (scene to (values[scene].orEmpty() - key)))
+  }
+
   fun action(scene: ShortcutScene, key: HardwareKeyId): ShortcutAction? = values[scene]?.get(key)
 
   fun bind(scene: ShortcutScene, key: HardwareKeyId, action: ShortcutAction?): HardwareShortcutBindings {
@@ -88,7 +100,7 @@ data class HardwareShortcutBindings(val values: Map<ShortcutScene, Map<HardwareK
     return copy(values = values + (scene to sceneValues))
   }
 
-  fun clear(scene: ShortcutScene): HardwareShortcutBindings = copy(values = values - scene)
+  fun clear(scene: ShortcutScene): HardwareShortcutBindings = copy(values = values - scene, commands = commands - scene)
 }
 
 /** Extension point for hardware-key behavior owned by an attached flyout. */

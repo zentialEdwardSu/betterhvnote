@@ -79,7 +79,7 @@ class PenSettingsStore(context: Context) {
 
   private fun slotKey(slot: Int, key: String): String = "slot_${slot}_$key"
 
-  private companion object {
+  companion object {
     const val PREFERENCES_NAME = "pen_settings"
     const val KEY_ACTIVE_TYPE = "active_type"
     const val KEY_ACTIVE_SLOT = "active_slot"

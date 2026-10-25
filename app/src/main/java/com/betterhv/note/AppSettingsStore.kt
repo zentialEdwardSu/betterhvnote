@@ -79,8 +79,16 @@ class AppSettingsStore(context: Context) {
     ShortcutScene.entries.forEach { scene ->
       HardwareKeyId.entries.forEach { key ->
         val id = preferences.getString(shortcutKey(scene, key), null) ?: return@forEach
-        val action = ShortcutAction.fromStorageId(id)?.takeIf { it.scene == scene } ?: return@forEach
-        result = result.bind(scene, key, action)
+        val binding = runCatching {
+          if (id.startsWith("{")) {
+            val json = org.json.JSONObject(id)
+            val args = json.optJSONObject("arguments")
+            CommandBinding(json.getString("commandId"), args?.keys()?.asSequence()?.associateWith {
+              args.getString(it)
+            }.orEmpty())
+          } else CommandBinding(id)
+        }.getOrElse { CommandBinding(id) }
+        result = result.bindCommand(scene, key, binding)
       }
     }
     return result
@@ -93,6 +101,16 @@ class AppSettingsStore(context: Context) {
       } else {
         require(action.scene == scene)
         putString(shortcutKey(scene, key), action.storageId)
+      }
+    }
+  }
+
+  fun saveCommandBinding(scene: ShortcutScene, key: HardwareKeyId, binding: CommandBinding?) {
+    preferences.edit {
+      if (binding == null) remove(shortcutKey(scene, key)) else {
+        val json = org.json.JSONObject().put("commandId", binding.commandId)
+          .put("arguments", org.json.JSONObject(binding.arguments))
+        putString(shortcutKey(scene, key), json.toString())
       }
     }
   }

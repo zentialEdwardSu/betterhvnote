@@ -202,7 +202,12 @@ class NotebookRepositoryInstrumentedTest {
     }
 
     @Test
-    fun pdfNotebookLinkedPageAndAnchorRoundTripWithCascade() {
+    fun pdfNotebookLinkedPageAndAnchorRoundTripWithCascade() = assertAnchorRoundTrip(crossSource = false)
+
+    @Test
+    fun crossSourceAnchorRetainsItsOwnSource() = assertAnchorRoundTrip(crossSource = true)
+
+    private fun assertAnchorRoundTrip(crossSource: Boolean) {
         NotebookRepository(context).use { repository ->
             repository.openOrCreate()
             val source = PdfPageSource(
@@ -249,9 +254,10 @@ class NotebookRepositoryInstrumentedTest {
             reloaded.attachPage(notePage)
             reloaded.refreshPageMetadata(notePage)
             repository.persist(DocumentChange.fullPage(reloaded, notePage, "test:linked-note"))
+            val anchorSourceId = if (crossSource) secondSourcePageId else sourcePageId
             repository.savePdfAnchor(
                 PdfAnchor(
-                    sourcePageId = sourcePageId,
+                    sourcePageId = anchorSourceId,
                     notePageId = notePageId,
                     noteObjectId = objectId,
                     kind = PdfAnchorKind.REGION_TEXT,
@@ -260,20 +266,20 @@ class NotebookRepositoryInstrumentedTest {
                     ordinal = 1
                 )
             )
-            assertEquals(1, repository.pdfAnchors(sourcePageId).size)
+            assertEquals(1, repository.pdfAnchors(anchorSourceId).size)
             assertEquals(objectId, repository.pdfAnchorsForNotePage(notePageId).single().noteObjectId)
-            assertEquals(sourcePageId, repository.pdfAnchorForNoteObject(objectId)?.sourcePageId)
+            assertEquals(anchorSourceId, repository.pdfAnchorForNoteObject(objectId)?.sourcePageId)
 
             // Lifecycle/manual full-page saves must retain links for objects
             // that are still present on the linked-note page.
             repository.persist(DocumentChange.fullPage(reloaded, notePage, "test:retain-anchor-object"))
-            assertEquals(1, repository.pdfAnchors(sourcePageId).size)
+            assertEquals(1, repository.pdfAnchors(anchorSourceId).size)
             assertEquals(objectId, repository.pdfAnchorsForNotePage(notePageId).single().noteObjectId)
 
             notePage.removeObject(objectId)
             reloaded.refreshPageMetadata(notePage)
             repository.persist(DocumentChange.fullPage(reloaded, notePage, "test:remove-anchor-object"))
-            assertTrue(repository.pdfAnchors(sourcePageId).isEmpty())
+            assertTrue(repository.pdfAnchors(anchorSourceId).isEmpty())
             assertTrue(repository.pdfAnchorsForNotePage(notePageId).isEmpty())
             assertEquals(null, repository.pdfAnchorForNoteObject(objectId))
         }

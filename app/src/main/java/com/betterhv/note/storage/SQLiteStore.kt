@@ -33,6 +33,8 @@ class SQLiteStore(context: Context, file: File) :
   }
 
   fun checkpoint() {
-    writableDatabase.rawQuery("PRAGMA wal_checkpoint(TRUNCATE)", null).use { it.moveToFirst() }
+    writableDatabase.rawQuery("PRAGMA wal_checkpoint(TRUNCATE)", null).use { cursor ->
+      check(cursor.moveToFirst() && cursor.getInt(0) == 0) { "WAL checkpoint is busy; snapshot aborted" }
+    }
   }
 }

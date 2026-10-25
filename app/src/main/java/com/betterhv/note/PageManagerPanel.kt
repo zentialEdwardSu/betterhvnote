@@ -61,6 +61,8 @@ data class PageManagerPanelState(
   val thumbnailSize: DpSize,
   val pages: List<PageUiInfo>,
   val currentPageId: UUID?,
+  val showTabs: Boolean = true,
+  val laneTitle: String? = null,
 )
 
 data class PageManagerPanelActions(
@@ -88,9 +90,44 @@ private data class PageThumbnailCardActions(
   val onSide3Click: () -> Unit,
 )
 
-@OptIn(ExperimentalComposeUiApi::class)
+internal fun hasLinkedPageLane(pages: List<PageUiInfo>): Boolean =
+  pages.count { it.kind == com.betterhv.note.doc.PageKind.LINKED_NOTE } >= 2
+
 @Composable
 fun PageManagerPanel(state: PageManagerPanelState, actions: PageManagerPanelActions) {
+  if (!hasLinkedPageLane(state.pages)) {
+    SinglePageManagerPanel(state, actions)
+    return
+  }
+  var bookmarks by remember { mutableStateOf(false) }
+  val filtered = state.pages.filter { !bookmarks || it.bookmarked }
+  val lanes = listOf(filtered.filter { it.kind != com.betterhv.note.doc.PageKind.LINKED_NOTE },
+    filtered.filter { it.kind == com.betterhv.note.doc.PageKind.LINKED_NOTE })
+  val vertical = state.dockEdge == DockEdge.START || state.dockEdge == DockEdge.END
+  Column(state.modifier.background(Color.White)) {
+    Row(Modifier.fillMaxWidth().height(PAGE_MANAGER_TAB_RAIL_WIDTH)) {
+      PageManagerTab(!bookmarks, Icons.Filled.Layers, "全部页面", Modifier.weight(1f)) { bookmarks = false }
+      PageManagerTab(bookmarks, Icons.Filled.Bookmark, "书签页面", Modifier.weight(1f)) { bookmarks = true }
+    }
+    val lane: @Composable (Int, Modifier) -> Unit = { index, modifier ->
+      val pages = lanes[index]
+      SinglePageManagerPanel(state.copy(modifier = modifier, pages = pages, showTabs = false,
+        laneTitle = if (index == 0) "页面" else "夹页"), actions.copy(onMove = { id, target ->
+        val global = pages.getOrNull(target)?.id?.let { targetId -> state.pages.indexOfFirst { it.id == targetId } }
+        if (global != null && global >= 0) actions.onMove(id, global) else false
+      }))
+    }
+    if (vertical) Row(Modifier.weight(1f)) {
+      lane(0, Modifier.weight(1f).fillMaxHeight()); lane(1, Modifier.weight(1f).fillMaxHeight())
+    } else Column(Modifier.weight(1f)) {
+      lane(0, Modifier.weight(1f).fillMaxWidth()); lane(1, Modifier.weight(1f).fillMaxWidth())
+    }
+  }
+}
+
+@OptIn(ExperimentalComposeUiApi::class)
+@Composable
+private fun SinglePageManagerPanel(state: PageManagerPanelState, actions: PageManagerPanelActions) {
   val modifier = state.modifier
   val dockEdge = state.dockEdge
   val thumbnailSize = state.thumbnailSize
@@ -328,7 +365,7 @@ fun PageManagerPanel(state: PageManagerPanelState, actions: PageManagerPanelActi
     .then(dragInput)
 
   ToolbarFlyoutSurface(
-    title = noteText(
+    title = state.laneTitle ?: noteText(
       "页面 ${currentIndex + 1}/${displayedPages.size.coerceAtLeast(1)}",
       "Page ${currentIndex + 1}/${displayedPages.size.coerceAtLeast(1)}",
     ),
@@ -339,7 +376,7 @@ fun PageManagerPanel(state: PageManagerPanelState, actions: PageManagerPanelActi
   ) {
     if (vertical) {
       Column(Modifier.fillMaxSize()) {
-        Row(Modifier.fillMaxWidth().height(PAGE_MANAGER_TAB_RAIL_WIDTH)) {
+        if (state.showTabs) Row(Modifier.fillMaxWidth().height(PAGE_MANAGER_TAB_RAIL_WIDTH)) {
           PageManagerTab(
             selected = !bookmarkedOnly,
             icon = Icons.Filled.Layers,
@@ -366,7 +403,7 @@ fun PageManagerPanel(state: PageManagerPanelState, actions: PageManagerPanelActi
       }
     } else {
       Row(Modifier.fillMaxSize()) {
-        Column(Modifier.width(PAGE_MANAGER_TAB_RAIL_WIDTH).fillMaxHeight()) {
+        if (state.showTabs) Column(Modifier.width(PAGE_MANAGER_TAB_RAIL_WIDTH).fillMaxHeight()) {
           PageManagerTab(
             selected = !bookmarkedOnly,
             icon = Icons.Filled.Layers,
@@ -464,7 +501,7 @@ private fun PageThumbnailCard(state: PageThumbnailCardState, actions: PageThumbn
       )
     }
     Text(
-      text = info.pageNumber.toString(),
+      text = info.label,
       modifier = Modifier.align(Alignment.TopStart).background(Color(0xDFFFFFFF)).padding(2.dp),
       color = Color.Black,
     )
