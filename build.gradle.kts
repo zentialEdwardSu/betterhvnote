@@ -24,6 +24,9 @@ subprojects {
                 checkDependencies = true
                 checkReleaseBuilds = true
                 checkTestSources = true
+                // Dependency upgrades are handled explicitly; an available update must not fail CI.
+                disable += "GradleDependency"
+                disable += "AndroidGradlePluginVersion"
             }
         }
     }
@@ -35,6 +38,8 @@ subprojects {
                 checkDependencies = true
                 checkReleaseBuilds = true
                 checkTestSources = true
+                disable += "GradleDependency"
+                disable += "AndroidGradlePluginVersion"
             }
         }
     }
@@ -44,6 +49,8 @@ subprojects {
             warningsAsErrors = true
             checkDependencies = true
             checkTestSources = true
+            disable += "GradleDependency"
+                disable += "AndroidGradlePluginVersion"
         }
     }
     pluginManager.withPlugin("dev.detekt") {
