@@ -77,6 +77,21 @@ import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupPositionProvider
 import androidx.compose.ui.window.PopupProperties
 import com.betterhv.note.ink.PenType
+import com.betterhv.note.toolbar.FloatingPresentation
+import com.betterhv.note.toolbar.ToolbarCatalog
+import com.betterhv.note.toolbar.ToolbarFlyoutRequest
+import com.betterhv.note.toolbar.ToolbarGesture
+import com.betterhv.note.toolbar.ToolbarIcon
+import com.betterhv.note.toolbar.ToolbarToolUiState
+import com.betterhv.note.toolbar.ToolbarWindowContent
+import com.betterhv.note.toolbar.ToolbarWindowSpec
+import com.betterhv.note.ui.EinkActionRow
+import com.betterhv.note.ui.EinkChoiceCell
+import com.betterhv.note.ui.EinkColors
+import com.betterhv.note.ui.EinkDimens
+import com.betterhv.note.ui.EinkFlyoutSurface
+import com.betterhv.note.ui.EinkTheme
+import com.betterhv.note.ui.EinkToolButton
 import com.betterhv.transfer.core.ContentKind
 
 /** Which edge of the screen the toolbar is currently docked to. */
@@ -88,11 +103,9 @@ data class EditorToolbarState(
   val dockEdge: DockEdge,
   val dockFraction: Float,
   val toolbarHidden: Boolean,
-  val visibleItems: Set<ToolbarItem>,
-  val hasPdf: Boolean,
-  val eraserMode: EraserMode,
-  val penToolbarSettings: PenToolbarSettings,
-  val menu: ToolbarMenuRequest?,
+  val tools: List<ToolbarToolUiState>,
+  val penSettings: PenToolbarSettings,
+  val openFlyout: ToolbarFlyoutRequest?,
   val dispatcher: CommandDispatcher,
 )
 
@@ -108,6 +121,15 @@ data class EditorToolbarActions(
 /** Dockable editing toolbar with a pen-settings popup anchored to the pen button. */
 @Composable
 fun EditorToolbar(modifier: Modifier = Modifier, state: EditorToolbarState, actions: EditorToolbarActions) {
+  EinkTheme { EditorToolbarContent(modifier, state, actions) }
+}
+
+@Composable
+private fun EditorToolbarContent(
+  modifier: Modifier,
+  state: EditorToolbarState,
+  actions: EditorToolbarActions,
+) {
   val dockEdge = state.dockEdge
   val dockFraction = state.dockFraction
   val toolbarHidden = state.toolbarHidden
@@ -153,7 +175,7 @@ fun EditorToolbar(modifier: Modifier = Modifier, state: EditorToolbarState, acti
 
   Box(modifier.onSizeChanged { containerSize = it }) {
     if (toolbarHidden) {
-      val handleSize = with(LocalDensity.current) { 44.dp.roundToPx() }
+      val handleSize = with(LocalDensity.current) { EinkDimens.Touch.roundToPx() }
       val hiddenPosition = toolbarPosition(
         containerSize,
         IntSize(handleSize, handleSize),
@@ -167,7 +189,7 @@ fun EditorToolbar(modifier: Modifier = Modifier, state: EditorToolbarState, acti
         onClick = { onToolbarHiddenChange(false) },
       )
     } else {
-      Surface(
+      com.betterhv.note.ui.EinkSurface(
         modifier = Modifier
           .offset {
             IntOffset(
@@ -183,11 +205,7 @@ fun EditorToolbar(modifier: Modifier = Modifier, state: EditorToolbarState, acti
           }
           .onSizeChanged { toolbarSize = it }
           .penInputGuard(onInteractionBlockChange),
-        shape = RectangleShape,
-        color = Color(0xFFEFEFEF),
-        contentColor = Color.Black,
-        tonalElevation = 0.dp,
-        shadowElevation = 0.dp,
+        color = EinkColors.Chrome,
       ) {
         ToolbarContent(
           state = state,
@@ -215,9 +233,7 @@ private fun ToolbarContent(
   onHandleClick: () -> Unit,
 ) {
   val dispatcher = state.dispatcher
-  val entries = CommandRegistry.toolbar.filter { descriptor ->
-    descriptor.item != ToolbarItem.NAVIGATION || state.hasPdf
-  }
+  val tools = state.tools
   val buttons: @Composable () -> Unit = {
     ToolbarDragHandle(
       dockEdge = state.dockEdge,
@@ -226,92 +242,141 @@ private fun ToolbarContent(
       onDragEnd = onHandleDragEnd,
       onClick = { actions.onMenuDismiss(); onHandleClick() },
     )
-    entries.filter { it.item == ToolbarItem.MENU || it.item in state.visibleItems }.forEach { descriptor ->
-      val binding = descriptor.click
-      val perform: (CommandBinding?) -> Unit = { command -> command?.let { dispatcher.dispatch(it) } }
+    tools.filter { it.visible }.forEach { tool ->
       Box {
-        val penSlot = descriptor.item.ordinal.takeIf { it < PenToolbarSettings.SLOT_COUNT }
-        if (penSlot != null) {
-          SquarePainterButton(
-            icon = penTypeIcon(state.penToolbarSettings.settingsFor(penSlot).activeType),
-            contentDescription = CommandRegistry.title(binding),
-            enabled = dispatcher.enabled(binding), selected = dispatcher.selected(binding),
-            onClick = { perform(binding) }, onFunctionClick = { perform(descriptor.side1) },
-            onDoubleClick = { perform(descriptor.doubleClick) },
+        EinkToolButton(
+          icon = toolbarIcon(tool.icon),
+          contentDescription = tool.contentDescription?.localized(NoteI18n.isChinese)
+            ?: dispatcher.title(tool.primary),
+          enabled = tool.enabled,
+          selected = tool.selected,
+          onClick = { dispatcher.dispatch(tool.primary) },
+          onFunctionClick = tool.gestureAction(ToolbarGesture.SIDE_1, dispatcher),
+          onSide2Click = tool.gestureAction(ToolbarGesture.SIDE_2, dispatcher),
+          onSide3Click = tool.gestureAction(ToolbarGesture.SIDE_3, dispatcher),
+          onDoubleClick = tool.gestureAction(ToolbarGesture.DOUBLE_CLICK, dispatcher),
+        )
+        val request = state.openFlyout
+        val spec = request?.let { ToolbarCatalog.windows[it.window] }
+        if (request != null && spec != null &&
+          spec.presentation == FloatingPresentation.FLYOUT &&
+          anchorFor(request, tools) == tool.id
+        ) {
+          ToolbarWindowPopup(
+            spec = spec,
+            request = request,
+            allTools = tools,
+            penSettings = state.penSettings,
+            dockEdge = state.dockEdge,
+            dispatcher = dispatcher,
+            onDismiss = actions.onMenuDismiss,
           )
-        } else {
-          SquareIconButton(
-            icon = toolbarIcon(descriptor.item, state.eraserMode),
-            contentDescription = if (descriptor.item == ToolbarItem.TAIL_ERASER) {
-              if (state.eraserMode == EraserMode.POINT) "局部擦除 · 点击切换" else "整笔擦除 · 点击切换"
-            } else if (descriptor.item == ToolbarItem.MENU) {
-              "Settings: tap to open; Side1 opens quick panel"
-            } else dispatcher.title(binding),
-            enabled = dispatcher.enabled(binding), selected = dispatcher.selected(binding),
-            onClick = { perform(binding) }, onFunctionClick = { perform(descriptor.side1) },
-            onSide2Click = { perform(descriptor.side2) }, onSide3Click = { perform(descriptor.side3) },
-          )
-        }
-        val menu = state.menu
-        val attached = when (menu?.id) {
-          "pen" -> penSlot == menu.slot
-          "insert" -> descriptor.item == ToolbarItem.INSERT
-          "navigation" -> descriptor.item == ToolbarItem.NAVIGATION
-          "menu" -> descriptor.item == ToolbarItem.MENU
-          else -> false
-        }
-        // Hidden tools anchor their menus to Menu.
-        val hiddenAnchor = descriptor.item == ToolbarItem.MENU && when (menu?.id) {
-          "pen" -> ToolbarItem.entries[menu.slot] !in state.visibleItems
-          "insert" -> ToolbarItem.INSERT !in state.visibleItems
-          "navigation" -> ToolbarItem.NAVIGATION !in state.visibleItems
-          else -> false
-        }
-        if (menu != null && (attached || hiddenAnchor)) {
-          if (menu.id == "pen") {
-            PenSettingsMenu(true, actions.onMenuDismiss, state.dockEdge,
-              state.penToolbarSettings.settingsFor(menu.slot), menu.slot, dispatcher::dispatch)
-          } else {
-            val menuBindings = buildList {
-              if (menu.id == "menu") addAll(entries.filter {
-                it.item != ToolbarItem.MENU && it.item !in state.visibleItems
-              }.map { it.click })
-              addAll(CommandRegistry.menus[menu.id].orEmpty().map(::CommandBinding))
-            }
-            AttachedToolbarFlyout("菜单", state.dockEdge, actions.onMenuDismiss) {
-              Column(Modifier.verticalScroll(rememberScrollState())) {
-                menuBindings.forEach { command ->
-                  androidx.compose.material3.TextButton(
-                    onClick = { dispatcher.dispatch(command) }, enabled = dispatcher.enabled(command),
-                    modifier = Modifier.semantics { contentDescription = dispatcher.title(command) },
-                  ) { Text(dispatcher.title(command)) }
-                }
-              }
-            }
-          }
         }
       }
     }
   }
   if (state.dockEdge == DockEdge.TOP || state.dockEdge == DockEdge.BOTTOM) {
-    Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) { buttons() }
+    Row(horizontalArrangement = Arrangement.spacedBy(EinkDimens.ToolbarGap)) { buttons() }
   } else {
-    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) { buttons() }
+    Column(verticalArrangement = Arrangement.spacedBy(EinkDimens.ToolbarGap)) { buttons() }
   }
 }
 
-private fun toolbarIcon(item: ToolbarItem, mode: EraserMode): ImageVector = when (item) {
-  ToolbarItem.TAIL_ERASER -> if (mode == EraserMode.POINT) Icons.Filled.RemoveCircleOutline else Icons.Filled.Clear
-  ToolbarItem.LASSO -> Icons.Filled.CropFree
-  ToolbarItem.NAVIGATION -> Icons.Filled.Navigation
-  ToolbarItem.INSERT -> Icons.Filled.PostAdd
-  ToolbarItem.UNDO -> Icons.AutoMirrored.Filled.Undo
-  ToolbarItem.REDO -> Icons.AutoMirrored.Filled.Redo
-  ToolbarItem.DELETE -> Icons.Filled.Delete
-  ToolbarItem.PAGES -> Icons.Filled.Layers
-  ToolbarItem.NOTEBOOKS -> NotebookBookIcon
-  ToolbarItem.EXPORT -> Icons.Filled.IosShare
-  else -> Icons.Filled.Menu
+@Composable
+private fun ToolbarWindowPopup(
+  spec: ToolbarWindowSpec,
+  request: ToolbarFlyoutRequest,
+  allTools: List<ToolbarToolUiState>,
+  penSettings: PenToolbarSettings,
+  dockEdge: DockEdge,
+  dispatcher: CommandDispatcher,
+  onDismiss: () -> Unit,
+) {
+  when (val content = spec.content) {
+    ToolbarWindowContent.PenSettings -> {
+      val slot = request.arguments["slot"]
+        ?.takeIf { it != "current" }
+        ?.toIntOrNull()
+        ?: penSettings.activeSlot
+      PenSettingsMenu(
+        true,
+        onDismiss,
+        dockEdge,
+        penSettings.settingsFor(slot),
+        slot,
+        dispatcher::dispatch,
+      )
+    }
+
+    is ToolbarWindowContent.Commands -> AttachedToolbarFlyout(
+      spec.title.localized(NoteI18n.isChinese),
+      dockEdge,
+      onDismiss,
+    ) {
+      Column(Modifier.verticalScroll(rememberScrollState())) {
+        content.entries.forEach { ToolbarCommandButton(it, dispatcher) }
+      }
+    }
+
+    is ToolbarWindowContent.Menu -> {
+      val hidden = allTools.filter { it.menuEligible && !it.visible }
+      AttachedToolbarFlyout(
+        spec.title.localized(NoteI18n.isChinese),
+        dockEdge,
+        onDismiss,
+      ) {
+        Column(Modifier.verticalScroll(rememberScrollState())) {
+          hidden.forEach { ToolbarCommandButton(it.primary, dispatcher) }
+          content.entries.forEach { ToolbarCommandButton(it, dispatcher) }
+        }
+      }
+    }
+
+    ToolbarWindowContent.PageManager -> Unit
+  }
+}
+
+@Composable
+private fun ToolbarCommandButton(binding: CommandBinding, dispatcher: CommandDispatcher) {
+  EinkActionRow(
+    label = dispatcher.title(binding),
+    enabled = dispatcher.enabled(binding),
+    onClick = { dispatcher.dispatch(binding) },
+  )
+}
+
+private fun ToolbarToolUiState.gestureAction(
+  gesture: ToolbarGesture,
+  dispatcher: CommandDispatcher,
+): (() -> Unit)? = gestures[gesture]?.let { binding -> { dispatcher.dispatch(binding) } }
+
+private fun anchorFor(
+  request: ToolbarFlyoutRequest,
+  tools: List<ToolbarToolUiState>,
+): ToolbarItem =
+  if (tools.firstOrNull { it.id == request.anchor }?.visible == true) request.anchor
+  else ToolbarItem.MENU
+
+@Composable
+private fun toolbarIcon(icon: ToolbarIcon): Painter = when (icon) {
+  is ToolbarIcon.Static -> when (icon.id) {
+    ToolbarIcon.StaticId.TAIL_ERASER -> rememberVectorPainter(Icons.Filled.Clear)
+    ToolbarIcon.StaticId.LASSO -> rememberVectorPainter(Icons.Filled.CropFree)
+    ToolbarIcon.StaticId.NAVIGATION -> rememberVectorPainter(Icons.Filled.Navigation)
+    ToolbarIcon.StaticId.INSERT -> rememberVectorPainter(Icons.Filled.PostAdd)
+    ToolbarIcon.StaticId.UNDO -> rememberVectorPainter(Icons.AutoMirrored.Filled.Undo)
+    ToolbarIcon.StaticId.REDO -> rememberVectorPainter(Icons.AutoMirrored.Filled.Redo)
+    ToolbarIcon.StaticId.DELETE -> rememberVectorPainter(Icons.Filled.Delete)
+    ToolbarIcon.StaticId.PAGES -> rememberVectorPainter(Icons.Filled.Layers)
+    ToolbarIcon.StaticId.NOTEBOOKS -> rememberVectorPainter(NotebookBookIcon)
+    ToolbarIcon.StaticId.EXPORT -> rememberVectorPainter(Icons.Filled.IosShare)
+    ToolbarIcon.StaticId.MENU -> rememberVectorPainter(Icons.Filled.Menu)
+  }
+  is ToolbarIcon.Pen -> penTypeIcon(icon.type)
+  is ToolbarIcon.Eraser ->
+    rememberVectorPainter(
+      if (icon.mode == EraserMode.POINT) Icons.Filled.RemoveCircleOutline else Icons.Filled.Clear,
+    )
 }
 
 @Composable
@@ -347,12 +412,14 @@ private fun AttachedToolbarFlyout(
       dismissOnClickOutside = true,
     ),
   ) {
-    ToolbarFlyoutSurface(
-      title = title,
-      dockEdge = dockEdge,
-      modifier = modifier,
-      content = content,
-    )
+    EinkTheme {
+      ToolbarFlyoutSurface(
+        title = title,
+        dockEdge = dockEdge,
+        modifier = modifier,
+        content = content,
+      )
+    }
   }
 }
 
@@ -369,78 +436,14 @@ internal fun ToolbarFlyoutSurface(
   wrapContentWidth: Boolean = true,
   content: @Composable () -> Unit,
 ) {
-  val resolvedHeaderWidth = compactHeaderWidth.takeIf {
-    dockEdge == DockEdge.TOP || dockEdge == DockEdge.BOTTOM
-  }
-  Surface(
+  EinkFlyoutSurface(
+    title = title,
+    dockEdge = dockEdge,
     modifier = modifier,
-    shape = RectangleShape,
-    color = Color(0xFFF2F2F2),
-    contentColor = Color.Black,
-    tonalElevation = 0.dp,
-    shadowElevation = 0.dp,
-    border = androidx.compose.foundation.BorderStroke(1.dp, Color.Black),
-  ) {
-    // Popup supplies window-sized maximum constraints. Resolve the panel from its
-    // content's intrinsic width first so a small Insert/Menu flyout does not expand
-    // across the whole screen. Explicitly-sized consumers (the page manager and pen
-    // settings) still win through [modifier].
-    Column(if (wrapContentWidth) Modifier.width(IntrinsicSize.Max) else Modifier.fillMaxWidth()) {
-      Row(Modifier.fillMaxWidth().height(36.dp).background(Color(0xFFF2F2F2))) {
-        Box(
-          Modifier
-            .then(if (resolvedHeaderWidth == null) Modifier.fillMaxWidth() else Modifier.width(resolvedHeaderWidth))
-            .height(36.dp)
-            .background(Color(0xFFF2F2F2))
-            .padding(horizontal = 12.dp),
-          contentAlignment = Alignment.CenterStart,
-        ) {
-          Text(
-            title,
-            color = Color.Black,
-            fontWeight = FontWeight.SemiBold,
-            maxLines = 1,
-          )
-        }
-      }
-      Box(Modifier.background(Color(0xFFF2F2F2))) { content() }
-    }
-  }
-}
-
-@Composable
-private fun PopupTextButton(label: String, onClick: () -> Unit, selected: Boolean = false) {
-  Box(
-    Modifier
-      .width(172.dp)
-      .height(48.dp)
-      .background(if (selected) Color.Black else Color(0xFFF2F2F2))
-      .border(0.5.dp, Color(0xFF707070))
-      .clickable(onClick = onClick)
-      .padding(horizontal = 14.dp),
-    contentAlignment = Alignment.CenterStart,
-  ) {
-    Text(label, color = if (selected) Color.White else Color.Black)
-  }
-}
-
-@Composable
-private fun PopupIconButton(
-  icon: ImageVector,
-  contentDescription: String,
-  selected: Boolean = false,
-  onClick: () -> Unit,
-) {
-  Box(
-    modifier = Modifier
-      .size(48.dp)
-      .background(if (selected) Color(0xFFB0C4DE) else Color.White)
-      .border(1.dp, if (selected) Color(0xFF516780) else Color(0xFFB0B0B0))
-      .clickable(onClick = onClick),
-    contentAlignment = Alignment.Center,
-  ) {
-    Icon(icon, contentDescription = contentDescription, tint = Color.Black)
-  }
+    compactHeaderWidth = compactHeaderWidth,
+    wrapContentWidth = wrapContentWidth,
+    content = content,
+  )
 }
 
 @Composable
@@ -554,33 +557,27 @@ private fun BrushChoice(
   onSettingsChange: (PenSettings) -> Unit,
 ) {
   val selected = settings.activeType == type
-  Box(
-    modifier = Modifier
-      .width(82.dp)
-      .height(56.dp)
-      .background(if (selected) Color(0xFFB0C4DE) else Color(0xFFF5F5F5))
-      .border(1.dp, if (selected) Color(0xFF516780) else Color(0xFFB0B0B0))
-      .clickable { onSettingsChange(settings.selectType(type)) },
-    contentAlignment = Alignment.Center,
+  EinkChoiceCell(
+    modifier = Modifier.width(82.dp).height(56.dp),
+    selected = selected,
+    contentDescription = label,
+    onClick = { onSettingsChange(settings.selectType(type)) },
   ) {
-    Icon(icon, contentDescription = label)
+    Icon(icon, contentDescription = null)
   }
 }
 
 @Composable
 private fun WidthChoice(level: Int, sampleWidthDp: Float, selected: Boolean, onClick: () -> Unit) {
-  Box(
-    modifier = Modifier
-      .size(46.dp)
-      .background(if (selected) Color(0xFFB0C4DE) else Color(0xFFF5F5F5))
-      .border(1.dp, if (selected) Color(0xFF516780) else Color(0xFFB0B0B0))
-      .semantics { contentDescription = noteText("粗细 ${level + 1}", "Width ${level + 1}") }
-      .clickable(onClick = onClick),
-    contentAlignment = Alignment.Center,
+  EinkChoiceCell(
+    modifier = Modifier.size(46.dp),
+    selected = selected,
+    contentDescription = noteText("粗细 ${level + 1}", "Width ${level + 1}"),
+    onClick = onClick,
   ) {
     Canvas(Modifier.size(34.dp)) {
       drawLine(
-        color = Color.Black,
+        color = if (selected) EinkColors.Paper else EinkColors.Ink,
         start = Offset(3.dp.toPx(), size.height / 2f),
         end = Offset(size.width - 3.dp.toPx(), size.height / 2f),
         strokeWidth = sampleWidthDp.dp.toPx(),
@@ -591,16 +588,15 @@ private fun WidthChoice(level: Int, sampleWidthDp: Float, selected: Boolean, onC
 
 @Composable
 private fun ColorChoice(choice: PenColorChoice, selected: Boolean, onClick: () -> Unit) {
-  val borderColor = when {
-    selected -> Color(0xFF2B579A)
-    choice.argb == 0xFFFFFFFF.toInt() -> Color(0xFF555555)
-    else -> Color(0xFF9A9A9A)
-  }
   Box(
     modifier = Modifier
-      .size(58.dp, 42.dp)
+      .size(58.dp, EinkDimens.Touch)
       .background(Color(choice.argb))
-      .border(if (selected) 3.dp else 1.dp, borderColor)
+      .border(
+        if (selected) EinkDimens.BorderEmphasis else EinkDimens.Hairline,
+        EinkColors.Ink,
+        RectangleShape,
+      )
       .semantics { contentDescription = choice.localizedLabel() }
       .clickable(onClick = onClick),
     contentAlignment = Alignment.Center,
@@ -609,99 +605,12 @@ private fun ColorChoice(choice: PenColorChoice, selected: Boolean, onClick: () -
       val checkColor = if (choice.argb == 0xFFFFFFFF.toInt() ||
         choice.argb == 0xFFEDED05.toInt()
       ) {
-        Color.Black
+        EinkColors.Ink
       } else {
-        Color.White
+        EinkColors.Paper
       }
       Icon(Icons.Filled.Check, contentDescription = null, tint = checkColor)
     }
-  }
-}
-
-@OptIn(ExperimentalFoundationApi::class, ExperimentalComposeUiApi::class)
-@Composable
-private fun SquareIconButton(
-  icon: ImageVector,
-  contentDescription: String,
-  enabled: Boolean,
-  selected: Boolean,
-  onFunctionClick: (() -> Unit)? = null,
-  onSide2Click: (() -> Unit)? = null,
-  onSide3Click: (() -> Unit)? = null,
-  onDoubleClick: (() -> Unit)? = null,
-  onClick: () -> Unit,
-) = SquarePainterButton(
-  icon = rememberVectorPainter(icon),
-  contentDescription = contentDescription,
-  enabled = enabled,
-  selected = selected,
-  onFunctionClick = onFunctionClick,
-  onSide2Click = onSide2Click,
-  onSide3Click = onSide3Click,
-  onDoubleClick = onDoubleClick,
-  onClick = onClick,
-)
-
-@OptIn(ExperimentalFoundationApi::class, ExperimentalComposeUiApi::class)
-@Composable
-private fun SquarePainterButton(
-  icon: Painter,
-  contentDescription: String,
-  enabled: Boolean,
-  selected: Boolean,
-  onFunctionClick: (() -> Unit)? = null,
-  onSide2Click: (() -> Unit)? = null,
-  onSide3Click: (() -> Unit)? = null,
-  onDoubleClick: (() -> Unit)? = null,
-  onClick: () -> Unit,
-) {
-  val stylusClick = remember { StylusClickResolver() }
-  val background = if (selected) Color.Black else Color.Transparent
-  val tint = when {
-    !enabled -> Color.Gray
-    selected -> Color.White
-    else -> Color.Black
-  }
-  val resolvedClick = {
-    when (stylusClick.consume()) {
-      PenSideButton.SIDE_1 -> (onFunctionClick ?: onClick).invoke()
-      PenSideButton.SIDE_2 -> (onSide2Click ?: onClick).invoke()
-      PenSideButton.SIDE_3 -> (onSide3Click ?: onClick).invoke()
-      PenSideButton.NONE -> onClick()
-    }
-  }
-  val gestures = if (onDoubleClick != null) {
-    Modifier.combinedClickable(
-      enabled = enabled,
-      onClick = resolvedClick,
-      onDoubleClick = onDoubleClick,
-    )
-  } else {
-    Modifier.clickable(enabled = enabled, onClick = resolvedClick)
-  }
-  val functionKeyDetector = if (
-    onFunctionClick != null || onSide2Click != null || onSide3Click != null
-  ) {
-    @Suppress("DEPRECATION")
-    Modifier.pointerInteropFilter { event ->
-      if (event.actionMasked == MotionEvent.ACTION_DOWN) {
-        stylusClick.observe(event)
-        PenButtonTracker.observeMotion(event, "pen-icon")
-      }
-      false
-    }
-  } else {
-    Modifier
-  }
-  Box(
-    modifier = Modifier
-      .size(44.dp)
-      .background(background, RectangleShape)
-      .then(functionKeyDetector)
-      .then(gestures),
-    contentAlignment = Alignment.Center,
-  ) {
-    Icon(icon, contentDescription = contentDescription, tint = tint)
   }
 }
 
@@ -715,7 +624,7 @@ private fun ToolbarDragHandle(
 ) {
   Box(
     Modifier
-      .size(44.dp)
+      .size(EinkDimens.Touch)
       .pointerInput(dockEdge) {
         detectDragGestures(
           onDragStart = { onDragStart() },
@@ -733,7 +642,7 @@ private fun ToolbarDragHandle(
     Icon(
       Icons.Filled.OpenWith,
       contentDescription = noteText("拖动工具栏；点击隐藏", "Drag toolbar; tap to hide"),
-      tint = Color.Black,
+      tint = EinkColors.Ink,
     )
   }
 }
@@ -741,7 +650,7 @@ private fun ToolbarDragHandle(
 @Composable
 private fun HiddenToolbarHandle(edge: DockEdge, modifier: Modifier, onClick: () -> Unit) {
   Box(
-    modifier.size(44.dp).clickable(onClick = onClick),
+    modifier.size(EinkDimens.Touch).clickable(onClick = onClick),
     contentAlignment = when (edge) {
       DockEdge.START -> Alignment.CenterStart
       DockEdge.END -> Alignment.CenterEnd
@@ -755,7 +664,7 @@ private fun HiddenToolbarHandle(edge: DockEdge, modifier: Modifier, onClick: () 
           width = if (edge == DockEdge.START || edge == DockEdge.END) 12.dp else 40.dp,
           height = if (edge == DockEdge.TOP || edge == DockEdge.BOTTOM) 12.dp else 40.dp,
         )
-        .background(Color.Black),
+        .background(EinkColors.Ink),
     )
   }
 }

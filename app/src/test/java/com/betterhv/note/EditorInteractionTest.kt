@@ -1,5 +1,6 @@
 package com.betterhv.note
 
+import com.betterhv.note.toolbar.ToolbarCatalog
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -8,8 +9,8 @@ import org.junit.Test
 
 class EditorInteractionTest {
   @Test fun toolbarDefaultsContainEveryConfigurableItemButMenu() {
-    assertFalse(ToolbarItem.MENU in ToolbarItem.defaults)
-    assertEquals(ToolbarItem.entries.size - 1, ToolbarItem.defaults.size)
+    assertFalse(ToolbarItem.MENU in ToolbarCatalog.defaultVisibleItems)
+    assertEquals(ToolbarItem.entries.size - 1, ToolbarCatalog.defaultVisibleItems.size)
   }
 
   @Test fun legacyLinkedNoteToolbarItemMigratesToLasso() {

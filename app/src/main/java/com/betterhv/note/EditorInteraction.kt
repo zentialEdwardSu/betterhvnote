@@ -1,25 +1,24 @@
 package com.betterhv.note
 
 /** Stable toolbar entries. Their order is the order rendered on screen and in Menu. */
-enum class ToolbarItem(val storageId: String, val label: String) {
-  PEN_1("pen_1", "笔 1"),
-  PEN_2("pen_2", "笔 2"),
-  PEN_3("pen_3", "笔 3"),
-  TAIL_ERASER("tail_eraser", "笔尾橡皮模式"),
-  LASSO("lasso", "套索"),
-  NAVIGATION("navigation", "PDF 导航"),
-  INSERT("insert", "插入"),
-  UNDO("undo", "撤销"),
-  REDO("redo", "重做"),
-  DELETE("delete", "删除所选"),
-  PAGES("pages", "页面"),
-  NOTEBOOKS("notebooks", "笔记本"),
-  EXPORT("export", "导出"),
-  MENU("menu", "Menu"),
+enum class ToolbarItem(val storageId: String) {
+  PEN_1("pen_1"),
+  PEN_2("pen_2"),
+  PEN_3("pen_3"),
+  TAIL_ERASER("tail_eraser"),
+  LASSO("lasso"),
+  NAVIGATION("navigation"),
+  INSERT("insert"),
+  UNDO("undo"),
+  REDO("redo"),
+  DELETE("delete"),
+  PAGES("pages"),
+  NOTEBOOKS("notebooks"),
+  EXPORT("export"),
+  MENU("menu"),
   ;
 
   companion object {
-    val defaults: Set<ToolbarItem> = entries.filterNot { it == MENU }.toSet()
     fun fromStorageId(value: String): ToolbarItem? = entries.firstOrNull { it.storageId == value }
   }
 }

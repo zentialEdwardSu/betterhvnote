@@ -40,23 +40,6 @@ fun NoteLanguage.displayName(): String = when (this) {
   NoteLanguage.ENGLISH -> "English"
 }
 
-fun ToolbarItem.localizedLabel(): String = when (this) {
-  ToolbarItem.PEN_1 -> noteText("笔 1", "Pen 1")
-  ToolbarItem.PEN_2 -> noteText("笔 2", "Pen 2")
-  ToolbarItem.PEN_3 -> noteText("笔 3", "Pen 3")
-  ToolbarItem.TAIL_ERASER -> noteText("笔尾橡皮模式", "Tail eraser mode")
-  ToolbarItem.LASSO -> noteText("套索", "Lasso")
-  ToolbarItem.NAVIGATION -> noteText("PDF 导航", "PDF navigation")
-  ToolbarItem.INSERT -> noteText("插入", "Insert")
-  ToolbarItem.UNDO -> noteText("撤销", "Undo")
-  ToolbarItem.REDO -> noteText("重做", "Redo")
-  ToolbarItem.DELETE -> noteText("删除所选", "Delete selection")
-  ToolbarItem.PAGES -> noteText("页面", "Pages")
-  ToolbarItem.NOTEBOOKS -> noteText("笔记本", "Notebooks")
-  ToolbarItem.EXPORT -> noteText("导出", "Export")
-  ToolbarItem.MENU -> "Menu"
-}
-
 fun PenColorChoice.localizedLabel(): String = when (id) {
   "black" -> noteText("黑色", "Black")
   "dark_gray" -> noteText("深灰", "Dark gray")

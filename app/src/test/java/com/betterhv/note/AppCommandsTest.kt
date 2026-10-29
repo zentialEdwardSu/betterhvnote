@@ -1,5 +1,6 @@
 package com.betterhv.note
 
+import com.betterhv.note.toolbar.ToolbarCatalog
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
@@ -9,8 +10,9 @@ import org.junit.Test
 
 class AppCommandsTest {
   @Test fun everyToolbarAndMenuActionResolves() {
-    val bindings = CommandRegistry.toolbar.flatMap {
-      listOfNotNull(it.click, it.doubleClick, it.side1, it.side2, it.side3)
+    val bindings = ToolbarCatalog.tools.flatMap { tool ->
+      listOf(CommandBinding("editor.${tool.id.storageId}")) +
+        tool.gestures.values.map { CommandBinding(it.commandId, it.arguments) }
     } +
       CommandRegistry.menus.values.flatten().map(::CommandBinding)
     bindings.forEach { binding ->

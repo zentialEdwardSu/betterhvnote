@@ -17,6 +17,7 @@ import androidx.test.uiautomator.Direction
 import androidx.test.uiautomator.By
 import androidx.test.uiautomator.UiDevice
 import androidx.test.uiautomator.Until
+import com.betterhv.note.toolbar.ToolbarCatalog
 import com.betterhv.transfer.core.ContentKind
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -44,7 +45,7 @@ class EditorFeatureUiTest {
     val oldHidden = settings.toolbarHidden
     val imageFile = File(context.filesDir, "updates/clipboard-feature-test.png")
     settings.toolbarHidden = false
-    settings.visibleToolbarItems = ToolbarItem.defaults
+    settings.visibleToolbarItems = ToolbarCatalog.defaultVisibleItems
     HardwareKeyId.entries.forEach { key ->
       settings.saveCommandBinding(ShortcutScene.EDITOR, key, CommandBinding("editor.tail_eraser"))
     }

@@ -2,6 +2,7 @@ package com.betterhv.note
 
 import android.content.Context
 import androidx.core.content.edit
+import com.betterhv.note.toolbar.ToolbarCatalog
 
 internal fun decodeVisibleToolbarItems(stored: Set<String>): Set<ToolbarItem> {
   val migrated = stored.mapNotNull(ToolbarItem::fromStorageId)
@@ -40,7 +41,7 @@ class AppSettingsStore(context: Context) {
 
   var visibleToolbarItems: Set<ToolbarItem>
     get() {
-      if (!preferences.contains(KEY_TOOLBAR_ITEMS)) return ToolbarItem.defaults
+      if (!preferences.contains(KEY_TOOLBAR_ITEMS)) return ToolbarCatalog.defaultVisibleItems
       val stored = preferences.getStringSet(KEY_TOOLBAR_ITEMS, emptySet()).orEmpty()
       // v1 exposed linked-note as a standalone tool. It is now Side1 of
       // the lasso tool; keep it reachable for users who had hidden lasso

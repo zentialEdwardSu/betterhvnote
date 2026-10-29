@@ -92,6 +92,15 @@ import com.betterhv.note.doc.PageKind
 import com.betterhv.note.doc.TextFontFamily
 import com.betterhv.note.doc.TextObject
 import com.betterhv.note.export.ExportViewModel
+import com.betterhv.note.toolbar.NotebookScope
+import com.betterhv.note.toolbar.ToolEffectSink
+import com.betterhv.note.toolbar.ToolbarCatalog
+import com.betterhv.note.toolbar.ToolbarCommandRouter
+import com.betterhv.note.toolbar.ToolbarEffect
+import com.betterhv.note.toolbar.ToolbarFlyoutRequest
+import com.betterhv.note.toolbar.ToolbarScreenId
+import com.betterhv.note.toolbar.ToolbarUiState
+import com.betterhv.note.toolbar.ToolbarWindowId
 import com.betterhv.note.storage.StartupBehavior
 import com.betterhv.note.template.TemplateStore
 import com.betterhv.transfer.android.TransferPermissions
@@ -369,9 +378,9 @@ private fun AppRoot(
     var shortcutBindings by remember { mutableStateOf(appSettingsStore.loadHardwareShortcuts()) }
     var shortcutCaptureScene by remember { mutableStateOf<ShortcutScene?>(null) }
     var shortcutBindingRequest by remember { mutableStateOf<Pair<ShortcutScene, HardwareKeyId>?>(null) }
-    var toolbarMenu by remember { mutableStateOf<ToolbarMenuRequest?>(null) }
+    var openFlyout by remember { mutableStateOf<ToolbarFlyoutRequest?>(null) }
     var pageManagerOpen by rememberSaveable { mutableStateOf(false) }
-    val penSettingsOpen = toolbarMenu != null
+    val penSettingsOpen = openFlyout != null
     var settingsOpen by rememberSaveable { mutableStateOf(false) }
     var documentSettingsOpen by rememberSaveable { mutableStateOf(false) }
     var templateChooserOpen by rememberSaveable { mutableStateOf(false) }
@@ -835,13 +844,13 @@ private fun AppRoot(
     var shortcutDeleteAt by remember { mutableLongStateOf(0L) }
     LaunchedEffect(hasPdf) {
       if (!hasPdf) {
-        if (toolbarMenu?.id == "navigation") toolbarMenu = null
+        if (openFlyout?.window == ToolbarWindowId.PDF_NAVIGATION) openFlyout = null
         if (toolKind == ToolKind.NAVIGATION) { toolKind = ToolKind.PEN; penView?.setTool(ToolKind.PEN) }
       }
     }
     val commandScene = when {
       pageManagerOpen -> ShortcutScene.PAGE_MANAGER
-      toolbarMenu?.id == "insert" || insertionState is InsertionState.ChoosingSource ||
+      openFlyout?.window == ToolbarWindowId.INSERT || insertionState is InsertionState.ChoosingSource ||
         insertionState is InsertionState.ChoosingClient -> ShortcutScene.INSERT
       else -> ShortcutScene.EDITOR
     }
@@ -850,24 +859,33 @@ private fun AppRoot(
       pendingLinkedNoteRequest != null || penView?.hasPendingLinkedNotePlacement() == true ||
       (insertionState !is InsertionState.Idle && insertionState !is InsertionState.ChoosingSource &&
         insertionState !is InsertionState.ChoosingClient)
-    val commandContext = CommandContext(
+    val baseCommandContext = CommandContext(
       scene = commandScene, blocked = commandsBlocked, hasPdf = hasPdf,
-      pdfPage = penView?.isPdfSourcePage() == true, selection = hasSelection, canUndo = canUndo, canRedo = canRedo,
-      labels = mapOf(
-        "insert.local" to if ((insertionState as? InsertionState.ChoosingSource)?.kind == ContentKind.TEXT) {
-          noteText("手动输入", "Enter manually")
-        } else noteText("从系统文件选择", "Choose system file"),
-        "editor.tail_eraser" to if (eraserMode == EraserMode.POINT) "局部擦除 · 点击切换" else "整笔擦除 · 点击切换",
-        "editor.debug" to if (debugMode) "关闭 Debug" else "开启 Debug",
-        "pdf.mode" to if (penView?.isStudyNavigation() == true) "学习模式" else "阅读模式",
-      ),
-      selected = buildSet {
-        if (toolKind == ToolKind.PEN) add("editor.pen_${penToolbarSettings.activeSlot + 1}")
-        if (toolKind == ToolKind.LASSO) add("editor.lasso")
-        if (toolKind == ToolKind.NAVIGATION) add("editor.navigation")
-        if (pageManagerOpen) add("editor.pages")
-        if (toolbarMenu != null) add("editor.${toolbarMenu!!.id}")
-      },
+      pdfPage = penView?.isPdfSourcePage() == true, selection = hasSelection,
+      canUndo = canUndo, canRedo = canRedo,
+    )
+    val labelState = ToolbarUiState(
+      visibleItems = visibleToolbarItems,
+      toolKind = toolKind,
+      eraserMode = eraserMode,
+      penSettings = penToolbarSettings,
+      openFlyout = openFlyout,
+      pageManagerOpen = pageManagerOpen,
+      notebookManagerOpen = notebookManagerOpen,
+      exportPanelOpen = exportPanelOpen,
+      commandContext = baseCommandContext,
+    )
+    val commandContext = baseCommandContext.copy(
+      labels = ToolbarCatalog.commandTitles(labelState)
+        .mapValues { (_, text) -> text.localized(NoteI18n.isChinese) }
+        .plus(mapOf(
+          "insert.local" to if ((insertionState as? InsertionState.ChoosingSource)?.kind == ContentKind.TEXT) {
+            noteText("手动输入", "Enter manually")
+          } else noteText("从系统文件选择", "Choose system file"),
+          "editor.debug" to if (debugMode) "关闭 Debug" else "开启 Debug",
+          "pdf.mode" to if (penView?.isStudyNavigation() == true) "学习模式" else "阅读模式",
+        )),
+      selected = ToolbarCatalog.selectedCommandIds(labelState),
     )
     fun changePen(binding: CommandBinding) {
       val slot = binding.arguments["slot"]?.toIntOrNull() ?: penToolbarSettings.activeSlot
@@ -884,104 +902,153 @@ private fun AppRoot(
       penSettingsStore.save(penToolbarSettings)
     }
     fun clipboard(kind: ContentKind) {
-      toolbarMenu = null
+      openFlyout = null
       appScope.launch {
         insertion.clipboard(context, kind).onFailure { showNotice(it.message ?: "Clipboard import failed") }
       }
     }
+    val effectSink = ToolEffectSink { effect ->
+      when (effect) {
+        is ToolbarEffect.SelectPenSlot -> {
+          val slot = effect.slot ?: penToolbarSettings.activeSlot
+          penToolbarSettings = penToolbarSettings.selectSlot(slot)
+          penSettingsStore.save(penToolbarSettings)
+        }
+
+        is ToolbarEffect.SetCanvasTool -> {
+          toolKind = effect.tool
+          penView?.setTool(effect.tool)
+        }
+
+        ToolbarEffect.ToggleEraserMode -> {
+          eraserMode = if (eraserMode == EraserMode.POINT) EraserMode.WHOLE_STROKE else EraserMode.POINT
+          penView?.setEraserMode(eraserMode)
+        }
+
+        is ToolbarEffect.ShowFloatingWindow -> {
+          if (effect.window == ToolbarWindowId.PAGE_MANAGER) {
+            pageManagerOpen = !pageManagerOpen
+            notebookManagerOpen = false
+            openFlyout = null
+          } else {
+            toolbarHidden = false
+            pageManagerOpen = false
+            val slot = effect.arguments["slot"]
+              ?.takeIf { it != "current" }
+              ?.toIntOrNull()
+              ?.takeIf { it in 0 until PenToolbarSettings.SLOT_COUNT }
+              ?: penToolbarSettings.activeSlot
+            val requested = effect.anchor ?: when (effect.window) {
+              ToolbarWindowId.PEN_SETTINGS -> ToolbarCatalog.penToolForSlot(slot).id
+              else -> ToolbarCatalog.windows[effect.window]?.anchor
+            }
+            val anchor = requested
+              ?.takeIf { it == ToolbarItem.MENU || it in visibleToolbarItems }
+              ?: ToolbarItem.MENU
+            openFlyout = ToolbarFlyoutRequest(effect.window, anchor, effect.arguments)
+          }
+        }
+
+        is ToolbarEffect.OpenFullScreen -> {
+          openFlyout = null
+          pageManagerOpen = false
+          when (effect.screen) {
+            ToolbarScreenId.NOTEBOOK_MANAGER -> notebookManagerOpen = true
+            ToolbarScreenId.EXPORT_MANAGER -> {
+              exportInitialNotebookId = penView?.currentNotebookId()
+              exportViewModel.refresh()
+              exportPanelOpen = true
+            }
+          }
+        }
+
+        ToolbarEffect.Undo -> penView?.undo()
+        ToolbarEffect.Redo -> penView?.redo()
+        ToolbarEffect.DeleteSelection -> {
+          penView?.deleteSelection()
+          pendingPdfRegion = null
+        }
+        ToolbarEffect.AddPage -> penView?.addPage()
+
+        is ToolbarEffect.NavigatePage -> {
+          if (penView?.navigatePage(effect.delta) != true) {
+            showNotice(noteText("没有更多页面", "No more pages"))
+          }
+        }
+
+        is ToolbarEffect.CreateNotebook -> {
+          penView?.let { pv ->
+            val ids = if (effect.scope == NotebookScope.CURRENT_PAGE) {
+              setOfNotNull(pv.pageIds().getOrNull(pv.currentPageIndex()))
+            } else {
+              pv.currentPageToEndIds()
+            }
+            if (ids.isNotEmpty()) pendingNotebookCreation = NotebookCreationRequest.Transfer(ids)
+            pageManagerOpen = false
+          }
+        }
+      }
+    }
+    val toolbarRouter = ToolbarCommandRouter()
     val dispatcher = CommandDispatcher(
       context = { commandContext.copy(blocked = commandsBlocked || penView?.isInputGestureActive() == true) },
       execute = { binding ->
         val id = binding.commandId
-        if (id !in setOf("pen.type", "pen.width", "pen.color")) toolbarMenu = null
-        when (id) {
-          "editor.pen_1", "editor.pen_2", "editor.pen_3" -> {
-            penToolbarSettings = penToolbarSettings.selectSlot(id.last().digitToInt() - 1)
-            penSettingsStore.save(penToolbarSettings)
-            toolKind = ToolKind.PEN; penView?.setTool(ToolKind.PEN)
-          }
-          "pen.settings" -> {
-            val slot = binding.arguments["slot"]?.toIntOrNull() ?: penToolbarSettings.activeSlot
-            penToolbarSettings = penToolbarSettings.selectSlot(slot)
-            penSettingsStore.save(penToolbarSettings)
-            toolKind = ToolKind.PEN; penView?.setTool(ToolKind.PEN)
-            toolbarHidden = false; toolbarMenu = ToolbarMenuRequest("pen", slot)
-          }
-          "pen.type", "pen.width", "pen.color" -> changePen(binding)
-          "editor.tail_eraser", "eraser.mode" -> {
-            eraserMode = if (id == "eraser.mode") EraserMode.valueOf(binding.arguments.getValue("value"))
-            else if (eraserMode == EraserMode.POINT) EraserMode.WHOLE_STROKE else EraserMode.POINT
-            penView?.setEraserMode(eraserMode)
-          }
-          "editor.lasso" -> { toolKind = ToolKind.LASSO; penView?.setTool(ToolKind.LASSO) }
-          "editor.navigation" -> {
-            toolKind = ToolKind.NAVIGATION; penView?.setTool(ToolKind.NAVIGATION)
-            toolbarHidden = false; toolbarMenu = ToolbarMenuRequest("navigation")
-          }
-          "pdf.fit" -> penView?.fitPdf()
-          "pdf.mode" -> penView?.toggleStudyNavigation()
-          "editor.undo" -> penView?.undo()
-          "editor.redo" -> penView?.redo()
-          "editor.delete" -> { penView?.deleteSelection(); pendingPdfRegion = null }
-          "editor.insert", "editor.menu" -> {
-            toolbarHidden = false; toolbarMenu = ToolbarMenuRequest(id.substringAfter('.'))
-          }
-          "insert.image" -> beginInsertion(ContentKind.IMAGE)
-          "insert.text" -> beginInsertion(ContentKind.TEXT)
-          "clipboard.image" -> clipboard(ContentKind.IMAGE)
-          "clipboard.text" -> clipboard(ContentKind.TEXT)
-          "insert.clipboard" -> (insertion.state.value as? InsertionState.ChoosingSource)?.let { clipboard(it.kind) }
-          "insert.local" -> (insertion.state.value as? InsertionState.ChoosingSource)?.let { choosing ->
-            if (choosing.kind == ContentKind.IMAGE) { insertion.cancel(); imagePicker.launch(arrayOf("image/*")) }
-            else { insertion.manualText(); showNotice(noteText("请点击页面确定文字位置", "Tap the page to place text")) }
-          }
-          "insert.notelink" -> (insertion.state.value as? InsertionState.ChoosingSource)?.let { choosing ->
-            val missing = TransferPermissions.missingNotePermissions(context)
-            if (missing.isEmpty()) appScope.launch { insertion.remote(choosing.kind) }
-            else {
-              permissionRemoteKind = choosing.kind; permissionRemoteAuto = false
-              transferPermissionLauncher.launch(missing)
+        if (id !in setOf("pen.type", "pen.width", "pen.color")) openFlyout = null
+        val action = toolbarRouter.action(binding)
+        if (action != null) {
+          action.effects(binding.arguments).forEach(effectSink::execute)
+        } else {
+          when (id) {
+            "pen.type", "pen.width", "pen.color" -> changePen(binding)
+            "eraser.mode" -> {
+              eraserMode = EraserMode.valueOf(binding.arguments.getValue("value"))
+              penView?.setEraserMode(eraserMode)
+            }
+            "pdf.fit" -> penView?.fitPdf()
+            "pdf.mode" -> penView?.toggleStudyNavigation()
+            "insert.image" -> beginInsertion(ContentKind.IMAGE)
+            "insert.text" -> beginInsertion(ContentKind.TEXT)
+            "clipboard.image" -> clipboard(ContentKind.IMAGE)
+            "clipboard.text" -> clipboard(ContentKind.TEXT)
+            "insert.clipboard" -> (insertion.state.value as? InsertionState.ChoosingSource)?.let { clipboard(it.kind) }
+            "insert.local" -> (insertion.state.value as? InsertionState.ChoosingSource)?.let { choosing ->
+              if (choosing.kind == ContentKind.IMAGE) { insertion.cancel(); imagePicker.launch(arrayOf("image/*")) }
+              else { insertion.manualText(); showNotice(noteText("请点击页面确定文字位置", "Tap the page to place text")) }
+            }
+            "insert.notelink" -> (insertion.state.value as? InsertionState.ChoosingSource)?.let { choosing ->
+              val missing = TransferPermissions.missingNotePermissions(context)
+              if (missing.isEmpty()) appScope.launch { insertion.remote(choosing.kind) }
+              else {
+                permissionRemoteKind = choosing.kind; permissionRemoteAuto = false
+                transferPermissionLauncher.launch(missing)
+              }
+            }
+            "insert.cancel" -> insertion.cancel()
+            "page.close" -> pageManagerOpen = false
+            "page.bookmark" -> penView?.toggleCurrentPageBookmark()
+            "page.delete" -> penView?.let { pv ->
+              val pageId = pv.pageIds().getOrNull(pv.currentPageIndex())
+              val now = android.os.SystemClock.uptimeMillis()
+              if (pageId != null && shortcutDeletePageId == pageId && now - shortcutDeleteAt in 0..3_000L) {
+                if (pv.canDeletePage()) pv.deletePage(pageId) else showNotice("最后一页不能删除")
+                shortcutDeletePageId = null
+              } else {
+                shortcutDeletePageId = pageId; shortcutDeleteAt = now
+                showNotice(noteText("再次按删除键确认删除当前页", "Press Delete again to confirm"))
+              }
+            }
+            "settings.document" -> {
+              templateCatalog = penView?.refreshTemplates() ?: templateCatalog
+              documentSettingsOpen = true; pageManagerOpen = false
+            }
+            "settings.app" -> { settingsOpen = true; pageManagerOpen = false }
+            "editor.debug" -> debugMode = !debugMode
+            "editor.toggle_toolbar" -> {
+              toolbarHidden = !toolbarHidden
+              appSettingsStore.toolbarHidden = toolbarHidden
             }
           }
-          "insert.cancel" -> insertion.cancel()
-          "editor.pages" -> { pageManagerOpen = !pageManagerOpen; notebookManagerOpen = false }
-          "page.close" -> pageManagerOpen = false
-          "page.previous", "page.next" -> {
-            if (penView?.navigatePage(if (id == "page.next") 1 else -1) != true) {
-              showNotice(noteText("没有更多页面", "No more pages"))
-            }
-          }
-          "page.add" -> penView?.addPage()
-          "page.bookmark" -> penView?.toggleCurrentPageBookmark()
-          "page.delete" -> penView?.let { pv ->
-            val pageId = pv.pageIds().getOrNull(pv.currentPageIndex())
-            val now = android.os.SystemClock.uptimeMillis()
-            if (pageId != null && shortcutDeletePageId == pageId && now - shortcutDeleteAt in 0..3_000L) {
-              if (pv.canDeletePage()) pv.deletePage(pageId) else showNotice("最后一页不能删除")
-              shortcutDeletePageId = null
-            } else {
-              shortcutDeletePageId = pageId; shortcutDeleteAt = now
-              showNotice(noteText("再次按删除键确认删除当前页", "Press Delete again to confirm"))
-            }
-          }
-          "editor.notebooks" -> { notebookManagerOpen = true; pageManagerOpen = false }
-          "notebook.current", "notebook.remaining" -> penView?.let { pv ->
-            val ids = if (id == "notebook.current") setOfNotNull(pv.pageIds().getOrNull(pv.currentPageIndex()))
-            else pv.currentPageToEndIds()
-            if (ids.isNotEmpty()) pendingNotebookCreation = NotebookCreationRequest.Transfer(ids)
-            pageManagerOpen = false
-          }
-          "editor.export" -> {
-            exportInitialNotebookId = penView?.currentNotebookId(); exportViewModel.refresh()
-            exportPanelOpen = true; pageManagerOpen = false
-          }
-          "settings.document" -> {
-            templateCatalog = penView?.refreshTemplates() ?: templateCatalog
-            documentSettingsOpen = true; pageManagerOpen = false
-          }
-          "settings.app" -> { settingsOpen = true; pageManagerOpen = false }
-          "editor.debug" -> debugMode = !debugMode
-          "editor.toggle_toolbar" -> { toolbarHidden = !toolbarHidden; appSettingsStore.toolbarHidden = toolbarHidden }
         }
       },
     )
@@ -995,15 +1062,33 @@ private fun AppRoot(
         }
       }
     }
+    val toolbarUiState = ToolbarUiState(
+      visibleItems = visibleToolbarItems,
+      toolKind = toolKind,
+      eraserMode = eraserMode,
+      penSettings = penToolbarSettings,
+      openFlyout = openFlyout,
+      pageManagerOpen = pageManagerOpen,
+      notebookManagerOpen = notebookManagerOpen,
+      exportPanelOpen = exportPanelOpen,
+      commandContext = commandContext,
+    )
     EditorToolbar(
       modifier = Modifier.fillMaxSize(),
-      state = EditorToolbarState(dockEdge, dockFraction, toolbarHidden, visibleToolbarItems, hasPdf,
-        eraserMode, penToolbarSettings, toolbarMenu, dispatcher),
+      state = EditorToolbarState(
+        dockEdge = dockEdge,
+        dockFraction = dockFraction,
+        toolbarHidden = toolbarHidden,
+        tools = ToolbarCatalog.present(toolbarUiState, dispatcher),
+        penSettings = penToolbarSettings,
+        openFlyout = openFlyout,
+        dispatcher = dispatcher,
+      ),
       actions = EditorToolbarActions(
         onDockEdgeChange = { dockEdge = it; appSettingsStore.toolbarDockEdge = it },
         onDockFractionChange = { dockFraction = it; appSettingsStore.toolbarDockFraction = it },
         onToolbarHiddenChange = { toolbarHidden = it; appSettingsStore.toolbarHidden = it },
-        onMenuDismiss = { toolbarMenu = null },
+        onMenuDismiss = { openFlyout = null },
         onToolbarDragStateChange = { penView?.setToolbarDragActive(it) },
         onInteractionBlockChange = { toolbarInteractionBlocked = it },
       ),
@@ -1452,7 +1537,7 @@ private fun AppRoot(
             appSettingsStore.visibleToolbarItems = visibleToolbarItems
           },
           onResetToolbarItems = {
-            visibleToolbarItems = ToolbarItem.defaults
+            visibleToolbarItems = ToolbarCatalog.defaultVisibleItems
             appSettingsStore.visibleToolbarItems = visibleToolbarItems
           },
           onStartShortcutCapture = { shortcutCaptureScene = it },
@@ -1959,9 +2044,11 @@ private fun TextEditorDialog(request: TextEditorRequest, onConfirm: (String) -> 
         horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(10.dp, Alignment.End),
       ) {
         EinkDialogAction(noteText("取消", "Cancel"), onClick = onDismiss)
-        EinkDialogAction(noteText("确定", "OK"), enabled = value.isNotBlank()) {
-          if (value.isNotBlank()) onConfirm(value)
-        }
+        EinkDialogAction(
+          noteText("确定", "OK"),
+          enabled = value.isNotBlank(),
+          onClick = { if (value.isNotBlank()) onConfirm(value) },
+        )
       }
     }
   }

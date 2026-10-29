@@ -14,21 +14,11 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.PrimaryTabRow
-import androidx.compose.material3.RadioButton
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Switch
-import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -40,11 +30,21 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.betterhv.note.storage.StartupBehavior
+import com.betterhv.note.toolbar.ToolbarCatalog
+import com.betterhv.note.ui.EinkChoiceCell
+import com.betterhv.note.ui.EinkColors
+import com.betterhv.note.ui.EinkDimens
+import com.betterhv.note.ui.EinkProgress
+import com.betterhv.note.ui.EinkRadioMark
+import com.betterhv.note.ui.EinkScreenHeader
+import com.betterhv.note.ui.EinkTab
+import com.betterhv.note.ui.EinkTheme
+import com.betterhv.note.ui.EinkToggle
+import com.betterhv.note.ui.EinkType
 import com.betterhv.transfer.core.PairedDevice
 import com.betterhv.transfer.core.TransferLogEntry
 import com.betterhv.transfer.core.TransferLogLevel
@@ -125,6 +125,11 @@ data class SettingsActions(
 
 @Composable
 fun SettingsScreen(state: SettingsState, actions: SettingsActions) {
+  EinkTheme { SettingsScreenContent(state, actions) }
+}
+
+@Composable
+private fun SettingsScreenContent(state: SettingsState, actions: SettingsActions) {
   val debugMode = state.debugMode
   val startupBehavior = state.startupBehavior
   val pairedClients = state.pairedClients
@@ -188,24 +193,18 @@ fun SettingsScreen(state: SettingsState, actions: SettingsActions) {
     }
   }
 
-  Surface(Modifier.fillMaxSize(), color = Color.White) {
+  androidx.compose.material3.Surface(Modifier.fillMaxSize(), color = EinkColors.Paper, shape = RectangleShape) {
     Column(Modifier.fillMaxSize()) {
-      Row(
-        Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-      ) {
-        IconButton(onClick = onClose) {
-          Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = noteText("返回", "Back"))
-        }
-        Text(noteText("设置", "Settings"), fontSize = 26.sp)
-      }
-      PrimaryTabRow(selectedTabIndex = selectedTab.ordinal, containerColor = Color.White) {
+      EinkScreenHeader(title = noteText("设置", "Settings"), onBack = onClose)
+      Row(Modifier.fillMaxWidth()) {
         SettingsTab.entries.forEach { tab ->
-          Tab(
+          EinkTab(
             selected = selectedTab == tab,
             onClick = { selectedTab = tab },
-            text = { Text(tab.label(), fontSize = 16.sp) },
-          )
+            modifier = Modifier.weight(1f),
+          ) {
+            Text(tab.label(), style = EinkType.Label, maxLines = 1)
+          }
         }
       }
 
@@ -214,16 +213,29 @@ fun SettingsScreen(state: SettingsState, actions: SettingsActions) {
           SettingsTab.GENERAL -> Column(
             Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp),
           ) {
-            Text(noteText("语言", "Language"), modifier = Modifier.padding(bottom = 8.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(
+              noteText("语言", "Language"),
+              style = EinkType.SectionTitle,
+              modifier = Modifier.padding(bottom = EinkDimens.SpaceSm),
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(EinkDimens.SpaceSm)) {
               NoteLanguage.entries.forEach { option ->
-                OutlinedButton(onClick = { onLanguageChange(option) }) {
-                  Text((if (option == language) "✓ " else "") + option.displayName())
+                EinkChoiceCell(
+                  modifier = Modifier.heightIn(min = EinkDimens.Touch),
+                  selected = option == language,
+                  contentDescription = option.displayName(),
+                  onClick = { onLanguageChange(option) },
+                ) {
+                  Text(
+                    (if (option == language) "✓ " else "") + option.displayName(),
+                    style = EinkType.Body,
+                    modifier = Modifier.padding(horizontal = EinkDimens.SpaceMd),
+                  )
                 }
               }
             }
             SettingRow(noteText("调试模式", "Debug mode"), onClick = { onDebugModeChange(!debugMode) }) {
-              Switch(checked = debugMode, onCheckedChange = onDebugModeChange)
+              EinkToggle(checked = debugMode, contentDescription = noteText("调试模式", "Debug mode"))
             }
             SettingRow(
               noteText(
@@ -234,23 +246,33 @@ fun SettingsScreen(state: SettingsState, actions: SettingsActions) {
                 onSkipSourceSelectionChange(!skipSourceSelectionWhenQueueAvailable)
               }
             ) {
-              Switch(skipSourceSelectionWhenQueueAvailable, onSkipSourceSelectionChange)
+              EinkToggle(
+                checked = skipSourceSelectionWhenQueueAvailable,
+                contentDescription = noteText("从 NoteLink 获取", "Get from NoteLink"),
+              )
             }
             SettingRow(noteText("末页按下一页时自动新增页面", "Create a page when navigating past the last page"), onClick = {
               onAutoCreatePageOnNextAtEndChange(!autoCreatePageOnNextAtEnd)
             }) {
-              Switch(autoCreatePageOnNextAtEnd, onAutoCreatePageOnNextAtEndChange)
+              EinkToggle(
+                checked = autoCreatePageOnNextAtEnd,
+                contentDescription = noteText("自动新增页面", "Create page automatically"),
+              )
             }
-            Text(noteText("重新进入应用时", "When reopening the app"), modifier = Modifier.padding(top = 24.dp, bottom = 8.dp))
+            Text(
+              noteText("重新进入应用时", "When reopening the app"),
+              style = EinkType.SectionTitle,
+              modifier = Modifier.padding(top = EinkDimens.SpaceXl, bottom = EinkDimens.SpaceSm),
+            )
             StartupBehavior.entries.forEach { behavior ->
               val label = when (behavior) {
                 StartupBehavior.WORKING_COPY -> noteText("打开 Working Copy", "Open Working Copy")
                 StartupBehavior.LAST_OPENED -> noteText("打开上次使用的笔记本", "Open the last notebook")
               }
               SettingRow(label, onClick = { onStartupBehaviorChange(behavior) }) {
-                RadioButton(
+                EinkRadioMark(
                   selected = startupBehavior == behavior,
-                  onClick = { onStartupBehaviorChange(behavior) },
+                  contentDescription = label,
                 )
               }
             }
@@ -272,42 +294,63 @@ fun SettingsScreen(state: SettingsState, actions: SettingsActions) {
               onContinueInstall = onContinueNoteAppInstall,
             )
             SettingRow(noteText("备份与恢复", "Backup and restore"), onClick = actions.onOpenBackup) {
-              Text(noteText("导出 / 恢复 / 回滚", "Export / Restore / Roll back"), color = Color.DarkGray)
+              Text(
+                noteText("导出 / 恢复 / 回滚", "Export / Restore / Roll back"),
+                color = EinkColors.Muted,
+                style = EinkType.Caption,
+              )
             }
             SettingRow(noteText("开源许可", "Open-source licenses"), onClick = { showOpenSourceLicenses = true }) {
-              Text("AGPL-3.0-or-later", color = Color.DarkGray)
+              Text("AGPL-3.0-or-later", color = EinkColors.Muted, style = EinkType.Caption)
             }
           }
 
           SettingsTab.TOOLBAR -> Column(
             Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp),
           ) {
-            Text(noteText("工具栏显示", "Toolbar items"), fontSize = 20.sp, modifier = Modifier.padding(bottom = 12.dp))
-            ToolbarItem.entries.filterNot { it == ToolbarItem.MENU }.chunked(2).forEach { items ->
-              Row(
-                Modifier.fillMaxWidth().padding(bottom = 8.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-              ) {
-                items.forEach { item ->
-                  val visible = item in visibleToolbarItems
-                  GridSettingCell(item.localizedLabel(), Modifier.weight(1f), {
-                    onToolbarItemVisibilityChange(item, !visible)
-                  }) {
-                    Switch(visible, { onToolbarItemVisibilityChange(item, it) })
+            Text(
+              noteText("工具栏显示", "Toolbar items"),
+              style = EinkType.SectionTitle,
+              modifier = Modifier.padding(bottom = EinkDimens.SpaceMd),
+            )
+            ToolbarCatalog.tools
+              .filterNot { it.id == ToolbarItem.MENU }
+              .chunked(2)
+              .forEach { tools ->
+                Row(
+                  Modifier.fillMaxWidth().padding(bottom = 8.dp),
+                  horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                  tools.forEach { tool ->
+                    val visible = tool.id in visibleToolbarItems
+                    GridSettingCell(
+                      tool.label.localized(NoteI18n.isChinese),
+                      Modifier.weight(1f),
+                      { onToolbarItemVisibilityChange(tool.id, !visible) },
+                    ) {
+                      EinkToggle(
+                        checked = visible,
+                        contentDescription = tool.label.localized(NoteI18n.isChinese),
+                      )
+                    }
                   }
+                  if (tools.size == 1) Spacer(Modifier.weight(1f))
                 }
-                if (items.size == 1) Spacer(Modifier.weight(1f))
               }
-            }
             Text(
               noteText(
                 "拖动把手和 Menu 始终显示；关闭的工具会自动进入 Menu。",
                 "The drag handle and Menu are always visible. Hidden tools move into Menu.",
               ),
-              color = Color.DarkGray,
-              modifier = Modifier.padding(top = 4.dp),
+              color = EinkColors.Muted,
+              style = EinkType.Caption,
+              modifier = Modifier.padding(top = EinkDimens.SpaceXs),
             )
-            OutlinedButton(onClick = onResetToolbarItems, modifier = Modifier.padding(top = 12.dp)) {
+            OutlinedButton(
+              onClick = onResetToolbarItems,
+              modifier = Modifier.padding(top = EinkDimens.SpaceMd),
+              shape = RectangleShape,
+            ) {
               Text(noteText("恢复默认显示", "Restore defaults"))
             }
           }
@@ -315,8 +358,17 @@ fun SettingsScreen(state: SettingsState, actions: SettingsActions) {
           SettingsTab.SHORTCUTS -> Column(Modifier.fillMaxSize().padding(16.dp)) {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
               ShortcutScene.entries.forEach { scene ->
-                OutlinedButton(onClick = { shortcutScene = scene }) {
-                  Text((if (scene == shortcutScene) "● " else "") + scene.localizedLabel())
+                EinkChoiceCell(
+                  modifier = Modifier.heightIn(min = EinkDimens.Touch),
+                  selected = scene == shortcutScene,
+                  contentDescription = scene.localizedLabel(),
+                  onClick = { shortcutScene = scene },
+                ) {
+                  Text(
+                    (if (scene == shortcutScene) "✓ " else "") + scene.localizedLabel(),
+                    style = EinkType.Body,
+                    modifier = Modifier.padding(horizontal = EinkDimens.SpaceMd),
+                  )
                 }
               }
             }
@@ -334,14 +386,21 @@ fun SettingsScreen(state: SettingsState, actions: SettingsActions) {
           ) {
             Text(
               noteText("NoteLink 客户端", "NoteLink clients"),
-              fontSize = 20.sp,
-              modifier = Modifier.padding(bottom = 8.dp),
+              style = EinkType.SectionTitle,
+              modifier = Modifier.padding(bottom = EinkDimens.SpaceSm),
             )
-            Text(transferStatus, modifier = Modifier.padding(bottom = 8.dp))
+            Text(
+              transferStatus,
+              style = EinkType.Body,
+              modifier = Modifier.padding(bottom = EinkDimens.SpaceSm),
+            )
             SettingRow(noteText("显示最近传输事件", "Show recent transfer events"), onClick = {
               onShowRecentTransferEventsChange(!showRecentTransferEvents)
             }) {
-              Switch(showRecentTransferEvents, onShowRecentTransferEventsChange)
+              EinkToggle(
+                checked = showRecentTransferEvents,
+                contentDescription = noteText("显示最近传输事件", "Show recent transfer events"),
+              )
             }
             TransferDiagnostics(
               transferSnapshot,
@@ -359,7 +418,7 @@ fun SettingsScreen(state: SettingsState, actions: SettingsActions) {
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
               ) {
                 Column(Modifier.weight(1f)) {
-                  Text(client.name, fontSize = 18.sp)
+                  Text(client.name, style = EinkType.Body)
                   Text(
                     if (client.legacy) {
                       noteText(
@@ -369,11 +428,11 @@ fun SettingsScreen(state: SettingsState, actions: SettingsActions) {
                     } else {
                       client.id
                     },
-                    fontSize = 12.sp,
-                    color = Color.DarkGray,
+                    style = EinkType.Caption,
+                    color = EinkColors.Muted,
                   )
                   Text(
-                    if (online == null) {
+                    (if (online == null) "! " else "✓ ") + if (online == null) {
                       noteText("离线", "Offline")
                     } else {
                       noteText(
@@ -381,8 +440,8 @@ fun SettingsScreen(state: SettingsState, actions: SettingsActions) {
                         "Online · ${online.imageCount} images · ${online.textCount} texts · ${online.pdfCount} PDFs",
                       )
                     },
-                    fontSize = 12.sp,
-                    color = if (online == null) Color.DarkGray else Color(0xFF246B3A),
+                    style = EinkType.Caption,
+                    color = EinkColors.Ink,
                   )
                   Text(
                     noteText(
@@ -392,35 +451,49 @@ fun SettingsScreen(state: SettingsState, actions: SettingsActions) {
                       DateFormat.SHORT,
                       DateFormat.SHORT,
                     ).format(Date(client.lastUsedAt))}",
-                    fontSize = 12.sp,
-                    color = Color.DarkGray,
+                    style = EinkType.Caption,
+                    color = EinkColors.Muted,
                   )
                 }
-                OutlinedButton(onClick = { renameTarget = client }) { Text(noteText("重命名", "Rename")) }
-                OutlinedButton(onClick = { onUnpairClient(client.id) }) { Text(noteText("移除", "Remove")) }
+                OutlinedButton(onClick = { renameTarget = client }, shape = RectangleShape) {
+                  Text(noteText("重命名", "Rename"))
+                }
+                OutlinedButton(onClick = { onUnpairClient(client.id) }, shape = RectangleShape) {
+                  Text(noteText("移除", "Remove"))
+                }
               }
-              HorizontalDivider()
+              HorizontalDivider(
+                color = EinkColors.ChromeAlt,
+                thickness = EinkDimens.Hairline,
+              )
             }
             Row(
-              Modifier.fillMaxWidth().padding(top = 12.dp),
+              Modifier.fillMaxWidth().padding(top = EinkDimens.SpaceMd),
               horizontalArrangement = Arrangement.spacedBy(8.dp),
               verticalAlignment = Alignment.CenterVertically,
             ) {
-              Button(onClick = onScanClients, enabled = !pairingScanActive && !pairingInProgress) {
+              Button(
+                onClick = onScanClients,
+                enabled = !pairingScanActive && !pairingInProgress,
+                shape = RectangleShape,
+              ) {
                 Text(if (pairingScanActive) noteText("正在扫描", "Scanning") else noteText("扫描新客户端", "Scan for clients"))
               }
               if (!transferPermissionsGranted) {
                 OutlinedButton(
                   onClick = onTransferPermissions,
+                  shape = RectangleShape,
                 ) { Text(noteText("授予权限", "Grant permission")) }
               }
-              OutlinedButton(onClick = onRefreshTransferStatus) { Text(noteText("刷新状态", "Refresh status")) }
+              OutlinedButton(onClick = onRefreshTransferStatus, shape = RectangleShape) {
+                Text(noteText("刷新状态", "Refresh status"))
+              }
             }
             pairingCandidates.forEach { candidate ->
               SettingRow(candidate.name, onClick = { selectedCandidateId = candidate.deviceId }) {
-                RadioButton(
+                EinkRadioMark(
                   selected = candidate.deviceId == selectedCandidateId,
-                  onClick = { selectedCandidateId = candidate.deviceId },
+                  contentDescription = candidate.name,
                 )
               }
             }
@@ -430,12 +503,14 @@ fun SettingsScreen(state: SettingsState, actions: SettingsActions) {
                 { pairingCode = it.filter(Char::isDigit).take(6) },
                 label = { Text(noteText("所选 NoteLink 显示的六位配对码", "Six-digit code shown by the selected NoteLink")) },
                 singleLine = true,
-                modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                shape = RectangleShape,
+                modifier = Modifier.fillMaxWidth().padding(top = EinkDimens.SpaceSm),
               )
               Button(
                 onClick = { selectedCandidate?.let { onPairClient(it, pairingCode) } },
                 enabled = selectedCandidate != null && pairingCode.length == 6 && !pairingInProgress,
-                modifier = Modifier.padding(top = 8.dp),
+                modifier = Modifier.padding(top = EinkDimens.SpaceSm),
+                shape = RectangleShape,
               ) { Text(if (pairingInProgress) noteText("正在配对", "Pairing") else noteText("完成配对", "Pair")) }
             }
           }
@@ -448,23 +523,35 @@ fun SettingsScreen(state: SettingsState, actions: SettingsActions) {
     var name by remember(target.id) { mutableStateOf(target.name) }
     AlertDialog(
       onDismissRequest = { renameTarget = null },
-      title = { Text(noteText("重命名 NoteLink", "Rename NoteLink")) },
+      shape = RectangleShape,
+      containerColor = EinkColors.Paper,
+      titleContentColor = EinkColors.Ink,
+      textContentColor = EinkColors.Ink,
+      tonalElevation = 0.dp,
+      title = { Text(noteText("重命名 NoteLink", "Rename NoteLink"), style = EinkType.SectionTitle) },
       text = {
         OutlinedTextField(
           value = name,
           onValueChange = { name = it },
           singleLine = true,
+          shape = RectangleShape,
           label = { Text(noteText("名称", "Name")) },
         )
       },
       confirmButton = {
-        Button(onClick = {
-          onRenameClient(target.id, name)
-          renameTarget = null
-        }, enabled = name.isNotBlank()) { Text(noteText("保存", "Save")) }
+        Button(
+          onClick = {
+            onRenameClient(target.id, name)
+            renameTarget = null
+          },
+          enabled = name.isNotBlank(),
+          shape = RectangleShape,
+        ) { Text(noteText("保存", "Save")) }
       },
       dismissButton = {
-        OutlinedButton(onClick = { renameTarget = null }) { Text(noteText("取消", "Cancel")) }
+        OutlinedButton(onClick = { renameTarget = null }, shape = RectangleShape) {
+          Text(noteText("取消", "Cancel"))
+        }
       },
     )
   }
@@ -472,31 +559,39 @@ fun SettingsScreen(state: SettingsState, actions: SettingsActions) {
   if (showOpenSourceLicenses) {
     AlertDialog(
       onDismissRequest = { showOpenSourceLicenses = false },
-      title = { Text(noteText("开源许可", "Open-source licenses")) },
+      shape = RectangleShape,
+      containerColor = EinkColors.Paper,
+      titleContentColor = EinkColors.Ink,
+      textContentColor = EinkColors.Ink,
+      tonalElevation = 0.dp,
+      title = { Text(noteText("开源许可", "Open-source licenses"), style = EinkType.SectionTitle) },
       text = {
         Column(Modifier.heightIn(max = 460.dp).verticalScroll(rememberScrollState())) {
-          Text("BetterHvNote · AGPL-3.0-or-later", fontSize = 18.sp)
+          Text("BetterHvNote · AGPL-3.0-or-later", style = EinkType.SectionTitle)
           Text(
             noteText(
               "PDF Ink annotation 导出使用 MuPDF fitz 1.28.0，Copyright Artifex Software, Inc.，按 GNU AGPL v3 或更高版本授权。",
               "PDF ink annotation export uses MuPDF fitz 1.28.0, Copyright Artifex Software, Inc., licensed under GNU AGPL v3 or later.",
             ),
-            modifier = Modifier.padding(top = 12.dp),
+            style = EinkType.Body,
+            modifier = Modifier.padding(top = EinkDimens.SpaceMd),
           )
           Text(
             noteText("对应源代码：", "Source code:") +
               "\nhttps://github.com/zentialEdwardSu/betterhvnote\n\n" +
               noteText("完整许可：", "Full license:") +
               "\nhttps://www.gnu.org/licenses/agpl-3.0.txt",
-            color = Color.DarkGray,
-            modifier = Modifier.padding(top = 12.dp),
+            color = EinkColors.Muted,
+            style = EinkType.Caption,
+            modifier = Modifier.padding(top = EinkDimens.SpaceMd),
           )
           Text(
             noteText(
               "汉王 ROM 接口由设备平台提供，声明仅用于编译，不随应用分发。",
               "Hanvon ROM interfaces are provided by the device platform. Declarations are compile-only and are not distributed with the app.",
             ),
-            modifier = Modifier.padding(top = 12.dp),
+            style = EinkType.Body,
+            modifier = Modifier.padding(top = EinkDimens.SpaceMd),
           )
         }
       },
@@ -528,11 +623,12 @@ private fun UpdateSettingsSection(
   var chooseClient by remember { mutableStateOf(false) }
   val online = onlineClients.map { it.client }
   Column(Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
-    Text(noteText("应用更新", "App updates"), fontSize = 18.sp)
+    Text(noteText("应用更新", "App updates"), style = EinkType.SectionTitle)
     Text(
       noteText("当前版本 $currentVersion", "Current version $currentVersion"),
-      color = Color.DarkGray,
-      modifier = Modifier.padding(top = 4.dp),
+      color = EinkColors.Muted,
+      style = EinkType.Caption,
+      modifier = Modifier.padding(top = EinkDimens.SpaceXs),
     )
     Text(
       when (checkState) {
@@ -556,15 +652,16 @@ private fun UpdateSettingsSection(
           "Automatic check is temporarily unavailable"
         }
       },
-      color = if (checkState is UpdateCheckState.Failed && state.manualErrorVisible) {
-        Color.Red
-      } else {
-        Color.DarkGray
-      },
-      modifier = Modifier.padding(top = 4.dp),
+      color = EinkColors.Muted,
+      style = EinkType.Caption,
+      modifier = Modifier.padding(top = EinkDimens.SpaceXs),
     )
     Row(Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-      OutlinedButton(onClick = onCheck, enabled = checkState !is UpdateCheckState.Checking) {
+      OutlinedButton(
+        onClick = onCheck,
+        enabled = checkState !is UpdateCheckState.Checking,
+        shape = RectangleShape,
+      ) {
         Text(
           if (checkState is UpdateCheckState.Checking) {
             noteText(
@@ -577,7 +674,10 @@ private fun UpdateSettingsSection(
         )
       }
       (checkState as? UpdateCheckState.UpdateAvailable)?.let { available ->
-        Button(onClick = { onOpenRelease(available.info.releaseUrl) }) { Text(noteText("查看 Release", "View release")) }
+        Button(
+          onClick = { onOpenRelease(available.info.releaseUrl) },
+          shape = RectangleShape,
+        ) { Text(noteText("查看 Release", "View release")) }
       }
     }
     Text(
@@ -607,12 +707,16 @@ private fun UpdateSettingsSection(
           "NoteLink update failed: ${noteLinkState.message}",
         )
       },
-      color = if (noteLinkState is NoteAppUpdateUiState.Failed) Color.Red else Color.DarkGray,
-      modifier = Modifier.padding(top = 12.dp),
+      color = EinkColors.Muted,
+      style = EinkType.Caption,
+      modifier = Modifier.padding(top = EinkDimens.SpaceMd),
     )
     Row(Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
       if (noteLinkState is NoteAppUpdateUiState.Ready) {
-        Button(onClick = onContinueInstall) { Text(noteText("继续安装", "Continue installation")) }
+        Button(
+          onClick = onContinueInstall,
+          shape = RectangleShape,
+        ) { Text(noteText("继续安装", "Continue installation")) }
       } else {
         Button(
           enabled = pairedClients.isNotEmpty() && noteLinkState !is NoteAppUpdateUiState.Resolving &&
@@ -623,6 +727,7 @@ private fun UpdateSettingsSection(
               else -> chooseClient = true
             }
           },
+          shape = RectangleShape,
         ) { Text(noteText("通过 NoteLink 更新", "Update via NoteLink")) }
       }
     }
@@ -630,7 +735,12 @@ private fun UpdateSettingsSection(
   if (chooseClient) {
     AlertDialog(
       onDismissRequest = { chooseClient = false },
-      title = { Text(noteText("选择 NoteLink", "Select NoteLink")) },
+      shape = RectangleShape,
+      containerColor = EinkColors.Paper,
+      titleContentColor = EinkColors.Ink,
+      textContentColor = EinkColors.Ink,
+      tonalElevation = 0.dp,
+      title = { Text(noteText("选择 NoteLink", "Select NoteLink"), style = EinkType.SectionTitle) },
       text = {
         Column {
           val candidates = online.ifEmpty { pairedClients }
@@ -640,10 +750,17 @@ private fun UpdateSettingsSection(
                 "当前未发现在线客户端，将尝试连接已配对设备。",
                 "No client is currently online; a paired client will be tried.",
               ),
+              style = EinkType.Body,
             )
           }
           candidates.forEach { client ->
-            TextButton(onClick = { chooseClient = false; onUpdateViaNoteLink(client.id) }) { Text(client.name) }
+            EinkChoiceCell(
+              modifier = Modifier.fillMaxWidth().heightIn(min = EinkDimens.Touch),
+              selected = false,
+              onClick = { chooseClient = false; onUpdateViaNoteLink(client.id) },
+            ) {
+              Text(client.name, style = EinkType.Body)
+            }
           }
         }
       },
@@ -678,8 +795,8 @@ private fun TransferDiagnostics(
       "${noteText("本端", "Local")} ${TransferModes.describe(snapshot.localModes)} · " +
         "${noteText("对端", "Remote")} ${TransferModes.describe(snapshot.remoteModes)}" +
         " · ${noteText("尝试", "attempt")} ${snapshot.attempt} · fallback ${snapshot.fallbackCount}",
-      fontSize = 12.sp,
-      color = Color.DarkGray,
+      style = EinkType.Caption,
+      color = EinkColors.Muted,
     )
     snapshot.endpoint?.let {
       Text(
@@ -687,8 +804,8 @@ private fun TransferDiagnostics(
           "端点",
           "Endpoint",
         )} ${endpointName ?: snapshot.deviceId ?: noteText("未知设备", "Unknown device")} · ${it.host}:${it.port}",
-        fontSize = 12.sp,
-        color = Color.DarkGray,
+        style = EinkType.Caption,
+        color = EinkColors.Muted,
       )
     }
     Text(
@@ -701,12 +818,12 @@ private fun TransferDiagnostics(
           snapshot.operationId?.let { " · ${noteText("操作", "operation")} ${it.toString().take(8)}" },
         )
           .joinToString(""),
-      fontSize = 12.sp,
-      color = Color.DarkGray,
+      style = EinkType.Caption,
+      color = EinkColors.Muted,
     )
     if (snapshot.totalBytes > 0) {
-      LinearProgressIndicator(
-        progress = { (snapshot.bytesTransferred.toFloat() / snapshot.totalBytes).coerceIn(0f, 1f) },
+      EinkProgress(
+        progress = (snapshot.bytesTransferred.toFloat() / snapshot.totalBytes).coerceIn(0f, 1f),
         modifier = Modifier.fillMaxWidth(),
       )
       Text(
@@ -714,16 +831,16 @@ private fun TransferDiagnostics(
           " · ${noteText("当前", "current")} ${noteFormatBytes(snapshot.bytesPerSecond)}/s" +
           " · ${noteText("平均", "average")} ${noteFormatBytes(snapshot.averageBytesPerSecond)}/s" +
           (snapshot.etaMillis?.let { " · ETA ${noteFormatDuration(it)}" } ?: ""),
-        fontSize = 12.sp,
-        color = Color.DarkGray,
+        style = EinkType.Caption,
+        color = EinkColors.Muted,
       )
     }
     snapshot.fallbackReason?.let {
-      Text("fallback ${it.code}: ${it.message}", fontSize = 12.sp, color = Color(0xFF6A4A00))
+      Text("! fallback ${it.code}: ${it.message}", style = EinkType.Caption, color = EinkColors.Ink)
     }
     snapshot.lastFailure?.let {
       Text(
-        "${it.code}: ${it.message} · ${if (it.recoverable) {
+        "! ${it.code}: ${it.message} · ${if (it.recoverable) {
           noteText(
             "可重试",
             "retryable",
@@ -731,13 +848,21 @@ private fun TransferDiagnostics(
         } else {
           noteText("不可重试", "not retryable")
         }}",
-        fontSize = 12.sp,
-        color = Color(0xFF8A1C1C),
+        style = EinkType.Caption,
+        color = EinkColors.Ink,
       )
     }
-    if (snapshot.canCancel) OutlinedButton(onClick = onCancel) { Text(noteText("取消传输", "Cancel transfer")) }
+    if (snapshot.canCancel) {
+      OutlinedButton(onClick = onCancel, shape = RectangleShape) {
+        Text(noteText("取消传输", "Cancel transfer"))
+      }
+    }
     if (showRecentEvents && events.isNotEmpty()) {
-      Text(noteText("最近传输事件", "Recent transfer events"), modifier = Modifier.padding(top = 4.dp))
+      Text(
+        noteText("最近传输事件", "Recent transfer events"),
+        style = EinkType.Label,
+        modifier = Modifier.padding(top = EinkDimens.SpaceXs),
+      )
       Column(
         Modifier.fillMaxWidth().heightIn(max = 100.dp).verticalScroll(rememberScrollState()),
       ) {
@@ -747,13 +872,17 @@ private fun TransferDiagnostics(
               "${entry.category} ${entry.detail}",
             modifier = Modifier.fillMaxWidth().height(20.dp),
             maxLines = 1,
-            fontSize = 11.sp,
-            color = if (entry.level == TransferLogLevel.ERROR) Color(0xFF8A1C1C) else Color.DarkGray,
+            style = EinkType.Caption,
+            color = if (entry.level == TransferLogLevel.ERROR) EinkColors.Ink else EinkColors.Muted,
           )
         }
       }
 
-      HorizontalDivider(Modifier.padding(top = 24.dp, bottom = 8.dp))
+      HorizontalDivider(
+        Modifier.padding(top = EinkDimens.SpaceXl, bottom = EinkDimens.SpaceSm),
+        color = EinkColors.ChromeAlt,
+        thickness = EinkDimens.Hairline,
+      )
     }
   }
 }
@@ -773,11 +902,15 @@ private fun noteFormatDuration(millis: Long): String {
 @Composable
 private fun SettingRow(label: String, onClick: () -> Unit, control: @Composable () -> Unit) {
   Row(
-    modifier = Modifier.fillMaxWidth().clickable(onClick = onClick).padding(vertical = 12.dp),
+    modifier = Modifier
+      .fillMaxWidth()
+      .heightIn(min = EinkDimens.Row)
+      .clickable(onClick = onClick)
+      .padding(vertical = EinkDimens.SpaceSm),
     verticalAlignment = Alignment.CenterVertically,
-    horizontalArrangement = Arrangement.spacedBy(12.dp),
+    horizontalArrangement = Arrangement.spacedBy(EinkDimens.SpaceMd),
   ) {
-    Text(label, modifier = Modifier.weight(1f), fontSize = 18.sp)
+    Text(label, modifier = Modifier.weight(1f), style = EinkType.Body)
     control()
   }
 }
@@ -787,13 +920,13 @@ private fun GridSettingCell(label: String, modifier: Modifier, onClick: () -> Un
   Row(
     modifier = modifier
       .heightIn(min = 64.dp)
-      .border(1.dp, Color(0xFFB0B0B0))
+      .border(EinkDimens.Hairline, EinkColors.Ink)
       .clickable(onClick = onClick)
-      .padding(horizontal = 12.dp, vertical = 8.dp),
+      .padding(horizontal = EinkDimens.SpaceMd, vertical = EinkDimens.SpaceSm),
     verticalAlignment = Alignment.CenterVertically,
-    horizontalArrangement = Arrangement.spacedBy(8.dp),
+    horizontalArrangement = Arrangement.spacedBy(EinkDimens.SpaceSm),
   ) {
-    Text(label, modifier = Modifier.weight(1f), fontSize = 17.sp)
+    Text(label, modifier = Modifier.weight(1f), style = EinkType.Body)
     control()
   }
 }
@@ -801,11 +934,11 @@ private fun GridSettingCell(label: String, modifier: Modifier, onClick: () -> Un
 @Composable
 private fun BuildInfoRow(label: String, value: String) {
   Row(
-    modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+    modifier = Modifier.fillMaxWidth().padding(vertical = EinkDimens.SpaceSm),
     verticalAlignment = Alignment.CenterVertically,
-    horizontalArrangement = Arrangement.spacedBy(12.dp),
+    horizontalArrangement = Arrangement.spacedBy(EinkDimens.SpaceMd),
   ) {
-    Text(label, modifier = Modifier.weight(1f), fontSize = 16.sp)
-    Text(value, fontSize = 14.sp, color = Color.DarkGray)
+    Text(label, modifier = Modifier.weight(1f), style = EinkType.Label)
+    Text(value, style = EinkType.Caption, color = EinkColors.Muted)
   }
 }
