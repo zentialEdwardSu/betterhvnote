@@ -12,6 +12,7 @@ import com.betterhv.note.doc.PdfPageSource
 import com.betterhv.note.doc.Transform2D
 import com.betterhv.note.ink.Bounds
 import com.betterhv.note.storage.DocumentChange
+import com.betterhv.note.storage.MigrationManager
 import com.betterhv.note.storage.PdfImportCommit
 import com.betterhv.note.storage.PdfImportedPage
 import java.security.MessageDigest
@@ -182,7 +183,7 @@ class BackupManagerInstrumentedTest {
     manager.export(Uri.fromFile(archive), ignoreProgress)
     val staging = File(root, "invalid-staging")
     val manifest = archive.inputStream().use { BackupArchive.read(it, staging) }
-    val newer = manifest.copy(schemaVersion = 9)
+    val newer = manifest.copy(schemaVersion = MigrationManager.VERSION + 1)
     archive.outputStream().use { BackupArchive.write(staging, newer, it) }
     val before = names()
     assertThrows(IllegalArgumentException::class.java) { manager.prepare(Uri.fromFile(archive), ignoreProgress) }
@@ -199,17 +200,21 @@ class BackupManagerInstrumentedTest {
     assertFalse(File(root, "backups/export-staging").exists())
   }
 
-  @Test fun v7DatabaseMigratesToV8InStaging() {
+  @Test fun v7DatabaseMigratesToCurrentVersionInStaging() {
     val archive = File(root, "v7.zip")
     val staging = File(root, "v7-staging")
     manager.export(Uri.fromFile(archive), ignoreProgress)
     val manifest = archive.inputStream().use { BackupArchive.read(it, staging) }
-    SQLiteStore(context, File(staging, "documents/default.inknote")).use { it.writableDatabase.version = 7 }
+    SQLiteStore(context, File(staging, "documents/default.inknote")).use {
+      // Simulate a v7/v8-era task table that predates render_mode.
+      it.writableDatabase.execSQL("ALTER TABLE export_tasks DROP COLUMN render_mode")
+      it.writableDatabase.version = 7
+    }
     val v7 = BackupArchive.manifest(staging, 7, manifest.notebookCount)
     archive.outputStream().use { BackupArchive.write(staging, v7, it) }
     val candidate = manager.prepare(Uri.fromFile(archive), ignoreProgress)
     SQLiteStore(context, File(candidate.directory, "documents/default.inknote")).use {
-      assertEquals(8, it.readableDatabase.version)
+      assertEquals(MigrationManager.VERSION, it.readableDatabase.version)
     }
     manager.discard(candidate)
   }

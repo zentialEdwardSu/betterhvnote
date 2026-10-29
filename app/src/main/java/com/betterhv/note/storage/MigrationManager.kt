@@ -4,7 +4,7 @@ import android.database.sqlite.SQLiteDatabase
 
 /** Explicit schema migrations; every semantic schema change increments VERSION. */
 object MigrationManager {
-  const val VERSION = 8
+  const val VERSION = 9
 
   fun create(db: SQLiteDatabase) {
     db.execSQL("CREATE TABLE metadata(key TEXT PRIMARY KEY, value TEXT NOT NULL)")
@@ -150,6 +150,11 @@ object MigrationManager {
     }
     // v8 permits anchors to any linked page in the same notebook; no table layout change.
     if (version == 7) version = 8
+    if (version == 8) {
+      // Existing tasks keep the pre-v9 editable-ink semantics.
+      db.execSQL("ALTER TABLE export_tasks ADD COLUMN render_mode TEXT NOT NULL DEFAULT 'VECTOR'")
+      version = 9
+    }
     require(version == newVersion) { "Incomplete migration $oldVersion -> $newVersion (at $version)" }
     // Future migrations are appended here, never by mutating v1 semantics.
     db.execSQL(
@@ -245,7 +250,8 @@ object MigrationManager {
                 artifact_size INTEGER,
                 artifact_sha256 BLOB,
                 artifact_created_at INTEGER,
-                last_error TEXT
+                last_error TEXT,
+                render_mode TEXT NOT NULL DEFAULT 'VECTOR'
             )
       """.trimIndent(),
     )
