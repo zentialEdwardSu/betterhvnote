@@ -45,6 +45,10 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
+import com.betterhv.note.ui.EinkColors
+import com.betterhv.note.ui.EinkDimens
+import com.betterhv.note.ui.EinkTheme
+import com.betterhv.note.ui.EinkType
 import kotlinx.coroutines.delay
 import java.util.UUID
 import kotlin.math.floor
@@ -95,6 +99,13 @@ internal fun hasLinkedPageLane(pages: List<PageUiInfo>): Boolean =
 
 @Composable
 fun PageManagerPanel(state: PageManagerPanelState, actions: PageManagerPanelActions) {
+  EinkTheme {
+    PageManagerPanelContent(state, actions)
+  }
+}
+
+@Composable
+private fun PageManagerPanelContent(state: PageManagerPanelState, actions: PageManagerPanelActions) {
   if (!hasLinkedPageLane(state.pages)) {
     SinglePageManagerPanel(state, actions)
     return
@@ -104,7 +115,7 @@ fun PageManagerPanel(state: PageManagerPanelState, actions: PageManagerPanelActi
   val lanes = listOf(filtered.filter { it.kind != com.betterhv.note.doc.PageKind.LINKED_NOTE },
     filtered.filter { it.kind == com.betterhv.note.doc.PageKind.LINKED_NOTE })
   val vertical = state.dockEdge == DockEdge.START || state.dockEdge == DockEdge.END
-  Column(state.modifier.background(Color.White)) {
+  Column(state.modifier.background(EinkColors.Paper)) {
     Row(Modifier.fillMaxWidth().height(PAGE_MANAGER_TAB_RAIL_WIDTH)) {
       PageManagerTab(!bookmarks, Icons.Filled.Layers, "全部页面", Modifier.weight(1f)) { bookmarks = false }
       PageManagerTab(bookmarks, Icons.Filled.Bookmark, "书签页面", Modifier.weight(1f)) { bookmarks = true }
@@ -443,12 +454,16 @@ private fun PageManagerTab(
   Box(
     modifier
       .fillMaxSize()
-      .background(if (selected) Color.Black else Color(0xFFE5E5E5))
-      .border(0.5.dp, Color(0xFF808080))
+      .background(if (selected) EinkColors.Ink else EinkColors.Paper)
+      .border(EinkDimens.Hairline, EinkColors.Ink)
       .clickable(onClick = onClick),
     contentAlignment = Alignment.Center,
   ) {
-    Icon(icon, contentDescription = description, tint = if (selected) Color.White else Color.Black)
+    Icon(
+      icon,
+      contentDescription = description,
+      tint = if (selected) EinkColors.Paper else EinkColors.Ink,
+    )
   }
 }
 
@@ -465,16 +480,15 @@ private fun PageThumbnailCard(state: PageThumbnailCardState, actions: PageThumbn
   val onSide2Click = actions.onSide2Click
   val onSide3Click = actions.onSide3Click
   val stylus = remember(info.id) { StylusClickResolver() }
-  val border = when {
-    pendingDelete -> Color(0xFFB00020)
-    current -> Color.Black
-    else -> Color(0xFF888888)
-  }
+  val border = if (current || pendingDelete) EinkColors.Ink else EinkColors.Muted
   @Suppress("DEPRECATION")
   Box(
     modifier = modifier
-      .background(if (dragging) Color(0xFFD0D0D0) else Color.White)
-      .border(if (current || pendingDelete) 3.dp else 1.dp, border)
+      .background(if (dragging) EinkColors.ChromeAlt else EinkColors.Paper)
+      .border(
+        if (current || pendingDelete) EinkDimens.BorderEmphasis else EinkDimens.Hairline,
+        border,
+      )
       .pointerInteropFilter { event ->
         stylus.observe(event);
         false
@@ -502,15 +516,24 @@ private fun PageThumbnailCard(state: PageThumbnailCardState, actions: PageThumbn
     }
     Text(
       text = info.label,
-      modifier = Modifier.align(Alignment.TopStart).background(Color(0xDFFFFFFF)).padding(2.dp),
-      color = Color.Black,
+      modifier = Modifier.align(Alignment.TopStart).background(EinkColors.Paper).padding(2.dp),
+      color = EinkColors.Ink,
+      style = EinkType.Caption,
     )
     if (info.bookmarked) {
       Icon(
         Icons.Filled.Bookmark,
         contentDescription = "Bookmarked",
         modifier = Modifier.align(Alignment.TopEnd).padding(2.dp).size(16.dp),
-        tint = Color.Black,
+        tint = EinkColors.Ink,
+      )
+    }
+    if (pendingDelete) {
+      Text(
+        text = noteText("再次点按删除", "Tap again to delete"),
+        modifier = Modifier.align(Alignment.BottomCenter).background(EinkColors.Paper).padding(2.dp),
+        color = EinkColors.Ink,
+        style = EinkType.Caption,
       )
     }
   }

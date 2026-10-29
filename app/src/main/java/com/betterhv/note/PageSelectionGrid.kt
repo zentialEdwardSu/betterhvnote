@@ -27,9 +27,10 @@ import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.dp
+import com.betterhv.note.ui.EinkColors
+import com.betterhv.note.ui.EinkDimens
+import com.betterhv.note.ui.EinkType
 import java.util.UUID
-
-private val NotionBorder = Color(0xFFE3E3E1)
 
 /**
  * Reusable page selection grid with thumbnail display and checkbox overlay.
@@ -69,10 +70,10 @@ private fun SelectablePageCard(page: PageUiInfo, bitmap: Bitmap?, selected: Bool
     modifier = Modifier
       .fillMaxWidth()
       .aspectRatio(0.75f)
-      .background(Color.White, RectangleShape)
+      .background(EinkColors.Paper, RectangleShape)
       .border(
-        if (selected) 2.dp else 1.dp,
-        if (selected) Color.Black else NotionBorder,
+        if (selected) EinkDimens.BorderEmphasis else EinkDimens.Hairline,
+        if (selected) EinkColors.Ink else EinkColors.Muted,
         RectangleShape,
       )
       .clickable(onClick = onToggle),
@@ -87,17 +88,23 @@ private fun SelectablePageCard(page: PageUiInfo, bitmap: Bitmap?, selected: Bool
     }
     Text(
       page.label,
-      modifier = Modifier.align(Alignment.TopStart).background(Color.White).padding(4.dp),
+      modifier = Modifier.align(Alignment.TopStart).background(EinkColors.Paper).padding(4.dp),
+      color = EinkColors.Ink,
+      style = EinkType.Caption,
     )
     if (selected) {
       Box(
         Modifier
           .align(Alignment.TopEnd)
           .size(28.dp)
-          .background(Color.Black, RectangleShape),
+          .background(EinkColors.Ink, RectangleShape),
         contentAlignment = Alignment.Center,
       ) {
-        Icon(Icons.Filled.Check, contentDescription = noteText("已选择", "Selected"), tint = Color.White)
+        Icon(
+          Icons.Filled.Check,
+          contentDescription = noteText("已选择", "Selected"),
+          tint = EinkColors.Paper,
+        )
       }
     }
   }

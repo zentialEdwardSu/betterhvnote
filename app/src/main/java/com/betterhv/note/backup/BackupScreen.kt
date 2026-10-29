@@ -13,8 +13,6 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.LinearProgressIndicator
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
@@ -24,8 +22,13 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.unit.dp
+import com.betterhv.note.ui.EinkColors
+import com.betterhv.note.ui.EinkDimens
+import com.betterhv.note.ui.EinkProgress
+import com.betterhv.note.ui.EinkTheme
+import com.betterhv.note.ui.EinkType
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
@@ -44,6 +47,11 @@ object BackupMaintenance {
 
 @Composable
 fun BackupScreen(onClose: () -> Unit, initialError: String? = null) {
+  EinkTheme { BackupScreenContent(onClose, initialError) }
+}
+
+@Composable
+private fun BackupScreenContent(onClose: () -> Unit, initialError: String?) {
   val context = LocalContext.current
   val manager = remember { BackupManager(context.applicationContext) }
   val scope = rememberCoroutineScope()
@@ -110,46 +118,87 @@ fun BackupScreen(onClose: () -> Unit, initialError: String? = null) {
     }
   }
   DisposableEffect(Unit) { onDispose { if (!busy) manager.discard(prepared) } }
-  Surface(Modifier.fillMaxSize()) {
-    Column(Modifier.fillMaxSize().padding(24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-      Text("备份与恢复", style = MaterialTheme.typography.headlineMedium)
-      Text(message)
-      Text("导入将整体替换笔记与设置。NoteLink 配对保留在本机；恢复前会保存一份回滚副本。")
+  Surface(Modifier.fillMaxSize(), color = EinkColors.Paper, shape = RectangleShape) {
+    Column(
+      Modifier.fillMaxSize().padding(EinkDimens.SpaceXl),
+      verticalArrangement = Arrangement.spacedBy(EinkDimens.SpaceMd),
+    ) {
+      Text("备份与恢复", style = EinkType.ScreenTitle)
+      Text(message, style = EinkType.Body)
+      Text(
+        "导入将整体替换笔记与设置。NoteLink 配对保留在本机；恢复前会保存一份回滚副本。",
+        style = EinkType.Caption,
+        color = EinkColors.Muted,
+      )
       if (busy) {
-        LinearProgressIndicator(progress = { progress }, modifier = Modifier.fillMaxWidth())
-        Text(if (committing) "正在恢复，请等待完成" else "正在处理文件…")
+        EinkProgress(progress = progress, modifier = Modifier.fillMaxWidth())
+        Text(
+          if (committing) "正在恢复，请等待完成" else "正在处理文件…",
+          style = EinkType.Caption,
+          color = EinkColors.Muted,
+        )
         if (!committing) TextButton(onClick = { job?.cancel() }) { Text("取消") }
       }
       if (prepared == null) {
-        Button(onClick = { exportPicker.launch("BetterHvNote-${System.currentTimeMillis()}.zip") },
-          enabled = !busy && !recoveryRequired) { Text("导出完整备份") }
-        Button(onClick = { importPicker.launch(arrayOf("application/zip", "application/octet-stream")) },
-          enabled = !busy && !recoveryRequired) { Text("导入备份") }
-        OutlinedButton(onClick = {
-          runOperation { prepared = manager.prepareRollback(); message = "恢复前副本已就绪" }
-        }, enabled = !busy && hasRollback && !recoveryRequired) { Text("回滚到恢复前副本") }
-        if (recoveryRequired) Button(onClick = {
-          runOperation(commit = true) {
-            manager.recoverInterruptedRestore(); recoveryRequired = false; message = "回滚完成，可以返回笔记"
-          }
-        }, enabled = !busy) { Text("重试恢复中断回滚") }
+        Button(
+          onClick = { exportPicker.launch("BetterHvNote-${System.currentTimeMillis()}.zip") },
+          enabled = !busy && !recoveryRequired,
+          shape = RectangleShape,
+        ) { Text("导出完整备份") }
+        Button(
+          onClick = { importPicker.launch(arrayOf("application/zip", "application/octet-stream")) },
+          enabled = !busy && !recoveryRequired,
+          shape = RectangleShape,
+        ) { Text("导入备份") }
+        OutlinedButton(
+          onClick = {
+            runOperation { prepared = manager.prepareRollback(); message = "恢复前副本已就绪" }
+          },
+          enabled = !busy && hasRollback && !recoveryRequired,
+          shape = RectangleShape,
+        ) { Text("回滚到恢复前副本") }
+        if (recoveryRequired) Button(
+          onClick = {
+            runOperation(commit = true) {
+              manager.recoverInterruptedRestore()
+              recoveryRequired = false
+              message = "回滚完成，可以返回笔记"
+            }
+          },
+          enabled = !busy,
+          shape = RectangleShape,
+        ) { Text("重试恢复中断回滚") }
         TextButton(onClick = onClose, enabled = !busy && !recoveryRequired) { Text("返回笔记") }
       } else {
         val candidate = requireNotNull(prepared)
-        Text("备份时间：${DateFormat.getDateTimeInstance().format(Date(candidate.manifest.createdAt))}")
-        Text("笔记本数量：${candidate.manifest.notebookCount}")
-        Text("确认后，当前笔记与设置将被此备份整体替换。")
-        Button(onClick = {
-          runOperation(commit = true) {
-            prepared = null
-            try { manager.restore(candidate, it) } catch (error: Exception) {
-              recoveryRequired = manager.needsRecovery()
-              throw error
-            } finally { manager.discard(candidate) }
-            message = "恢复完成，返回后将重新加载笔记"
-          }
-        }, enabled = !busy) { Text("确认整体恢复") }
-        TextButton(onClick = { manager.discard(candidate); prepared = null }, enabled = !busy) { Text("取消") }
+        Text(
+          "备份时间：${DateFormat.getDateTimeInstance().format(Date(candidate.manifest.createdAt))}",
+          style = EinkType.Body,
+        )
+        Text("笔记本数量：${candidate.manifest.notebookCount}", style = EinkType.Body)
+        Text("确认后，当前笔记与设置将被此备份整体替换。", style = EinkType.Body)
+        Button(
+          onClick = {
+            runOperation(commit = true) {
+              prepared = null
+              try {
+                manager.restore(candidate, it)
+              } catch (error: Exception) {
+                recoveryRequired = manager.needsRecovery()
+                throw error
+              } finally {
+                manager.discard(candidate)
+              }
+              message = "恢复完成，返回后将重新加载笔记"
+            }
+          },
+          enabled = !busy,
+          shape = RectangleShape,
+        ) { Text("确认整体恢复") }
+        TextButton(
+          onClick = { manager.discard(candidate); prepared = null },
+          enabled = !busy,
+        ) { Text("取消") }
       }
     }
   }

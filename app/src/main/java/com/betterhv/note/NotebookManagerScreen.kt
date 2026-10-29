@@ -57,13 +57,14 @@ import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.betterhv.note.storage.NotebookSummary
+import com.betterhv.note.ui.EinkColors
+import com.betterhv.note.ui.EinkDimens
+import com.betterhv.note.ui.EinkTheme
+import com.betterhv.note.ui.EinkType
 import kotlinx.coroutines.delay
 import java.util.UUID
 
 private const val NOTEBOOK_DELETE_CONFIRM_MS = 3_000L
-private val NotionBorder = Color(0xFFE3E3E1)
-private val NotionMuted = Color(0xFF787774)
-private val NotionHover = Color(0xFFF7F7F5)
 
 private enum class NotebookCreateAction { CURRENT_TO_END, SELECTION, BLANK }
 
@@ -150,6 +151,13 @@ private data class NotionIconButtonState(
 
 @Composable
 fun NotebookManagerScreen(state: NotebookManagerState, actions: NotebookManagerActions) {
+  EinkTheme {
+    NotebookManagerScreenContent(state, actions)
+  }
+}
+
+@Composable
+private fun NotebookManagerScreenContent(state: NotebookManagerState, actions: NotebookManagerActions) {
   var selecting by remember { mutableStateOf(false) }
   var selectedIds by remember { mutableStateOf(emptySet<UUID>()) }
   var pendingDeleteId by remember { mutableStateOf<UUID?>(null) }
@@ -177,7 +185,7 @@ fun NotebookManagerScreen(state: NotebookManagerState, actions: NotebookManagerA
     }
   }
 
-  Surface(Modifier.fillMaxSize(), color = Color.White, shape = RectangleShape) {
+  Surface(Modifier.fillMaxSize(), color = EinkColors.Paper, shape = RectangleShape) {
     Column(Modifier.fillMaxSize()) {
       NotebookTopBar(
         state = NotebookTopBarState(
@@ -264,16 +272,22 @@ fun NotebookManagerScreen(state: NotebookManagerState, actions: NotebookManagerA
     }
     if (state.busy) {
       Box(
-        Modifier.fillMaxSize().background(Color(0x66FFFFFF)),
+        Modifier.fillMaxSize().background(EinkColors.Paper.copy(alpha = 0.66f)),
         contentAlignment = Alignment.Center,
       ) {
         Surface(
           shape = RectangleShape,
-          color = Color.White,
-          border = androidx.compose.foundation.BorderStroke(1.dp, Color.Black),
+          color = EinkColors.Paper,
+          border = androidx.compose.foundation.BorderStroke(EinkDimens.Hairline, EinkColors.Ink),
           tonalElevation = 0.dp,
           shadowElevation = 0.dp,
-        ) { Text(noteText("处理中…", "Working..."), Modifier.padding(horizontal = 24.dp, vertical = 14.dp)) }
+        ) {
+          Text(
+            noteText("处理中…", "Working..."),
+            Modifier.padding(horizontal = EinkDimens.SpaceXl, vertical = EinkDimens.SpaceMd),
+            style = EinkType.Body,
+          )
+        }
       }
     }
     if (pdfSourceChooserOpen && !state.busy) {
@@ -302,7 +316,10 @@ fun NotebookManagerScreen(state: NotebookManagerState, actions: NotebookManagerA
 @Composable
 private fun NotebookTopBar(state: NotebookTopBarState, actions: NotebookTopBarActions) {
   Row(
-    modifier = Modifier.fillMaxWidth().height(64.dp).padding(horizontal = 18.dp),
+    modifier = Modifier
+      .fillMaxWidth()
+      .height(EinkDimens.ScreenHeader)
+      .padding(horizontal = EinkDimens.SpaceLg),
     verticalAlignment = Alignment.CenterVertically,
   ) {
     NotionIconButton(
@@ -315,9 +332,8 @@ private fun NotebookTopBar(state: NotebookTopBarState, actions: NotebookTopBarAc
     )
     Text(
       if (state.selecting) noteText("选择页面", "Select pages") else noteText("笔记本", "Notebooks"),
-      fontSize = 18.sp,
-      fontWeight = FontWeight.Medium,
-      modifier = Modifier.padding(start = 8.dp),
+      style = EinkType.SectionTitle,
+      modifier = Modifier.padding(start = EinkDimens.SpaceSm),
     )
     Text(
       if (state.selecting) {
@@ -328,14 +344,14 @@ private fun NotebookTopBar(state: NotebookTopBarState, actions: NotebookTopBarAc
       } else {
         noteText("${state.notebookCount} 本", "${state.notebookCount} notebooks")
       },
-      color = NotionMuted,
-      fontSize = 13.sp,
-      modifier = Modifier.padding(start = 10.dp),
+      color = EinkColors.Muted,
+      style = EinkType.Caption,
+      modifier = Modifier.padding(start = EinkDimens.SpaceSm),
     )
     Spacer(Modifier.weight(1f))
     NotebookTopBarActions(state, actions)
   }
-  HorizontalDivider(color = NotionBorder, thickness = 1.dp)
+  HorizontalDivider(color = EinkColors.Ink, thickness = EinkDimens.Hairline)
 }
 
 @Composable
@@ -398,12 +414,12 @@ private fun CreateNotebookIconButton(
     NotebookCreateAction.SELECTION -> Icons.Filled.Workspaces
     NotebookCreateAction.BLANK -> NotebookBookIcon
   }
-  val foreground = if (enabled) Color.Black else Color(0xFFB3B3B1)
+  val foreground = if (enabled) EinkColors.Ink else EinkColors.Disabled
   Box(
     modifier = Modifier
-      .size(width = 48.dp, height = 40.dp)
-      .background(if (enabled) Color.White else NotionHover, RectangleShape)
-      .border(1.dp, NotionBorder, RectangleShape)
+      .size(width = 48.dp, height = EinkDimens.Touch)
+      .background(if (enabled) EinkColors.Paper else EinkColors.ChromeAlt, RectangleShape)
+      .border(EinkDimens.Hairline, EinkColors.Ink, RectangleShape)
       .clickable(enabled = enabled, onClick = onClick),
     contentAlignment = Alignment.Center,
   ) {
@@ -418,7 +434,7 @@ private fun CreateNotebookIconButton(
         modifier = Modifier
           .align(Alignment.BottomEnd)
           .size(15.dp)
-          .background(Color.White, RectangleShape),
+          .background(EinkColors.Paper, RectangleShape),
         contentAlignment = Alignment.Center,
       ) {
         Icon(
@@ -467,7 +483,7 @@ private fun NotebookSummaryCard(state: NotebookSummaryCardState, actions: Notebo
   Column(
     modifier = Modifier
       .width(state.thumbnailSize.width + 16.dp)
-      .background(if (summary.isCurrent) NotionHover else Color.White, RectangleShape)
+      .background(if (summary.isCurrent) EinkColors.Chrome else EinkColors.Paper, RectangleShape)
       .clickable(enabled = state.enabled, onClick = actions.onClick)
       .padding(8.dp),
     horizontalAlignment = Alignment.CenterHorizontally,
@@ -483,14 +499,11 @@ private fun NotebookCover(state: NotebookSummaryCardState) {
   Box(
     Modifier
       .size(state.thumbnailSize)
-      .background(Color.White, RectangleShape)
+      .background(EinkColors.Paper, RectangleShape)
       .border(
-        if (summary.isCurrent) 2.dp else 1.dp,
-        if (state.pendingDelete) Color(0xFFB00020) else if (summary.isCurrent) {
-          Color.Black
-        } else {
-          NotionBorder
-        },
+        if (summary.isCurrent || state.pendingDelete) EinkDimens.BorderEmphasis
+        else EinkDimens.Hairline,
+        if (summary.isCurrent || state.pendingDelete) EinkColors.Ink else EinkColors.Muted,
         RectangleShape,
       ),
   ) {
@@ -508,8 +521,8 @@ private fun NotebookCover(state: NotebookSummaryCardState) {
           .align(Alignment.TopEnd)
           .padding(7.dp)
           .size(30.dp)
-          .background(Color.White, RectangleShape)
-          .border(1.dp, NotionBorder, RectangleShape),
+          .background(EinkColors.Paper, RectangleShape)
+          .border(EinkDimens.Hairline, EinkColors.Ink, RectangleShape),
         contentAlignment = Alignment.Center,
       ) {
         Icon(
@@ -532,8 +545,7 @@ private fun NotebookSummaryFooter(state: NotebookSummaryCardState, actions: Note
     Column(Modifier.weight(1f)) {
       Text(
         summary.title,
-        fontSize = 16.sp,
-        fontWeight = FontWeight.Medium,
+        style = EinkType.Body,
         maxLines = 1,
         overflow = TextOverflow.Ellipsis,
       )
@@ -543,9 +555,10 @@ private fun NotebookSummaryFooter(state: NotebookSummaryCardState, actions: Note
           append(noteText(" 页", " pages"))
           if (summary.isCurrent) append(noteText("  ·  当前", "  ·  Current"))
           if (summary.isWorkingCopy) append("  ·  Working Copy")
+          if (state.pendingDelete) append(noteText("  ·  再次点按删除", "  ·  Tap again to delete"))
         },
-        color = if (state.pendingDelete) Color(0xFFB00020) else NotionMuted,
-        fontSize = 13.sp,
+        color = if (state.pendingDelete) EinkColors.Ink else EinkColors.Muted,
+        style = EinkType.Caption,
         maxLines = 1,
         overflow = TextOverflow.Ellipsis,
         modifier = Modifier.padding(top = 2.dp),
@@ -582,19 +595,22 @@ private fun NotebookSummaryFooter(state: NotebookSummaryCardState, actions: Note
 @Composable
 private fun NotionIconButton(state: NotionIconButtonState, onClick: () -> Unit) {
   val foreground = when {
-    !state.enabled -> Color(0xFFB3B3B1)
-    state.active -> Color.White
-    else -> Color.Black
+    !state.enabled -> EinkColors.Disabled
+    state.active -> EinkColors.Paper
+    else -> EinkColors.Ink
   }
   val background = when {
-    state.active -> Color(0xFFB00020)
+    state.active -> EinkColors.Ink
     else -> Color.Transparent
   }
   Box(
     modifier = state.modifier
       .size(state.size)
       .background(background, RectangleShape)
-      .then(if (state.outlined) Modifier.border(1.dp, NotionBorder, RectangleShape) else Modifier)
+      .then(
+        if (state.outlined) Modifier.border(EinkDimens.Hairline, EinkColors.Ink, RectangleShape)
+        else Modifier,
+      )
       .clickable(enabled = state.enabled, onClick = onClick),
     contentAlignment = Alignment.Center,
   ) {

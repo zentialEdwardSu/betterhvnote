@@ -24,6 +24,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.betterhv.note.doc.DEFAULT_TEMPLATE_ID
 import com.betterhv.note.template.TemplateCatalogSnapshot
+import com.betterhv.note.ui.EinkDimens
+import com.betterhv.note.ui.EinkTheme
+import com.betterhv.note.ui.EinkType
 
 data class NotebookNameDialogState(
   val catalog: TemplateCatalogSnapshot,
@@ -42,6 +45,14 @@ data class NotebookNameDialogActions(
 
 @Composable
 fun NotebookNameDialog(state: NotebookNameDialogState, actions: NotebookNameDialogActions) {
+  EinkTheme { NotebookNameDialogContent(state, actions) }
+}
+
+@Composable
+private fun NotebookNameDialogContent(
+  state: NotebookNameDialogState,
+  actions: NotebookNameDialogActions,
+) {
   var title by remember { mutableStateOf("") }
   var selectedTemplateId by remember { mutableStateOf(DEFAULT_TEMPLATE_ID) }
   var chooserOpen by remember { mutableStateOf(false) }
@@ -57,9 +68,13 @@ fun NotebookNameDialog(state: NotebookNameDialogState, actions: NotebookNameDial
     focusRequester.requestFocus()
     keyboard?.show()
   }
-  EinkModalOverlay(onDismissRequest = actions.onDismiss, position = EinkModalPosition.TOP) {
+  EinkModalOverlay(
+    onDismissRequest = actions.onDismiss,
+    position = EinkModalPosition.TOP,
+    borderWidth = EinkDimens.Hairline,
+  ) {
     Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-      Text(noteText("命名笔记本", "Name notebook"), fontSize = 22.sp)
+      Text(noteText("命名笔记本", "Name notebook"), style = EinkType.SectionTitle)
       OutlinedTextField(
         value = title,
         onValueChange = { title = it },
