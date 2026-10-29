@@ -12,41 +12,66 @@ import com.artifex.mupdf.fitz.Rect
 import com.betterhv.note.doc.StrokeObject
 import com.betterhv.note.storage.PageSnapshot
 import java.io.File
+import java.text.DecimalFormat
 import java.util.Date
 import kotlin.math.max
 
+/** Save profiles: only the final artifact pays for the expensive deep dedupe. */
+object PdfSaveOptions {
+  const val PAGE = "garbage=2,compress"
+  const val FINAL = "garbage=3,compress"
+}
+
+data class PdfMergeTiming(val graftMs: Long, val saveMs: Long)
+
 /** Writes editable PDF Ink annotations and joins annotated pages without rasterizing ink. */
 class PdfInkAnnotationWriter {
-  fun copySourcePage(sourcePdf: File, sourcePageIndex: Int, outputPdf: File) {
+  /**
+   * Composes one PDF source page and its ink annotations in a single document,
+   * then saves once. The previous extract-then-annotate pipeline parsed,
+   * compressed and wrote the same page twice.
+   */
+  fun writeAnnotatedSourcePage(
+    sourcePdf: File,
+    sourcePageIndex: Int,
+    snapshot: PageSnapshot,
+    outputPdf: File,
+    checkActive: () -> Unit = {},
+  ) {
     outputPdf.parentFile?.mkdirs()
     val source = openPdf(sourcePdf)
     val destination = PDFDocument()
+    var page: PDFPage? = null
     try {
       require(sourcePageIndex in 0 until source.countPages()) { "PDF source page is out of range" }
       destination.graftPage(0, source, sourcePageIndex)
       graftAnnotations(destination, 0, source, sourcePageIndex)
-      destination.save(outputPdf.absolutePath, "garbage=4,compress")
+      page = destination.loadPage(0) as? PDFPage ?: error("Grafted page is not a PDF page")
+      writeInkAnnotations(destination, page, snapshot, checkActive)
+      destination.save(outputPdf.absolutePath, PdfSaveOptions.PAGE)
     } catch (error: Throwable) {
       outputPdf.delete()
       throw error
     } finally {
+      page?.destroy()
       destination.destroy()
       source.destroy()
     }
   }
 
-  fun addInkAnnotations(basePdf: File, snapshot: PageSnapshot, outputPdf: File) {
+  fun addInkAnnotations(
+    basePdf: File,
+    snapshot: PageSnapshot,
+    outputPdf: File,
+    checkActive: () -> Unit = {},
+  ) {
     outputPdf.parentFile?.mkdirs()
     val document = openPdf(basePdf)
     var page: PDFPage? = null
     try {
       page = document.loadPage(0) as PDFPage
-      snapshot.objects
-        .asSequence()
-        .filterIsInstance<StrokeObject>()
-        .sortedBy { it.zIndex }
-        .forEach { stroke -> addAnnotation(document, page, stroke) }
-      document.save(outputPdf.absolutePath, "garbage=4,compress")
+      writeInkAnnotations(document, page, snapshot, checkActive)
+      document.save(outputPdf.absolutePath, PdfSaveOptions.PAGE)
     } catch (error: Throwable) {
       outputPdf.delete()
       throw error
@@ -56,15 +81,30 @@ class PdfInkAnnotationWriter {
     }
   }
 
-  fun mergePages(pageFiles: List<File>, outputPdf: File) {
+  /**
+   * Grafts all page files into one document. [onPage] receives the number of
+   * processed *files* (page caches are single-page files), and [onSaveStart]
+   * lets the caller switch to the indeterminate writing stage before the
+   * uninterruptible native save begins.
+   */
+  fun mergePages(
+    pageFiles: List<File>,
+    outputPdf: File,
+    onPage: (processed: Int, total: Int) -> Unit = { _, _ -> },
+    onSaveStart: () -> Unit = {},
+    checkActive: () -> Unit = {},
+  ): PdfMergeTiming {
     require(pageFiles.isNotEmpty()) { "At least one PDF page is required" }
     outputPdf.parentFile?.mkdirs()
     val destination = PDFDocument()
+    val graftStart = System.nanoTime()
     try {
-      pageFiles.forEach { pageFile ->
+      pageFiles.forEachIndexed { index, pageFile ->
+        checkActive()
         val source = openPdf(pageFile)
         try {
           repeat(source.countPages()) { pageNumber ->
+            checkActive()
             val destinationPageNumber = destination.countPages()
             destination.graftPage(destinationPageNumber, source, pageNumber)
             graftAnnotations(
@@ -77,14 +117,37 @@ class PdfInkAnnotationWriter {
         } finally {
           source.destroy()
         }
+        onPage(index + 1, pageFiles.size)
       }
-      destination.save(outputPdf.absolutePath, "garbage=4,compress")
+      val graftMs = (System.nanoTime() - graftStart) / 1_000_000
+      onSaveStart()
+      val saveStart = System.nanoTime()
+      destination.save(outputPdf.absolutePath, PdfSaveOptions.FINAL)
+      val saveMs = (System.nanoTime() - saveStart) / 1_000_000
+      return PdfMergeTiming(graftMs, saveMs)
     } catch (error: Throwable) {
       outputPdf.delete()
       throw error
     } finally {
       destination.destroy()
     }
+  }
+
+  private fun writeInkAnnotations(
+    document: PDFDocument,
+    page: PDFPage,
+    snapshot: PageSnapshot,
+    checkActive: () -> Unit,
+  ) {
+    val formatter = PdfInkAppearance.newFormatter()
+    snapshot.objects
+      .asSequence()
+      .filterIsInstance<StrokeObject>()
+      .sortedBy { it.zIndex }
+      .forEach { stroke ->
+        checkActive()
+        addAnnotation(document, page, stroke, formatter)
+      }
   }
 
   /** MuPDF's page graft intentionally omits annotations, so graft that object tree explicitly. */
@@ -113,7 +176,12 @@ class PdfInkAnnotationWriter {
     }
   }
 
-  private fun addAnnotation(document: PDFDocument, page: PDFPage, stroke: StrokeObject) {
+  private fun addAnnotation(
+    document: PDFDocument,
+    page: PDFPage,
+    stroke: StrokeObject,
+    formatter: DecimalFormat,
+  ) {
     val ink = PdfInkAppearance.from(stroke) ?: return
     val annotation = page.createAnnotation(PDFAnnotation.TYPE_INK)
     try {
@@ -144,7 +212,7 @@ class PdfInkAnnotationWriter {
         bottom = max(rect.y1, rect.y0 + MIN_APPEARANCE_SIZE),
       )
       annotation.setBorderWidth(ink.borderWidth)
-      val appearance = ink.buildAppearance(bounds)
+      val appearance = ink.buildAppearance(bounds, formatter)
       replaceNormalAppearance(document, annotation, bounds, appearance)
     } finally {
       annotation.destroy()

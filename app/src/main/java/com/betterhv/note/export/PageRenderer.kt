@@ -30,30 +30,53 @@ class PageRenderer(private val documentsDir: File, private val templates: Templa
   private val inkRenderer = InkRenderer()
   private val imageRoot = File(documentsDir, "assets").canonicalFile.toPath()
 
-  fun renderToBitmap(snapshot: PageSnapshot, widthPx: Int, heightPx: Int, backgroundColor: Int = Color.WHITE): Bitmap {
+  fun renderToBitmap(
+    snapshot: PageSnapshot,
+    widthPx: Int,
+    heightPx: Int,
+    backgroundColor: Int = Color.WHITE,
+    checkActive: () -> Unit = {},
+  ): Bitmap {
     require(widthPx > 0 && heightPx > 0) { "Invalid export dimensions" }
+    checkActive()
     val bitmap = createBitmap(widthPx, heightPx)
     Canvas(bitmap).apply {
       drawColor(backgroundColor)
       renderTemplate(this, snapshot, RectF(0f, 0f, widthPx.toFloat(), heightPx.toFloat()))
       withSave {
         scale(widthPx / snapshot.metadata.width, heightPx / snapshot.metadata.height)
-        renderSnapshot(this, snapshot)
+        renderSnapshot(this, snapshot, checkActive = checkActive)
       }
     }
     return bitmap
   }
 
   /**
+   * Draws the page's objects (text, images, strokes) over an existing bitmap.
+   * Fast PDF export uses this to overlay ink on a rasterized PDF source page
+   * without re-rendering the background.
+   */
+  fun renderObjectsOnto(bitmap: Bitmap, snapshot: PageSnapshot, checkActive: () -> Unit = {}) {
+    require(!bitmap.isRecycled) { "Cannot render onto a recycled bitmap" }
+    require(bitmap.isMutable) { "renderObjectsOnto requires a mutable bitmap" }
+    require(snapshot.metadata.width > 0f && snapshot.metadata.height > 0f) { "Invalid page dimensions" }
+    Canvas(bitmap).withSave {
+      scale(bitmap.width / snapshot.metadata.width, bitmap.height / snapshot.metadata.height)
+      renderSnapshot(this, snapshot, checkActive = checkActive)
+    }
+  }
+
+  /**
    * Render the non-ink PDF page contents. Strokes are added afterwards as
    * editable PDF Ink annotations by [PdfInkAnnotationWriter].
    */
-  fun renderSinglePagePdfBase(snapshot: PageSnapshot, output: File) {
+  fun renderSinglePagePdfBase(snapshot: PageSnapshot, output: File, checkActive: () -> Unit = {}) {
     output.parentFile?.mkdirs()
     val widthPoints = (snapshot.metadata.width * PDF_POINTS_PER_LOGICAL_PIXEL).roundToInt().coerceAtLeast(1)
     val heightPoints = (snapshot.metadata.height * PDF_POINTS_PER_LOGICAL_PIXEL).roundToInt().coerceAtLeast(1)
     val document = PdfDocument()
     try {
+      checkActive()
       val page = document.startPage(PdfDocument.PageInfo.Builder(widthPoints, heightPoints, 1).create())
       page.canvas.drawColor(Color.WHITE)
       renderTemplate(
@@ -66,7 +89,7 @@ class PageRenderer(private val documentsDir: File, private val templates: Templa
         widthPoints / snapshot.metadata.width,
         heightPoints / snapshot.metadata.height,
       )
-      renderSnapshot(page.canvas, snapshot, includeStrokes = false)
+      renderSnapshot(page.canvas, snapshot, includeStrokes = false, checkActive = checkActive)
       page.canvas.restore()
       document.finishPage(page)
       FileOutputStream(output).use(document::writeTo)
@@ -75,8 +98,14 @@ class PageRenderer(private val documentsDir: File, private val templates: Templa
     }
   }
 
-  private fun renderSnapshot(canvas: Canvas, snapshot: PageSnapshot, includeStrokes: Boolean = true) {
+  private fun renderSnapshot(
+    canvas: Canvas,
+    snapshot: PageSnapshot,
+    includeStrokes: Boolean = true,
+    checkActive: () -> Unit = {},
+  ) {
     snapshot.objects.sortedBy(PageObject::zIndex).forEach { obj ->
+      checkActive()
       if (!includeStrokes && obj is StrokeObject) return@forEach
       canvas.withMatrix(obj.transform.toMatrix()) {
         when (obj) {

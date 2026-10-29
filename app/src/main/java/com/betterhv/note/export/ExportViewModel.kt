@@ -28,6 +28,7 @@ data class ExportManagerState(
   val notebooks: List<ExportNotebookOption> = emptyList(),
   val activeTaskId: UUID? = null,
   val queuedTaskIds: Set<UUID> = emptySet(),
+  val cancellingTaskIds: Set<UUID> = emptySet(),
   val progress: ExportProgress? = null,
   val message: String? = null,
   val outcomes: Map<UUID, String> = emptyMap(),
@@ -78,11 +79,14 @@ class ExportViewModel(application: Application) : AndroidViewModel(application) 
 
   fun createTask(
     notebookId: UUID, scope: ExportScope, format: ExportFormat, pageIds: List<UUID>,
+    renderMode: ExportRenderMode = ExportRenderMode.VECTOR,
     beforeExport: suspend (UUID) -> Boolean,
   ) {
     viewModelScope.launch {
       try {
-        val task = withContext(Dispatchers.IO) { taskRepository.createTask(notebookId, scope, format, pageIds) }
+        val task = withContext(Dispatchers.IO) {
+          taskRepository.createTask(notebookId, scope, format, pageIds, renderMode)
+        }
         reload()
         generate(task.id, beforeExport)
       } catch (cancelled: CancellationException) {
@@ -111,7 +115,7 @@ class ExportViewModel(application: Application) : AndroidViewModel(application) 
   fun saveToDownloads(taskId: UUID, beforeExport: suspend (UUID) -> Boolean) {
     enqueue(taskId) {
       val artifact = generateArtifact(taskId, beforeExport)
-      setStage(ExportProgress.Stage.SAVING)
+      setStage(ExportProgress.Stage.PUBLISHING)
       withContext(Dispatchers.IO) { downloads.save(artifact) }
       noteText("已保存到 Downloads/BetterHvNote", "Saved to Downloads/BetterHvNote")
     }
@@ -153,7 +157,25 @@ class ExportViewModel(application: Application) : AndroidViewModel(application) 
   }
 
   fun chooseClient(client: PairedDevice) { clientChoice?.complete(client) }
-  fun cancel(taskId: UUID? = mutableState.value.activeTaskId) { jobs[taskId]?.cancel() }
+
+  fun cancel(taskId: UUID? = mutableState.value.activeTaskId) {
+    val id = taskId ?: return
+    val job = jobs[id] ?: return
+    val active = mutableState.value.activeTaskId == id
+    mutableState.update { state ->
+      state.copy(
+        cancellingTaskIds = state.cancellingTaskIds + id,
+        progress = if (active) {
+          (state.progress ?: ExportProgress(0, 0, null, ExportProgress.Stage.PREPARING))
+            .copy(stage = ExportProgress.Stage.CANCELLING)
+        } else {
+          state.progress
+        },
+      )
+    }
+    job.cancel()
+  }
+
   fun consumeMessage() { mutableState.update { it.copy(message = null) } }
 
   private fun setStage(stage: ExportProgress.Stage) {
@@ -164,7 +186,17 @@ class ExportViewModel(application: Application) : AndroidViewModel(application) 
     setStage(ExportProgress.Stage.PREPARING)
     val task = withContext(Dispatchers.IO) { taskRepository.loadTask(taskId) } ?: error("Export task does not exist")
     check(beforeExport(task.notebookId)) { "Could not save the current notebook" }
-    val result = engine.generate(taskId) { progress -> mutableState.update { it.copy(progress = progress) } }
+    val result = engine.generate(taskId) { progress ->
+      mutableState.update { state ->
+        // Once cancel was requested the job may still be blocked in a native
+        // save; do not let a late stage callback overwrite "cancelling".
+        if (state.cancellingTaskIds.contains(taskId)) {
+          state.copy(progress = progress.copy(stage = ExportProgress.Stage.CANCELLING))
+        } else {
+          state.copy(progress = progress)
+        }
+      }
+    }
     return when (result) {
       is ExportResult.Success -> result.artifact
       is ExportResult.Failure -> throw GenerationFailure(result)
@@ -204,7 +236,12 @@ class ExportViewModel(application: Application) : AndroidViewModel(application) 
         mutableState.update { it.copy(outcomes = it.outcomes + (taskId to noteText("已取消", "Cancelled"))) }
       } finally {
         jobs.remove(taskId)
-        mutableState.update { it.copy(queuedTaskIds = it.queuedTaskIds - taskId) }
+        mutableState.update {
+          it.copy(
+            queuedTaskIds = it.queuedTaskIds - taskId,
+            cancellingTaskIds = it.cancellingTaskIds - taskId,
+          )
+        }
         withContext(NonCancellable) { runCatching { reload() } }
       }
     }

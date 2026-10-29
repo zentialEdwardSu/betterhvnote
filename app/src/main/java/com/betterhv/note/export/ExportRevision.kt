@@ -4,9 +4,14 @@ import java.security.MessageDigest
 import java.util.UUID
 
 object ExportRevision {
-  fun fingerprint(format: ExportFormat, sources: List<ExportPageSource>, rendererVersion: Int): String {
+  fun fingerprint(
+    format: ExportFormat,
+    sources: List<ExportPageSource>,
+    rendererVersion: Int,
+    mode: ExportRenderMode = ExportRenderMode.VECTOR,
+  ): String {
     val value = buildString {
-      append(rendererVersion).append('|').append(format.name).append('|')
+      append(rendererVersion).append('|').append(format.name).append('|').append(mode.name).append('|')
       sources.forEach {
         append(it.id).append(':').append(it.contentRevision).append(':')
           .append(it.backgroundRevision).append(';')

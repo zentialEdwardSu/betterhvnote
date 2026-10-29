@@ -8,16 +8,30 @@ import com.betterhv.note.doc.PageKind
 import com.betterhv.note.storage.SQLiteStore
 import com.betterhv.note.template.TemplateStore
 import java.io.File
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption
 import java.util.UUID
 
-class ExportTaskRepository(context: Context) : AutoCloseable {
+class ExportTaskRepository(
+  context: Context,
+  private val reportsDir: File = File(context.filesDir, "exports/reports"),
+) : AutoCloseable {
   private val documentsDir = File(context.filesDir, "documents").also(File::mkdirs)
   private val store = SQLiteStore(context.applicationContext, File(documentsDir, "default.inknote"))
   private val templates = TemplateStore.get(context.applicationContext)
 
   @Synchronized
-  fun createTask(notebookId: UUID, scope: ExportScope, format: ExportFormat, pageIds: List<UUID>): ExportTask {
+  fun createTask(
+    notebookId: UUID,
+    scope: ExportScope,
+    format: ExportFormat,
+    pageIds: List<UUID>,
+    renderMode: ExportRenderMode = ExportRenderMode.VECTOR,
+  ): ExportTask {
     validate(scope, format, pageIds)
+    require(format == ExportFormat.PDF || renderMode == ExportRenderMode.VECTOR) {
+      "PNG export always uses the vector render mode"
+    }
     require(notebookExists(notebookId)) { "Notebook does not exist" }
     val normalizedPages = when (scope) {
       ExportScope.ALL_PAGES -> emptyList()
@@ -28,14 +42,14 @@ class ExportTaskRepository(context: Context) : AutoCloseable {
     }
     listTasksRaw().firstOrNull {
       it.notebookId == notebookId && it.scope == scope && it.format == format &&
-        it.pageIds == normalizedPages
+        it.renderMode == renderMode && it.pageIds == normalizedPages
     }?.let {
       touch(it.id)
       return loadTask(it.id)!!
     }
 
     val now = System.currentTimeMillis()
-    val task = ExportTask(UUID.randomUUID(), notebookId, scope, format, normalizedPages, now, now)
+    val task = ExportTask(UUID.randomUUID(), notebookId, scope, format, normalizedPages, now, now, renderMode)
     val db = store.writableDatabase
     db.transaction {
       try {
@@ -44,6 +58,7 @@ class ExportTaskRepository(context: Context) : AutoCloseable {
           put("notebook_id", notebookId.toString())
           put("scope", scope.name)
           put("format", format.name)
+          put("render_mode", renderMode.name)
           put("created_at", now)
           put("last_used_at", now)
         }.also { insertOrThrow("export_tasks", null, it) }
@@ -76,7 +91,16 @@ class ExportTaskRepository(context: Context) : AutoCloseable {
       currentFingerprint,
       record?.lastError != null,
     )
-    ExportTaskSummary(task, title, sources.size, stale, state, record?.createdAt, record?.lastError)
+    ExportTaskSummary(
+      task,
+      title,
+      sources.size,
+      stale,
+      state,
+      record?.createdAt,
+      record?.lastError,
+      runReport(task.id),
+    )
   }
 
   @Synchronized
@@ -149,23 +173,29 @@ class ExportTaskRepository(context: Context) : AutoCloseable {
     )
   }
 
+  /**
+   * Finds a reusable page file by page identity rather than task identity.
+   * Rows from other tasks are valid as long as the deterministic file name
+   * matches this page's revision/background/renderer/mode key.
+   */
   @Synchronized
-  fun cachedPage(taskId: UUID, source: ExportPageSource): File? = store.readableDatabase.query(
-    "export_page_cache",
-    arrayOf("content_revision", "cache_path"),
-    "task_id=? AND page_id=?",
-    arrayOf(taskId.toString(), source.id.toString()),
-    null,
-    null,
-    null,
-  ).use { cursor ->
-    if (!cursor.moveToFirst() || cursor.getLong(0) != source.contentRevision) {
-      null
-    } else {
-      File(cursor.getString(1)).takeIf {
-        it.isFile && it.name == pageCacheFileName(source)
+  fun cachedPage(source: ExportPageSource, mode: ExportRenderMode): File? {
+    val expectedName = ExportPageCacheKey.fileName(source, mode, RENDERER_VERSION)
+    store.readableDatabase.query(
+      "export_page_cache",
+      arrayOf("cache_path"),
+      "page_id=?",
+      arrayOf(source.id.toString()),
+      null,
+      null,
+      null,
+    ).use { cursor ->
+      while (cursor.moveToNext()) {
+        val file = File(cursor.getString(0))
+        if (file.isFile && file.name == expectedName) return file
       }
     }
+    return null
   }
 
   @Synchronized
@@ -192,7 +222,10 @@ class ExportTaskRepository(context: Context) : AutoCloseable {
         SQLiteDatabase.CONFLICT_REPLACE,
       )
     }
-    return previous?.takeIf { it.absolutePath != file.absolutePath }
+    // A previous file is only removable when no other task still references it.
+    return previous?.takeIf {
+      it.absolutePath != file.absolutePath && !pathReferenced(it.absolutePath)
+    }
   }
 
   @Synchronized
@@ -226,7 +259,7 @@ class ExportTaskRepository(context: Context) : AutoCloseable {
         args.toTypedArray(),
       )
     }
-    return removed
+    return removed.filterNot { pathReferenced(it.absolutePath) }
   }
 
   @Synchronized
@@ -258,6 +291,7 @@ class ExportTaskRepository(context: Context) : AutoCloseable {
   fun deleteTask(id: UUID): List<File> {
     val files = ArrayList<File>()
     artifactRecord(id)?.path?.let { files += File(it) }
+    val cached = ArrayList<File>()
     store.readableDatabase.query(
       "export_page_cache",
       arrayOf("cache_path"),
@@ -266,9 +300,11 @@ class ExportTaskRepository(context: Context) : AutoCloseable {
       null,
       null,
       null,
-    ).use { cursor -> while (cursor.moveToNext()) files += File(cursor.getString(0)) }
+    ).use { cursor -> while (cursor.moveToNext()) cached += File(cursor.getString(0)) }
+    reportFile(id).takeIf(File::isFile)?.let(files::add)
     store.writableDatabase.delete("export_tasks", "id=?", arrayOf(id.toString()))
-    return files
+    // Page files may be shared with other tasks; only recycle unreferenced ones.
+    return (files + cached.filterNot { pathReferenced(it.absolutePath) }).distinctBy(File::getAbsolutePath)
   }
 
   @Synchronized
@@ -292,14 +328,80 @@ class ExportTaskRepository(context: Context) : AutoCloseable {
       null,
       null,
     ).use { cursor -> while (cursor.moveToNext()) paths += File(cursor.getString(0)).absolutePath }
+    store.readableDatabase.query(
+      "export_tasks",
+      arrayOf("id"),
+      null,
+      null,
+      null,
+      null,
+      null,
+    ).use { cursor ->
+      while (cursor.moveToNext()) paths += reportFile(UUID.fromString(cursor.getString(0))).absolutePath
+    }
     return paths
   }
 
   fun fingerprint(task: ExportTask, sources: List<ExportPageSource>): String =
-    ExportRevision.fingerprint(task.format, sources, RENDERER_VERSION)
+    ExportRevision.fingerprint(task.format, sources, RENDERER_VERSION, task.renderMode)
 
   fun displayName(task: ExportTask): String =
     ExportFileNames.displayName(notebookTitle(task.notebookId), task.id, task.format)
+
+  /** Best-effort per-task report; malformed or missing files read as null. */
+  @Synchronized
+  fun runReport(taskId: UUID): ExportRunReport? {
+    val file = reportFile(taskId)
+    if (!file.isFile) return null
+    return runCatching { ExportRunReportCodec.decode(file.readText()) }.getOrNull()
+  }
+
+  @Synchronized
+  fun saveRunReport(report: ExportRunReport) {
+    check(reportsDir.isDirectory || reportsDir.mkdirs()) { "Could not create export report directory" }
+    val target = reportFile(report.taskId)
+    val temp = File(reportsDir, "${report.taskId}.report.tmp")
+    try {
+      temp.writeText(ExportRunReportCodec.encode(report))
+      runCatching {
+        Files.move(
+          temp.toPath(),
+          target.toPath(),
+          StandardCopyOption.ATOMIC_MOVE,
+          StandardCopyOption.REPLACE_EXISTING,
+        )
+      }.getOrElse {
+        Files.move(temp.toPath(), target.toPath(), StandardCopyOption.REPLACE_EXISTING)
+      }
+    } finally {
+      temp.delete()
+    }
+  }
+
+  private fun reportFile(taskId: UUID): File = File(reportsDir, "$taskId.report")
+
+  private fun pathReferenced(path: String): Boolean {
+    val db = store.readableDatabase
+    db.query(
+      "export_page_cache",
+      arrayOf("cache_path"),
+      "cache_path=?",
+      arrayOf(path),
+      null,
+      null,
+      null,
+    ).use { if (it.moveToFirst()) return true }
+    db.query(
+      "export_tasks",
+      arrayOf("artifact_path"),
+      "artifact_path=?",
+      arrayOf(path),
+      null,
+      null,
+      null,
+    ).use { if (it.moveToFirst()) return true }
+    return false
+  }
 
   private fun validate(scope: ExportScope, format: ExportFormat, pageIds: List<UUID>) {
     require(scope == ExportScope.SINGLE_PAGE || format == ExportFormat.PDF) { "Multi-page tasks only support PDF" }
@@ -329,7 +431,7 @@ class ExportTaskRepository(context: Context) : AutoCloseable {
     }
     return db.query(
       "export_tasks",
-      arrayOf("id", "notebook_id", "scope", "format", "created_at", "last_used_at"),
+      arrayOf("id", "notebook_id", "scope", "format", "created_at", "last_used_at", "render_mode"),
       null,
       null,
       null,
@@ -348,6 +450,8 @@ class ExportTaskRepository(context: Context) : AutoCloseable {
               pages[id].orEmpty().sortedBy { it.first }.map { it.second },
               cursor.getLong(4),
               cursor.getLong(5),
+              runCatching { ExportRenderMode.valueOf(cursor.getString(6)) }
+                .getOrDefault(ExportRenderMode.VECTOR),
             )
           )
         }
@@ -374,7 +478,7 @@ class ExportTaskRepository(context: Context) : AutoCloseable {
         sources.size
       }
     } else {
-      sources.count { cachedPage(task.id, it) == null }
+      sources.count { cachedPage(it, task.renderMode) == null }
     }
 
   private fun artifactRecord(taskId: UUID): ArtifactRecord? = store.readableDatabase.query(
@@ -445,13 +549,6 @@ class ExportTaskRepository(context: Context) : AutoCloseable {
   )
 
   companion object {
-    const val RENDERER_VERSION = 6
-
-    fun pageCacheFileName(source: ExportPageSource): String =
-      "${source.id}-r${source.contentRevision}-b${backgroundHash(source.backgroundRevision)}-v$RENDERER_VERSION.pdf"
-
-    private fun backgroundHash(value: String): String =
-      java.security.MessageDigest.getInstance("SHA-256").digest(value.encodeToByteArray())
-        .take(6).joinToString("") { "%02x".format(it) }
+    const val RENDERER_VERSION = 7
   }
 }

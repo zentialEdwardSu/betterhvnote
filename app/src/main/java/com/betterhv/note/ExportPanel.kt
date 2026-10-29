@@ -65,17 +65,28 @@ import com.betterhv.note.export.ExportFormat
 import com.betterhv.note.export.ExportManagerState
 import com.betterhv.note.export.ExportNotebookOption
 import com.betterhv.note.export.ExportProgress
+import com.betterhv.note.export.ExportRenderMode
+import com.betterhv.note.export.ExportRunReport
 import com.betterhv.note.export.ExportScope
 import com.betterhv.note.export.ExportTaskState
 import com.betterhv.note.export.ExportTaskSummary
 import com.betterhv.note.export.ExportViewModel
+import com.betterhv.note.export.determinateFraction
+import com.betterhv.note.export.formatDuration
+import com.betterhv.note.export.remainingMs
+import com.betterhv.note.ui.EinkActionRow
+import com.betterhv.note.ui.EinkChoiceCell
+import com.betterhv.note.ui.EinkColors
+import com.betterhv.note.ui.EinkDimens
+import com.betterhv.note.ui.EinkIconButton
+import com.betterhv.note.ui.EinkProgress
+import com.betterhv.note.ui.EinkSurface
+import com.betterhv.note.ui.EinkTheme
+import com.betterhv.note.ui.EinkType
 import com.betterhv.transfer.core.PairedDevice
 import java.text.DateFormat
 import java.util.Date
 import java.util.UUID
-
-private val ExportBorder = Color(0xFFE3E3E1)
-private val ExportMuted = Color(0xFF787774)
 
 data class ExportManagerInput(
   val viewModel: ExportViewModel,
@@ -99,7 +110,7 @@ data class ExportManagerCallbacks(
 data class ExportTaskCreatorCallbacks(
   val pageBitmap: (UUID) -> Bitmap?,
   val requestThumbnails: (List<UUID>) -> Unit,
-  val onCreate: (UUID, ExportScope, ExportFormat, List<UUID>) -> Unit,
+  val onCreate: (UUID, ExportScope, ExportFormat, List<UUID>, ExportRenderMode) -> Unit,
   val onBack: () -> Unit,
 )
 
@@ -110,6 +121,7 @@ data class ExportTaskRowState(
   val phoneTransferAvailable: Boolean,
   val progress: ExportProgress?,
   val queued: Boolean = false,
+  val cancelling: Boolean = false,
   val outcome: String? = null,
   val errorDetails: String? = null,
 )
@@ -149,6 +161,13 @@ data class ExportTaskListActions(
 
 @Composable
 fun ExportManagerScreen(input: ExportManagerInput) {
+  EinkTheme {
+    ExportManagerScreenContent(input)
+  }
+}
+
+@Composable
+private fun ExportManagerScreenContent(input: ExportManagerInput) {
   val viewModel = input.viewModel
   val initialNotebookId = input.initialNotebookId
   val creationRequest = input.creationRequest
@@ -214,7 +233,7 @@ private fun ExportManagerSurface(state: ExportManagerSurfaceState, actions: Expo
   val exportState = state.exportState
   val viewModel = state.viewModel
   val callbacks = state.callbacks
-  Surface(Modifier.fillMaxSize(), color = Color.White, shape = RectangleShape) {
+  Surface(Modifier.fillMaxSize(), color = EinkColors.Paper, shape = RectangleShape) {
     if (state.creating) {
       ExportTaskCreator(
         state = exportState,
@@ -223,8 +242,8 @@ private fun ExportManagerSurface(state: ExportManagerSurfaceState, actions: Expo
         callbacks = ExportTaskCreatorCallbacks(
           pageBitmap = callbacks.pageBitmap,
           requestThumbnails = callbacks.requestThumbnails,
-          onCreate = { notebookId, scope, format, ids ->
-            viewModel.createTask(notebookId, scope, format, ids, callbacks.beforeExport)
+          onCreate = { notebookId, scope, format, ids, renderMode ->
+            viewModel.createTask(notebookId, scope, format, ids, renderMode, callbacks.beforeExport)
             actions.onCreatingChange(false)
           },
           onBack = { actions.onCreatingChange(false) },
@@ -237,7 +256,7 @@ private fun ExportManagerSurface(state: ExportManagerSurfaceState, actions: Expo
           onBack = callbacks.onClose,
           onAdd = { actions.onCreatingChange(true) },
         )
-        HorizontalDivider(color = ExportBorder)
+        HorizontalDivider(color = EinkColors.Ink)
         ExportTaskList(
           input = ExportTaskListInput(
             exportState = exportState,
@@ -260,7 +279,7 @@ private fun ExportTaskList(input: ExportTaskListInput, actions: ExportTaskListAc
   val exportState = input.exportState
   if (exportState.tasks.isEmpty()) {
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-      Text(noteText("暂无导出任务", "No export tasks"), color = ExportMuted)
+      Text(noteText("暂无导出任务", "No export tasks"), color = EinkColors.Muted, style = EinkType.Body)
     }
     return
   }
@@ -274,6 +293,7 @@ private fun ExportTaskList(input: ExportTaskListInput, actions: ExportTaskListAc
           phoneTransferAvailable = input.pairedClients.isNotEmpty(),
           progress = exportState.progress,
           queued = summary.task.id in exportState.queuedTaskIds,
+          cancelling = summary.task.id in exportState.cancellingTaskIds,
           outcome = exportState.outcomes[summary.task.id],
           errorDetails = exportState.errors[summary.task.id]?.details,
         ),
@@ -287,16 +307,19 @@ private fun ExportTaskList(input: ExportTaskListInput, actions: ExportTaskListAc
           onCancel = { input.viewModel.cancel(summary.task.id) },
         ),
       )
-      HorizontalDivider(color = ExportBorder)
+      HorizontalDivider(color = EinkColors.Ink)
     }
   }
 }
 
 @Composable
 private fun ExportDeleteTaskDialog(onDismiss: () -> Unit, onDelete: () -> Unit) {
-  EinkModalOverlay(onDismissRequest = onDismiss) {
+  EinkModalOverlay(
+    onDismissRequest = onDismiss,
+    borderWidth = EinkDimens.Hairline,
+  ) {
     Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-      Text(noteText("删除导出任务？", "Delete export task?"), fontSize = 20.sp, fontWeight = FontWeight.Medium)
+      Text(noteText("删除导出任务？", "Delete export task?"), style = EinkType.SectionTitle)
       Text(
         noteText(
           "内部生成文件和增量缓存将被删除，Downloads 与 NoteLink 中的副本不受影响。",
@@ -316,11 +339,14 @@ private fun ExportDeleteTaskDialog(onDismiss: () -> Unit, onDelete: () -> Unit) 
 
 @Composable
 private fun ExportSendTaskDialog(clients: List<PairedDevice>, onDismiss: () -> Unit, onSend: (PairedDevice) -> Unit) {
-  EinkModalOverlay(onDismissRequest = onDismiss) {
+  EinkModalOverlay(
+    onDismissRequest = onDismiss,
+    borderWidth = EinkDimens.Hairline,
+  ) {
     Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-      Text(noteText("发送到 NoteLink", "Send to NoteLink"), fontSize = 20.sp, fontWeight = FontWeight.Medium)
+      Text(noteText("发送到 NoteLink", "Send to NoteLink"), style = EinkType.SectionTitle)
       clients.sortedByDescending(PairedDevice::lastUsedAt).forEach { client ->
-        EinkDialogAction(client.name) { onSend(client) }
+        EinkDialogAction(client.name, onClick = { onSend(client) })
       }
       EinkDialogAction(noteText("取消", "Cancel"), onClick = onDismiss)
     }
@@ -330,21 +356,27 @@ private fun ExportSendTaskDialog(clients: List<PairedDevice>, onDismiss: () -> U
 @Composable
 private fun ExportTopBar(taskCount: Int, onBack: () -> Unit, onAdd: () -> Unit) {
   Row(
-    Modifier.fillMaxWidth().height(64.dp).padding(horizontal = 18.dp),
+    Modifier.fillMaxWidth().height(EinkDimens.ScreenHeader).padding(horizontal = EinkDimens.SpaceLg),
     verticalAlignment = Alignment.CenterVertically,
   ) {
-    IconButton(onClick = onBack) {
-      Icon(Icons.AutoMirrored.Filled.ArrowBack, noteText("返回", "Back"))
-    }
-    Text(noteText("导出", "Export"), fontSize = 18.sp, fontWeight = FontWeight.Medium)
+    EinkIconButton(
+      icon = Icons.AutoMirrored.Filled.ArrowBack,
+      contentDescription = noteText("返回", "Back"),
+      onClick = onBack,
+    )
+    Text(noteText("导出", "Export"), style = EinkType.SectionTitle)
     Text(
       noteText("$taskCount 项", "$taskCount tasks"),
-      color = ExportMuted,
-      fontSize = 13.sp,
-      modifier = Modifier.padding(start = 10.dp),
+      color = EinkColors.Muted,
+      style = EinkType.Caption,
+      modifier = Modifier.padding(start = EinkDimens.SpaceSm),
     )
     Spacer(Modifier.weight(1f))
-    IconButton(onClick = onAdd) { Icon(Icons.Filled.Add, noteText("新建导出任务", "New export task")) }
+    EinkIconButton(
+      icon = Icons.Filled.Add,
+      contentDescription = noteText("新建导出任务", "New export task"),
+      onClick = onAdd,
+    )
   }
 }
 
@@ -363,104 +395,238 @@ private fun ExportTaskRow(state: ExportTaskRowState, actions: ExportTaskRowActio
       Column(Modifier.weight(1f)) {
         Text(
           taskTitle(summary),
-          fontSize = 16.sp,
+          style = EinkType.Body,
           fontWeight = FontWeight.Medium,
           maxLines = 1,
           overflow = TextOverflow.Ellipsis,
         )
         Text(
-          noteText(
-            "${summary.notebookTitle} · ${summary.pageCount} 页 · ${summary.task.format.name}",
-            "${summary.notebookTitle} · ${summary.pageCount} pages · ${summary.task.format.name}",
-          ),
-          color = ExportMuted,
-          fontSize = 13.sp,
+          taskMetaLine(summary),
+          color = EinkColors.Muted,
+          style = EinkType.Caption,
           maxLines = 1,
           overflow = TextOverflow.Ellipsis,
         )
+        val statusText = when {
+          state.cancelling -> noteText("正在取消…", "Cancelling…")
+          state.queued -> noteText("排队中", "Queued")
+          active -> state.progress?.let { progressLabel(it) + progressTiming(it) }
+            ?: noteText("准备中", "Preparing")
+          else -> state.outcome ?: taskStatus(summary)
+        }
+        val statusMarker = when {
+          state.errorDetails != null || summary.state == ExportTaskState.FAILED ||
+            summary.state == ExportTaskState.SOURCE_MISSING -> "! "
+          summary.state == ExportTaskState.CURRENT -> "✓ "
+          else -> ""
+        }
         Text(
-          when {
-            state.queued -> noteText("排队中", "Queued")
-            active -> state.progress?.let(::progressLabel) ?: noteText("准备中", "Preparing")
-            else -> state.outcome ?: taskStatus(summary)
-          },
-          color = if (state.errorDetails != null) Color(0xFFB00020) else stateColor(summary.state),
-          fontSize = 13.sp,
+          statusMarker + statusText,
+          color = if (statusMarker == "! ") EinkColors.Ink else EinkColors.Muted,
+          style = EinkType.Caption,
           maxLines = 3,
           overflow = TextOverflow.Ellipsis,
         )
-      }
-      if (active) {
-        CircularProgressIndicator(Modifier.size(28.dp), strokeWidth = 2.dp, color = Color.Black)
-        Spacer(Modifier.width(4.dp))
-      }
-      if (state.errorDetails != null) {
-        IconButton(onClick = { detailsOpen = true }) { Icon(Icons.Filled.Info, noteText("错误详情", "Error details")) }
-      }
-      if (state.busy) {
-        IconButton(onClick = actions.onCancel) { Icon(Icons.Filled.Close, noteText("取消", "Cancel")) }
-      } else {
-        IconButton(onClick = actions.onGenerate, enabled = availability.saveEnabled) {
-          Icon(Icons.Filled.Refresh, noteText("生成或重试", "Generate or retry"))
+        summary.lastRun?.let { lastRun ->
+          Text(
+            noteText(
+              "上次导出 ${formatDuration(lastRun.totalMs)} · ${modeLabel(lastRun.mode)}",
+              "Last export ${formatDuration(lastRun.totalMs)} · ${modeLabel(lastRun.mode)}",
+            ),
+            color = EinkColors.Muted,
+            style = EinkType.Caption,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+          )
         }
       }
-      IconButton(onClick = actions.onSave, enabled = availability.saveEnabled) {
-        Icon(
-          Icons.Filled.Download,
-          noteText("保存 ${summary.notebookTitle} 到 Downloads", "Save ${summary.notebookTitle} to Downloads"),
+      if (active) {
+        CircularProgressIndicator(Modifier.size(28.dp), strokeWidth = 2.dp, color = EinkColors.Ink)
+        Spacer(Modifier.width(EinkDimens.SpaceXs))
+      }
+      if (state.errorDetails != null || summary.lastRun != null) {
+        EinkIconButton(
+          icon = Icons.Filled.Info,
+          contentDescription = noteText("导出详情", "Export details"),
+          onClick = { detailsOpen = true },
         )
       }
-      IconButton(onClick = actions.onSend, enabled = availability.sendEnabled) {
-        Icon(
-          Icons.AutoMirrored.Filled.Send,
-          noteText("发送 ${summary.notebookTitle} 到 NoteLink", "Send ${summary.notebookTitle} to NoteLink"),
+      if (state.busy) {
+        EinkIconButton(
+          icon = Icons.Filled.Close,
+          contentDescription = noteText("取消", "Cancel"),
+          onClick = actions.onCancel,
+        )
+      } else {
+        EinkIconButton(
+          icon = Icons.Filled.Refresh,
+          contentDescription = noteText("生成或重试", "Generate or retry"),
+          enabled = availability.saveEnabled,
+          onClick = actions.onGenerate,
         )
       }
-      IconButton(onClick = actions.onDelete, enabled = availability.deleteEnabled) {
-        Icon(Icons.Filled.Delete, noteText("删除导出任务", "Delete export task"))
-      }
+      EinkIconButton(
+        icon = Icons.Filled.Download,
+        contentDescription = noteText(
+          "保存 ${summary.notebookTitle} 到 Downloads",
+          "Save ${summary.notebookTitle} to Downloads",
+        ),
+        enabled = availability.saveEnabled,
+        onClick = actions.onSave,
+      )
+      EinkIconButton(
+        icon = Icons.AutoMirrored.Filled.Send,
+        contentDescription = noteText(
+          "发送 ${summary.notebookTitle} 到 NoteLink",
+          "Send ${summary.notebookTitle} to NoteLink",
+        ),
+        enabled = availability.sendEnabled,
+        onClick = actions.onSend,
+      )
+      EinkIconButton(
+        icon = Icons.Filled.Delete,
+        contentDescription = noteText("删除导出任务", "Delete export task"),
+        enabled = availability.deleteEnabled,
+        onClick = actions.onDelete,
+      )
     }
     if (active && state.progress != null) {
-      val progress = state.progress
-      val modifier = Modifier.fillMaxWidth().padding(top = 10.dp)
-      val fraction = progress.determinateFraction()
-      if (fraction == null) {
-        LinearProgressIndicator(modifier = modifier, color = Color.Black)
-      } else {
-        LinearProgressIndicator(progress = { fraction }, modifier = modifier, color = Color.Black)
-      }
+      EinkProgress(
+        progress = state.progress.determinateFraction(),
+        modifier = Modifier.fillMaxWidth().padding(top = 10.dp),
+      )
     }
   }
   if (detailsOpen) {
     EinkModalOverlay(onDismissRequest = { detailsOpen = false }) {
       Column(Modifier.padding(20.dp).verticalScroll(rememberScrollState())) {
-        EinkDialogAction(noteText("关闭", "Close"), onClick = { detailsOpen = false })
-        androidx.compose.foundation.text.selection.SelectionContainer {
-          Text(state.errorDetails.orEmpty(), fontSize = 13.sp)
+        Text(noteText("导出详情", "Export details"), style = EinkType.SectionTitle)
+        summary.lastRun?.let { report ->
+          Spacer(Modifier.height(EinkDimens.SpaceSm))
+          Text(runReportText(report), style = EinkType.Caption)
         }
+        state.errorDetails?.let { details ->
+          Spacer(Modifier.height(EinkDimens.SpaceSm))
+          HorizontalDivider(color = EinkColors.Muted)
+          androidx.compose.foundation.text.selection.SelectionContainer {
+            Text(details, style = EinkType.Caption)
+          }
+        }
+        Spacer(Modifier.height(EinkDimens.SpaceMd))
+        EinkDialogAction(noteText("关闭", "Close"), onClick = { detailsOpen = false })
       }
     }
   }
 }
 
-internal fun ExportProgress.determinateFraction(): Float? = when (stage) {
-  ExportProgress.Stage.RENDERING, ExportProgress.Stage.SENDING -> {
-    if (total <= 0) null else (current.toFloat() / total).coerceIn(0f, 1f)
+private fun taskMetaLine(summary: ExportTaskSummary): String {
+  val mode = if (summary.task.format == ExportFormat.PDF) {
+    " · ${modeLabel(summary.task.renderMode)}"
+  } else {
+    ""
   }
-  else -> null
+  return noteText(
+    "${summary.notebookTitle} · ${summary.pageCount} 页 · ${summary.task.format.name}$mode",
+    "${summary.notebookTitle} · ${summary.pageCount} pages · ${summary.task.format.name}$mode",
+  )
 }
 
-private fun progressLabel(progress: ExportProgress): String = when (progress.stage) {
-  ExportProgress.Stage.PREPARING -> noteText("准备中", "Preparing")
-  ExportProgress.Stage.RENDERING -> noteText(
-    "生成页面 ${progress.current}/${progress.total}", "Rendering ${progress.current}/${progress.total}",
+private fun modeLabel(mode: ExportRenderMode): String = when (mode) {
+  ExportRenderMode.VECTOR -> noteText("可编辑笔迹", "Editable ink")
+  ExportRenderMode.FAST -> noteText("快速模式", "Fast mode")
+}
+
+private fun progressTiming(progress: ExportProgress): String {
+  val remaining = progress.remainingMs()
+  return if (remaining != null) {
+    noteText(
+      " · 已用 ${formatDuration(progress.elapsedMs)}，预计剩余 ${formatDuration(remaining)}",
+      " · ${formatDuration(progress.elapsedMs)} elapsed, ~${formatDuration(remaining)} left",
+    )
+  } else {
+    noteText(
+      " · 已用 ${formatDuration(progress.elapsedMs)}",
+      " · ${formatDuration(progress.elapsedMs)} elapsed",
+    )
+  }
+}
+
+private fun runReportText(report: ExportRunReport): String = buildString {
+  appendLine(noteText("模式：${modeLabel(report.mode)}", "Mode: ${modeLabel(report.mode)}"))
+  appendLine(noteText("结果：${runResultLabel(report.result)}", "Result: ${runResultLabel(report.result)}"))
+  appendLine(noteText("总耗时：${formatDuration(report.totalMs)}", "Total: ${formatDuration(report.totalMs)}"))
+  appendLine(
+    noteText(
+      "页面生成：${formatDuration(report.renderMs)}",
+      "Page render: ${formatDuration(report.renderMs)}",
+    ),
   )
-  ExportProgress.Stage.ASSEMBLING -> noteText("合并中", "Assembling")
-  ExportProgress.Stage.SAVING -> noteText("保存中", "Saving")
-  ExportProgress.Stage.DISCOVERING -> noteText("发现设备中", "Discovering devices")
-  ExportProgress.Stage.SENDING -> noteText(
-    "发送中 ${progress.current}/${progress.total}", "Sending ${progress.current}/${progress.total}",
+  appendLine(
+    noteText(
+      "合并 graft：${formatDuration(report.mergeGraftMs)}",
+      "Merge graft: ${formatDuration(report.mergeGraftMs)}",
+    ),
   )
+  appendLine(
+    noteText(
+      "最终写入：${formatDuration(report.mergeSaveMs)}",
+      "Final write: ${formatDuration(report.mergeSaveMs)}",
+    ),
+  )
+  appendLine(
+    noteText(
+      "校验：${formatDuration(report.verifyMs)} · 收尾：${formatDuration(report.finalizeMs)}",
+      "Verify: ${formatDuration(report.verifyMs)} · Finalize: ${formatDuration(report.finalizeMs)}",
+    ),
+  )
+  appendLine(
+    noteText(
+      "页数：${report.pageCount}（缓存命中 ${report.cacheHits} / 未命中 ${report.cacheMisses}）",
+      "Pages: ${report.pageCount} (cache hits ${report.cacheHits} / misses ${report.cacheMisses})",
+    ),
+  )
+  appendLine(
+    noteText(
+      "输出大小：${formatBytes(report.outputBytes)} · 栅格缩放：${"%.2f".format(report.rasterScale)}×",
+      "Output: ${formatBytes(report.outputBytes)} · raster scale: ${"%.2f".format(report.rasterScale)}×",
+    ),
+  )
+  report.failedStage?.let { appendLine(noteText("阶段：$it", "Stage: $it")) }
+}
+
+private fun runResultLabel(result: com.betterhv.note.export.ExportRunResult): String = when (result) {
+  com.betterhv.note.export.ExportRunResult.SUCCESS -> noteText("成功", "Succeeded")
+  com.betterhv.note.export.ExportRunResult.FAILED -> noteText("失败", "Failed")
+  com.betterhv.note.export.ExportRunResult.CANCELLED -> noteText("已取消", "Cancelled")
+}
+
+private fun formatBytes(bytes: Long): String = when {
+  bytes >= 1024L * 1024L -> String.format(java.util.Locale.US, "%.1f MB", bytes / (1024.0 * 1024.0))
+  bytes >= 1024L -> String.format(java.util.Locale.US, "%.1f KB", bytes / 1024.0)
+  else -> "$bytes B"
+}
+
+private fun progressLabel(progress: ExportProgress): String {
+  val elapsed = formatDuration(progress.elapsedMs)
+  return when (progress.stage) {
+    ExportProgress.Stage.PREPARING -> noteText("准备中", "Preparing")
+    ExportProgress.Stage.RENDERING -> noteText(
+      "生成第 ${progress.current}/${progress.total} 页",
+      "Rendering ${progress.current}/${progress.total}",
+    )
+    ExportProgress.Stage.ASSEMBLING -> noteText(
+      "合并第 ${progress.current}/${progress.total} 页",
+      "Merging ${progress.current}/${progress.total}",
+    )
+    ExportProgress.Stage.WRITING -> noteText("正在写入 PDF · $elapsed", "Writing PDF · $elapsed")
+    ExportProgress.Stage.VERIFYING -> noteText("正在校验文件 · $elapsed", "Verifying file · $elapsed")
+    ExportProgress.Stage.PUBLISHING -> noteText("正在保存 · $elapsed", "Saving · $elapsed")
+    ExportProgress.Stage.DISCOVERING -> noteText("发现设备中", "Discovering devices")
+    ExportProgress.Stage.SENDING -> noteText(
+      "发送中 ${progress.current}/${progress.total}", "Sending ${progress.current}/${progress.total}",
+    )
+    ExportProgress.Stage.CANCELLING -> noteText("正在取消…", "Cancelling…")
+  }
 }
 
 @Composable
@@ -475,6 +641,7 @@ private fun ExportTaskCreator(
   }
   var scope by remember { mutableStateOf(ExportScope.SINGLE_PAGE) }
   var format by remember { mutableStateOf(ExportFormat.PDF) }
+  var renderMode by remember { mutableStateOf(ExportRenderMode.VECTOR) }
   var selected by remember(notebookId, scope) { mutableStateOf(emptySet<UUID>()) }
   var notebookMenu by remember { mutableStateOf(false) }
   var notebookMenuWidth by remember { mutableIntStateOf(0) }
@@ -491,24 +658,41 @@ private fun ExportTaskCreator(
 
   Column(Modifier.fillMaxSize()) {
     Row(
-      Modifier.fillMaxWidth().height(64.dp).padding(horizontal = 18.dp),
+      Modifier.fillMaxWidth().height(EinkDimens.ScreenHeader).padding(horizontal = EinkDimens.SpaceLg),
       verticalAlignment = Alignment.CenterVertically,
     ) {
-      IconButton(onClick = callbacks.onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, noteText("返回", "Back")) }
-      Text(noteText("新建导出任务", "New export task"), fontSize = 18.sp, fontWeight = FontWeight.Medium)
+      EinkIconButton(
+        icon = Icons.AutoMirrored.Filled.ArrowBack,
+        contentDescription = noteText("返回", "Back"),
+        onClick = callbacks.onBack,
+      )
+      Text(noteText("新建导出任务", "New export task"), style = EinkType.SectionTitle)
       Spacer(Modifier.weight(1f))
       val valid = notebookId != null && (scope == ExportScope.ALL_PAGES || selected.isNotEmpty())
-      IconButton(
+      EinkIconButton(
+        icon = Icons.Filled.Check,
+        contentDescription = noteText("创建", "Create"),
         enabled = valid,
-        onClick = { notebookId?.let { callbacks.onCreate(it, scope, format, selected.toList()) } },
-      ) { Icon(Icons.Filled.Check, noteText("创建", "Create")) }
+        onClick = {
+          notebookId?.let {
+            callbacks.onCreate(
+              it,
+              scope,
+              format,
+              selected.toList(),
+              if (format == ExportFormat.PDF) renderMode else ExportRenderMode.VECTOR,
+            )
+          }
+        },
+      )
     }
-    HorizontalDivider(color = ExportBorder)
+    HorizontalDivider(color = EinkColors.Ink)
     Column(Modifier.fillMaxWidth().padding(24.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
       Box {
         Row(
           Modifier.fillMaxWidth().onSizeChanged { notebookMenuWidth = it.width }
-            .border(1.dp, ExportBorder).clickable { notebookMenu = true }.padding(14.dp),
+            .border(EinkDimens.Hairline, EinkColors.Ink).clickable { notebookMenu = true }
+            .padding(14.dp),
           verticalAlignment = Alignment.CenterVertically,
         ) {
           Text(notebook?.title ?: noteText("选择笔记本", "Select notebook"), modifier = Modifier.weight(1f))
@@ -545,6 +729,28 @@ private fun ExportTaskCreator(
           ScopeButton("PNG", format == ExportFormat.PNG) { format = ExportFormat.PNG }
         }
       }
+      if (format == ExportFormat.PDF) {
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+          ScopeButton(
+            noteText("可编辑笔迹", "Editable ink"),
+            renderMode == ExportRenderMode.VECTOR,
+          ) { renderMode = ExportRenderMode.VECTOR }
+          ScopeButton(
+            noteText("快速模式", "Fast mode"),
+            renderMode == ExportRenderMode.FAST,
+          ) { renderMode = ExportRenderMode.FAST }
+        }
+        if (renderMode == ExportRenderMode.FAST) {
+          Text(
+            noteText(
+              "每页笔迹合成为整页位图，导出更快，但 PDF 中不能逐笔编辑。",
+              "Each page is rasterized into one bitmap: faster export, but ink is not editable per stroke in the PDF.",
+            ),
+            color = EinkColors.Muted,
+            style = EinkType.Caption,
+          )
+        }
+      }
     }
     if (scope == ExportScope.ALL_PAGES) {
       Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -553,7 +759,8 @@ private fun ExportTaskCreator(
             "将持续跟随 ${pages.size} 个页面，并增量更新变化内容",
             "Tracks ${pages.size} pages and incrementally updates changes",
           ),
-          color = ExportMuted,
+          color = EinkColors.Muted,
+          style = EinkType.Body,
         )
       }
     } else {
@@ -593,22 +800,19 @@ private fun NotebookPickerPopup(
     onDismissRequest = onDismiss,
     properties = PopupProperties(focusable = true, dismissOnBackPress = true, dismissOnClickOutside = true),
   ) {
-    Surface(
-      modifier = Modifier.width(width).heightIn(max = 360.dp).border(1.dp, Color.Black, RectangleShape),
-      shape = RectangleShape,
-      color = Color.White,
-      tonalElevation = 0.dp,
-      shadowElevation = 0.dp,
-    ) {
-      Column(Modifier.verticalScroll(rememberScrollState())) {
-        options.forEach { option ->
-          Text(
-            option.title,
-            modifier = Modifier.fillMaxWidth().clickable { onSelect(option) }.padding(14.dp),
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-          )
-          HorizontalDivider(color = ExportBorder)
+    EinkTheme {
+      EinkSurface(
+        modifier = Modifier.width(width).heightIn(max = 360.dp),
+        color = EinkColors.Paper,
+      ) {
+        Column(Modifier.verticalScroll(rememberScrollState())) {
+          options.forEach { option ->
+            EinkActionRow(
+              label = option.title,
+              onClick = { onSelect(option) },
+            )
+            HorizontalDivider(color = EinkColors.Muted)
+          }
         }
       }
     }
@@ -617,11 +821,18 @@ private fun NotebookPickerPopup(
 
 @Composable
 private fun ScopeButton(text: String, selected: Boolean, onClick: () -> Unit) {
-  Box(
-    Modifier.background(if (selected) Color.Black else Color.White, RectangleShape)
-      .border(1.dp, if (selected) Color.Black else ExportBorder, RectangleShape)
-      .clickable(onClick = onClick).padding(horizontal = 16.dp, vertical = 10.dp),
-  ) { Text(text, color = if (selected) Color.White else Color.Black) }
+  EinkChoiceCell(
+    selected = selected,
+    contentDescription = text,
+    onClick = onClick,
+    modifier = Modifier.heightIn(min = EinkDimens.Row),
+  ) {
+    Text(
+      text,
+      modifier = Modifier.padding(horizontal = EinkDimens.SpaceLg, vertical = EinkDimens.SpaceSm),
+      style = EinkType.Action,
+    )
+  }
 }
 
 private fun taskTitle(summary: ExportTaskSummary): String = when (summary.task.scope) {
@@ -652,8 +863,4 @@ private fun taskStatus(summary: ExportTaskSummary): String = when (summary.state
     ?: "Generation failed"
 }
 
-private fun stateColor(state: ExportTaskState): Color = when (state) {
-  ExportTaskState.CURRENT -> Color(0xFF2E7D32)
-  ExportTaskState.SOURCE_MISSING, ExportTaskState.FAILED -> Color(0xFFB00020)
-  else -> ExportMuted
-}
+

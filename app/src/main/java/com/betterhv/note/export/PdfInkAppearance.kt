@@ -73,17 +73,18 @@ internal class PdfInkAppearance private constructor(
       )
     }
 
-  fun buildAppearance(bounds: PdfInkBounds): PdfInkAppearanceContent {
+  fun buildAppearance(
+    bounds: PdfInkBounds,
+    formatter: DecimalFormat = newFormatter(),
+  ): PdfInkAppearanceContent {
     require(bounds.width > 0f && bounds.height > 0f) { "Ink annotation bounds are empty" }
-    val formatter = DecimalFormat("0.####", DecimalFormatSymbols(Locale.US)).apply {
-      roundingMode = RoundingMode.HALF_UP
-      isGroupingUsed = false
-    }
     fun n(value: Float): String = formatter.format(if (abs(value) < 0.00005f) 0f else value)
     fun local(point: PdfInkPoint): PdfInkPoint = PdfInkPoint(point.x - bounds.left, point.y - bounds.top)
 
     val alphaBuckets = linkedSetOf<Int>()
-    val content = buildString {
+    val content = StringBuilder(
+      128 + shapeBodies.size * 40 + shapeDiscs.size * 120 + samples.size * 24,
+    ).apply {
       append("q\n1 0 0 -1 0 ").append(n(bounds.height)).append(" cm\n")
       val bucket = opacityBucket(opacity * if (penType == PenType.Pencil) PENCIL_OPACITY else 1f)
       alphaBuckets += bucket
@@ -104,7 +105,7 @@ internal class PdfInkAppearance private constructor(
       append("f\n")
       append("Q\n")
     }
-    return PdfInkAppearanceContent(content.toByteArray(Charsets.US_ASCII), alphaBuckets)
+    return PdfInkAppearanceContent(content.toString().toByteArray(Charsets.US_ASCII), alphaBuckets)
   }
 
   companion object {
@@ -113,6 +114,12 @@ internal class PdfInkAppearance private constructor(
     private const val ANTIALIAS_MARGIN_POINTS = 1f
     private const val CIRCLE_CONTROL = 0.5522848f
     private const val PENCIL_OPACITY = 0.8f
+
+    /** One formatter per exported page; DecimalFormat is not cheap to construct per stroke. */
+    fun newFormatter(): DecimalFormat = DecimalFormat("0.####", DecimalFormatSymbols(Locale.US)).apply {
+      roundingMode = RoundingMode.HALF_UP
+      isGroupingUsed = false
+    }
 
     fun from(source: StrokeObject): PdfInkAppearance? {
       val stroke = source.stroke
@@ -127,20 +134,32 @@ internal class PdfInkAppearance private constructor(
       }
 
       val transformedWidthScale = source.transform.approximateScale() * PDF_POINTS_PER_LOGICAL_PIXEL
-      val samples = stroke.points.map { point ->
-        PdfInkSample(map(point.x, point.y), stroke.style.widthAt(point) * transformedWidthScale)
+      val samples = ArrayList<PdfInkSample>(stroke.points.size)
+      stroke.points.forEach { point ->
+        samples += PdfInkSample(map(point.x, point.y), stroke.style.widthAt(point) * transformedWidthScale)
       }
       val outline = stroke.outline
-      val shapeDiscs = outline.discs.toList().chunked(3).map { values ->
-        PdfInkDisc(map(values[0], values[1]), values[2] * transformedWidthScale)
-      }
-      val shapeBodies = outline.bodies.toList().chunked(8).map { values ->
-        listOf(
-          map(values[0], values[1]),
-          map(values[2], values[3]),
-          map(values[4], values[5]),
-          map(values[6], values[7]),
+      val discs = outline.discs
+      val shapeDiscs = ArrayList<PdfInkDisc>(discs.size / 3)
+      var discIndex = 0
+      while (discIndex + 2 < discs.size) {
+        shapeDiscs += PdfInkDisc(
+          map(discs[discIndex], discs[discIndex + 1]),
+          discs[discIndex + 2] * transformedWidthScale,
         )
+        discIndex += 3
+      }
+      val bodies = outline.bodies
+      val shapeBodies = ArrayList<List<PdfInkPoint>>(bodies.size / 8)
+      var bodyIndex = 0
+      while (bodyIndex + 7 < bodies.size) {
+        shapeBodies += listOf(
+          map(bodies[bodyIndex], bodies[bodyIndex + 1]),
+          map(bodies[bodyIndex + 2], bodies[bodyIndex + 3]),
+          map(bodies[bodyIndex + 4], bodies[bodyIndex + 5]),
+          map(bodies[bodyIndex + 6], bodies[bodyIndex + 7]),
+        )
+        bodyIndex += 8
       }
       val inkList = if (samples.size == 1) {
         listOf(samples[0].point, samples[0].point)

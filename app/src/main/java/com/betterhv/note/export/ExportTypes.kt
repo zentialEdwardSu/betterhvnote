@@ -10,6 +10,15 @@ enum class ExportFormat(val extension: String, val mimeType: String) {
   PDF("pdf", "application/pdf"),
 }
 
+/** How ink is represented in a PDF artifact. */
+enum class ExportRenderMode {
+  /** One editable PDF Ink annotation per stroke (the pre-existing behavior). */
+  VECTOR,
+
+  /** Each page is rasterized once and embedded as a single image. */
+  FAST,
+}
+
 data class ExportTask(
   val id: UUID,
   val notebookId: UUID,
@@ -18,6 +27,7 @@ data class ExportTask(
   val pageIds: List<UUID>,
   val createdAt: Long,
   val lastUsedAt: Long,
+  val renderMode: ExportRenderMode = ExportRenderMode.VECTOR,
 )
 
 enum class ExportTaskState { NEVER_GENERATED, CURRENT, OUTDATED, SOURCE_MISSING, FAILED }
@@ -30,6 +40,7 @@ data class ExportTaskSummary(
   val state: ExportTaskState,
   val lastGeneratedAt: Long?,
   val lastError: String?,
+  val lastRun: ExportRunReport? = null,
 )
 
 data class ExportPageSource(
@@ -53,8 +64,29 @@ data class ExportArtifact(
   val createdAt: Long,
 )
 
-data class ExportProgress(val current: Int, val total: Int, val pageId: UUID?, val stage: Stage = Stage.RENDERING) {
-  enum class Stage { PREPARING, RENDERING, ASSEMBLING, SAVING, DISCOVERING, SENDING }
+data class ExportProgress(
+  val current: Int,
+  val total: Int,
+  val pageId: UUID?,
+  val stage: Stage = Stage.RENDERING,
+  /** Wall-clock time since the generation started. */
+  val elapsedMs: Long = 0,
+  /** Wall-clock time since the current stage started. */
+  val stageElapsedMs: Long = 0,
+) {
+  enum class Stage {
+    PREPARING,
+    RENDERING,
+    ASSEMBLING,
+
+    /** Native PDF write; cannot report fractions and cannot be interrupted. */
+    WRITING,
+    VERIFYING,
+    PUBLISHING,
+    DISCOVERING,
+    SENDING,
+    CANCELLING,
+  }
 }
 
 sealed interface ExportResult {

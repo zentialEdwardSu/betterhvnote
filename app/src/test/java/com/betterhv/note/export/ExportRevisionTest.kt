@@ -6,26 +6,42 @@ import org.junit.Test
 import java.util.UUID
 
 class ExportRevisionTest {
-  @Test fun `pdf page cache name is renderer-versioned`() {
+  @Test fun `pdf page cache name is renderer and mode versioned`() {
     val source = ExportPageSource(UUID.fromString("00000000-0000-0000-0000-000000000123"), 42L, 0)
 
-    assertEquals(6, ExportTaskRepository.RENDERER_VERSION)
+    assertEquals(7, ExportTaskRepository.RENDERER_VERSION)
     assertEquals(
-      "00000000-0000-0000-0000-000000000123-r42-be3b0c44298fc-v6.pdf",
-      ExportTaskRepository.pageCacheFileName(source),
+      "00000000-0000-0000-0000-000000000123-r42-be3b0c44298fc-v7-vector.pdf",
+      ExportPageCacheKey.fileName(source, ExportRenderMode.VECTOR, ExportTaskRepository.RENDERER_VERSION),
     )
   }
 
-  @Test fun backgroundChangeInvalidatesFingerprintAndPageCacheName() {
+  @Test fun renderModeAndBackgroundInvalidateFingerprintAndPageCacheName() {
     val page = ExportPageSource(first, 4, 0, "template-a")
     val changed = page.copy(backgroundRevision = "template-b")
     assertNotEquals(
-      ExportRevision.fingerprint(ExportFormat.PDF, listOf(page), 5),
-      ExportRevision.fingerprint(ExportFormat.PDF, listOf(changed), 5),
+      ExportRevision.fingerprint(ExportFormat.PDF, listOf(page), 5, ExportRenderMode.VECTOR),
+      ExportRevision.fingerprint(ExportFormat.PDF, listOf(changed), 5, ExportRenderMode.VECTOR),
     )
     assertNotEquals(
-      ExportTaskRepository.pageCacheFileName(page),
-      ExportTaskRepository.pageCacheFileName(changed),
+      ExportRevision.fingerprint(ExportFormat.PDF, listOf(page), 5, ExportRenderMode.VECTOR),
+      ExportRevision.fingerprint(ExportFormat.PDF, listOf(page), 5, ExportRenderMode.FAST),
+    )
+    assertNotEquals(
+      ExportPageCacheKey.fileName(page, ExportRenderMode.VECTOR, 5),
+      ExportPageCacheKey.fileName(changed, ExportRenderMode.VECTOR, 5),
+    )
+    assertNotEquals(
+      ExportPageCacheKey.fileName(page, ExportRenderMode.VECTOR, 5),
+      ExportPageCacheKey.fileName(page, ExportRenderMode.FAST, 5),
+    )
+  }
+
+  @Test fun stablePageSetKeepsFingerprint() {
+    val page = ExportPageSource(first, 4, 0, "template-a")
+    assertEquals(
+      ExportRevision.fingerprint(ExportFormat.PDF, listOf(page), 5, ExportRenderMode.FAST),
+      ExportRevision.fingerprint(ExportFormat.PDF, listOf(page), 5, ExportRenderMode.FAST),
     )
   }
 
