@@ -263,6 +263,8 @@ class BackupManager(private val context: Context) {
         db.execSQL("DELETE FROM export_page_cache")
         db.execSQL("UPDATE export_tasks SET artifact_id=NULL, artifact_path=NULL, artifact_fingerprint=NULL, " +
           "artifact_size=NULL, artifact_sha256=NULL, artifact_created_at=NULL, last_error=NULL")
+        // Restored documents no longer correspond to the previous run reports.
+        File(directory, "exports/reports").deleteRecursively()
       }
       val count = db.rawQuery("SELECT COUNT(*) FROM notebooks", null).use { it.moveToFirst(); it.getInt(0) }
       store.checkpoint()
