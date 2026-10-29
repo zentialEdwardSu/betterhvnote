@@ -91,6 +91,12 @@ Key invariants to preserve when touching this path (see extensive rationale comm
 - All three brushes use the same modeler and swept-disc geometry. `PenStyle.widthAt(InkPoint)` is the sole geometry width boundary: `NormalPen` uses `baseWidth * point.pressure`; `Pencil` and `Marker` use `baseWidth`. Brush-specific rendering is limited to color/alpha.
 - `StrokeRenderer` + `HWPenEngine` (the vendor's native pen rasterizer) are legacy/Phase-0 code paths, superseded by `InkRenderer`'s own Skia-based rendering. `NativeSelfTest` keeps a smoke-test around for the native libs in case a future editing feature (e.g. eraser trace mode) still needs them — don't assume they're dead code without checking current usage.
 
+### Toolbar tools and the e-ink UI layer
+
+- `com.betterhv.note.toolbar` is framework-free. `ToolbarTool` has four sealed branches by primary side effect (canvas, floating window, full-screen page, immediate document action); `ToolbarCatalog` is the explicit source of the 14 tools, shared actions, commands and window specs. Adding a tool means adding one tool class and one registration in `ToolbarCatalog.tools`; its primary and gesture commands then appear automatically in the K1–K8 binding directory. Do not reintroduce `ToolbarCommandItem` or per-tool `when` branches in `MainActivity`.
+- `com.betterhv.note.ui` owns `EinkTheme`, `EinkTokens` and shared e-ink components. Use its monochrome colors, 0-radius/1dp-border geometry, 44dp touch targets and typography roles for the toolbar, its opened surfaces, and the application settings page (including `HardwareBindingsPanel`). `EinkTheme` is scoped, not installed at the app root; pen-color swatches and document thumbnails are content exceptions.
+- Tool actions return pure `ToolbarEffect` values. `ToolEffectSink` in `AppRoot` maps them to state and `PenDrawView`; do not call editor/UI side effects from a tool object.
+
 ### The `ink` package (`com.betterhv.note.ink`) is framework-free by design
 
 Everything in this package (`InkPoint`, `Stroke`, `PenStyle`, `PressureCurve`, `StrokeGeometry`, `StrokeBuilder`, `StrokeSimplifier`, `StrokeSmoother`, `InputFilter`, `Bounds`) has zero Android dependencies — colors are packed ARGB ints, geometry is flat `FloatArray`s, no `android.graphics.*` types leak in. `InkRenderer` (also in this package) is the sole exception and is explicitly called out in its own doc comment as "the one place in the ink pipeline allowed to know about android.graphics". Keep new ink/geometry code in this package framework-free — that's what makes it JVM-testable without Robolectric and is a deliberate architectural boundary from `inkengine-plan.md` §93 (Core must not depend on UI framework, e-ink SDK, or any specific rendering backend).
@@ -117,19 +123,26 @@ Before adding or changing a native method signature, verify the exported symbol 
 The export functionality (Phase 7) follows the architecture principle: **strokes are source of truth**. Export never reads from rendered bitmaps; it renders fresh from `PageSnapshot`.
 
 **Key components:**
-- `ExportTaskRepository` stores reusable single-page, fixed-selection, and all-page tasks in the notebook SQLite database.
-- `PageRenderer` uses one Android Canvas path for 2x PNG and vector PDF output, including multiline text, object transforms, and image EXIF orientation.
-- `ExportEngine` caches one PDF per `pageId + contentRevision + rendererVersion`; multi-page output re-renders only stale pages and combines the cached pages with MuPDF page grafting.
-- `ExportViewModel` owns the active job, progress/cancellation, Downloads destination, and task list state.
+- `ExportTaskRepository` stores reusable single-page, fixed-selection, and all-page tasks in the notebook SQLite database. Schema v9 adds `export_tasks.render_mode` (`VECTOR` default); existing tasks migrate to vector mode. Page references, run reports, and artifact metadata also live here.
+- `PageRenderer` uses one Android Canvas path for 2x PNG and PDF output, including multiline text, object transforms, and image EXIF orientation. `renderObjectsOnto()` overlays objects on an existing bitmap for fast PDF pages.
+- `ExportEngine` has two PDF ink strategies selected per task:
+  - `ExportRenderMode.VECTOR` (default): one editable PDF Ink annotation per stroke, composed in a single document save per page.
+  - `ExportRenderMode.FAST`: each page (template/PDF background + images + text + all strokes) is rasterized once at 2x with an 8 MP/8192 px cap and embedded as one image object. Faster, but ink is not editable per stroke.
+- Page files are shared across tasks by `ExportPageCacheKey` (`pageId + contentRevision + background + rendererVersion + mode`) under `files/exports/pages/`; single-page PDF tasks publish the page file directly instead of merging.
+- `ExportViewModel` owns the active job, per-task render mode, progress/cancellation, Downloads destination, and task list state. `ExportProgress`/`ExportProgressSink` report page-level progress, elapsed/ETA, and throttle updates; native PDF saves are an uninterruptible boundary (cancel applies after the call returns).
 - `ExportManagerScreen` is the full-screen, cross-notebook task manager opened from both the toolbar and notebook cards.
 
 **Export formats:**
-- **PNG**: Single page only, 2x resolution, ARGB_8888
-- **PDF**: Single page, page range, or all pages, vector strokes (scalable)
+- **PNG**: Single page only, 2x resolution, ARGB_8888; PDF source pages are composited from the MuPDF background plus ink (no temporary PDF).
+- **PDF**: Single page, page range, or all pages; vector editable ink or fast raster pages, chosen when creating the task.
 
 **File locations:**
-- Internal reusable artifacts and page caches live below `files/exports/` and are written atomically.
+- `files/exports/artifacts/` holds task artifacts, `files/exports/pages/` holds shared page files, and `files/exports/reports/<taskId>.report` holds the last run's timings/counters. All writes use temp files + atomic moves.
 - User-facing local copies are published through MediaStore to `Downloads/BetterHvNote`.
+
+**Observability:**
+- Every run writes a structured report (mode, pages, cache hits/misses, render/graft/save/verify/finalize durations, bytes, result) and one `EventLog` line.
+- Task rows show the last duration/mode; the Info dialog shows the full report and error diagnostics.
 
 **NoteLink integration:**
 - BLE capability negotiation and push commands extend the existing protocol without renumbering Phone→Note commands.
@@ -137,14 +150,19 @@ The export functionality (Phase 7) follows the architecture principle: **strokes
 - Artifact IDs make retry idempotent; the receiver validates declared length and SHA-256 before committing a file.
 
 **Known limitations:**
+- Fast mode is not editable per stroke and usually produces a larger PDF than vector mode; it is opt-in per task.
+- Native `PDFDocument.save()`/`PdfDocument.writeTo()` cannot be interrupted, so cancel takes effect after the current save returns.
+- Multi-page output still re-merges every page; this is not a true incremental PDF update.
 - Imported PDF annotations are preserved and displayed read-only; editing those source annotations is not supported.
 - Imported encrypted PDFs and PDF reflow are not supported.
 - Large notebooks (>100 pages) not stress-tested
 - Memory: renders one page at a time, recycles bitmaps immediately
 
 **Testing:**
-- `ExportRevisionTest` covers revision/order fingerprints, stale-page calculation, and source-invalid state.
-- `PageRendererInstrumentedTest` covers actual Android PNG/PDF rendering, page dimensions, and multi-page PDF assembly.
+- `ExportPageCacheKeyTest`, `ExportRevisionTest`, `ExportRasterTest`, `ExportRunReportCodecTest`, `ExportProgressSinkTest`, and `ExportProgressPresentationTest` cover the framework-free export model.
+- `PageRendererInstrumentedTest` covers actual Android PNG/PDF rendering, page dimensions, vector annotations, and multi-page PDF assembly.
+- `ExportFastModeInstrumentedTest`, `ExportCacheInstrumentedTest`, `ExportCancellationInstrumentedTest`, and `ExportMigrationInstrumentedTest` cover fast raster pages (including PDF sources), cross-task cache sharing, cancel atomicity, and the v8→v9 migration.
+- `ExportBenchmarkInstrumentedTest` measures a 12-page × 60-stroke notebook. On the N10 Pro reference device (two runs): vector cold ≈36–50 s, fast cold ≈6.2–6.4 s (≈6–8×), fast artifact 3.5 MB vs vector 2.4 MB; a one-page edit re-renders only 1/12 pages.
 - `BleQueueProtocolTest` covers the backward-compatible export push command/response codec.
 
 When adding a format, extend `ExportFormat`, task validation, `ExportEngine.generate()`, and NoteLink's accepted MIME allowlist together.
