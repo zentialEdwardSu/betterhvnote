@@ -21,8 +21,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.RectangleShape
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
+import com.betterhv.note.ui.EinkColors
+import com.betterhv.note.ui.EinkDimens
+import com.betterhv.note.ui.EinkType
 
 internal enum class EinkModalPosition { TOP, CENTER }
 
@@ -32,6 +36,7 @@ internal fun EinkModalOverlay(
   onDismissRequest: () -> Unit,
   position: EinkModalPosition = EinkModalPosition.CENTER,
   dismissOnOutside: Boolean = true,
+  borderWidth: Dp = 2.dp,
   content: @Composable BoxScope.() -> Unit,
 ) {
   BackHandler(onBack = onDismissRequest)
@@ -56,14 +61,15 @@ internal fun EinkModalOverlay(
         .padding(horizontal = 24.dp, vertical = verticalPadding)
         .widthIn(max = 560.dp)
         .fillMaxWidth()
-        .border(2.dp, Color.Black, RectangleShape)
+        .border(borderWidth, EinkColors.Ink, RectangleShape)
         .clickable(
           interactionSource = contentInteractions,
           indication = null,
           onClick = {},
         ),
       shape = RectangleShape,
-      color = Color.White,
+      color = EinkColors.Paper,
+      contentColor = EinkColors.Ink,
       tonalElevation = 0.dp,
       shadowElevation = 0.dp,
     ) {
@@ -81,13 +87,17 @@ internal fun EinkDialogAction(
 ) {
   Box(
     modifier = modifier
-      .border(1.dp, if (enabled) Color.Black else Color.Gray, RectangleShape)
-      .background(if (enabled) Color.White else Color(0xFFE8E8E8), RectangleShape)
+      .border(1.dp, EinkColors.Ink, RectangleShape)
+      .background(if (enabled) EinkColors.Paper else EinkColors.DisabledFill, RectangleShape)
       .clickable(enabled = enabled, onClick = onClick)
       .padding(horizontal = 22.dp, vertical = 10.dp),
     contentAlignment = Alignment.Center,
   ) {
-    Text(label, color = if (enabled) Color.Black else Color.Gray)
+    Text(
+      label,
+      color = if (enabled) EinkColors.Ink else EinkColors.Disabled,
+      style = EinkType.Action,
+    )
   }
 }
 
