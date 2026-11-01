@@ -219,6 +219,16 @@ internal class WindowsFirewallInstaller(
                     'name=NoteLink-TCP-39817','dir=in','action=allow',
                     'protocol=TCP','localport=39817','profile=any'
                 ) | Out-Null
+                # LAN discovery: the Note's UDP probe must reach this PC even without Bluetooth.
+                try {
+                    Invoke-Netsh @('advfirewall','firewall','delete','rule','name=NoteLink-UDP-39818') |
+                        Out-Null
+                } catch { }
+                Invoke-Netsh @(
+                    'advfirewall','firewall','add','rule',
+                    'name=NoteLink-UDP-39818','dir=in','action=allow',
+                    'protocol=UDP','localport=39818','profile=any'
+                ) | Out-Null
                 Write-Result 'NOTELINK|INSTALLED'
                 exit 0
             } catch {

@@ -30,7 +30,14 @@ try {
     if ($LASTEXITCODE -ne 0) {
         throw ((($result | Out-String).Trim()) + ' (netsh exit ' + $LASTEXITCODE + ')')
     }
-    Write-Host 'NoteLink TCP 39817 inbound firewall access is enabled.'
+    # UDP 39818 answers the Note's LAN discovery probe, so a PC without Bluetooth can still be found.
+    & $netsh advfirewall firewall delete rule name=NoteLink-UDP-39818 | Out-Null
+    $result = & $netsh advfirewall firewall add rule name=NoteLink-UDP-39818 dir=in action=allow `
+        protocol=UDP localport=39818 profile=any 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        throw ((($result | Out-String).Trim()) + ' (netsh exit ' + $LASTEXITCODE + ')')
+    }
+    Write-Host 'NoteLink TCP 39817 and UDP 39818 inbound firewall access is enabled.'
     exit 0
 } catch {
     Write-Host ('Failed to configure the NoteLink firewall rule: ' + $_.Exception.Message)

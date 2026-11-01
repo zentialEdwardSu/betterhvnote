@@ -1,36 +1,52 @@
 package com.betterhv.note.sender.desktop
 
 import com.betterhv.note.sender.shared.noteLinkText
-import com.betterhv.transfer.core.BleCommand
-import com.betterhv.transfer.core.BleQueueProtocol
-import com.betterhv.transfer.core.BleResponse
-import com.betterhv.transfer.core.CapabilityNegotiation
+import com.betterhv.transfer.core.ContentCounts
 import com.betterhv.transfer.core.ContentKind
-import com.betterhv.transfer.core.DeviceCapabilities
-import com.betterhv.transfer.core.NetworkEndpoint
-import com.betterhv.transfer.core.PreparedQueueItemSummary
-import com.betterhv.transfer.core.TransferChannelException
+import com.betterhv.transfer.core.ExportTransferOffer
+import com.betterhv.transfer.core.NOTELINK_LAN_PORT
+import com.betterhv.transfer.core.NoteLinkAdvertisementCodec
 import com.betterhv.transfer.core.TransferErrorCode
 import com.betterhv.transfer.core.TransferEvent
 import com.betterhv.transfer.core.TransferEventLog
 import com.betterhv.transfer.core.TransferFailure
+import com.betterhv.transfer.core.TransferLimits
 import com.betterhv.transfer.core.TransferLogEntry
 import com.betterhv.transfer.core.TransferLogLevel
 import com.betterhv.transfer.core.TransferMode
-import com.betterhv.transfer.core.TransferModes
-import com.betterhv.transfer.core.TransferNetworkSecurity
 import com.betterhv.transfer.core.TransferObservable
 import com.betterhv.transfer.core.TransferPhase
 import com.betterhv.transfer.core.TransferProgressMeter
 import com.betterhv.transfer.core.TransferSnapshot
+import com.betterhv.transfer.core.v4.crypto.SessionKeys
+import com.betterhv.transfer.core.v4.notelink.ByteSink
+import com.betterhv.transfer.core.v4.notelink.FileByteSink
+import com.betterhv.transfer.core.v4.notelink.HostLease
+import com.betterhv.transfer.core.v4.notelink.NoteLinkHost
+import com.betterhv.transfer.core.v4.notelink.NoteLinkProto
+import com.betterhv.transfer.core.v4.notelink.NoteLinkServer
+import com.betterhv.transfer.core.v4.notelink.NoteLinkTransferEvent
+import com.betterhv.transfer.core.v4.notelink.PayloadSource
+import com.betterhv.transfer.core.v4.notelink.PushDecision
+import com.betterhv.transfer.core.v4.observability.LinkTimeline
+import com.betterhv.transfer.core.v4.observability.LinkTimelineRecorder
+import com.betterhv.transfer.core.v4.observability.LinkTimelineSummary
+import com.betterhv.transfer.core.v4.pairing.PairingOutcome
+import com.betterhv.transfer.core.v4.pairing.PairingResponder
+import com.betterhv.transfer.core.v4.session.PairingKey
+import com.betterhv.transfer.core.v4.session.PairingKeyStore
+import com.betterhv.transfer.proto.v4.CapabilitySet
+import com.betterhv.transfer.proto.v4.Endpoint
+import com.betterhv.transfer.proto.v4.Feature
+import com.betterhv.transfer.proto.v4.PushOffer
+import com.betterhv.transfer.proto.v4.UpdateCheck
+import com.betterhv.transfer.proto.v4.UpdateResult
+import com.betterhv.transfer.proto.v4.UpdateState
+import com.betterhv.transfer.windows.BleControlEvent
 import com.betterhv.transfer.windows.WindowsCapabilities
-import com.betterhv.transfer.windows.WindowsFileTransfer
 import com.betterhv.transfer.windows.WindowsNativeApi
-import com.betterhv.transfer.windows.WindowsReplayCache
-import com.betterhv.transfer.windows.WindowsSecureEnvelope
 import com.betterhv.update.NoteAppUpdateCoordinator
 import com.betterhv.update.NoteAppUpdateTaskState
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -46,11 +62,9 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.io.File
-import java.net.ServerSocket
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
-import java.util.concurrent.CountDownLatch
-import java.util.concurrent.TimeUnit
+import com.betterhv.transfer.proto.v4.ContentKind as ProtoContentKind
 
 data class DesktopTransferStatus(
   val running: Boolean = false,
@@ -59,8 +73,22 @@ data class DesktopTransferStatus(
   val detail: String = "",
   val transfer: TransferSnapshot = TransferSnapshot(),
   val transferLog: List<TransferLogEntry> = emptyList(),
+  val timelineSummary: LinkTimelineSummary? = null,
 )
 
+/** Desktop pairing dialog state: the user types the code shown on the Note. */
+sealed interface DesktopPairingState {
+  data object Idle : DesktopPairingState
+  data object Entering : DesktopPairingState
+  data class Waiting(val code: String, val message: String? = null) : DesktopPairingState
+  data class Paired(val deviceName: String) : DesktopPairingState
+  data class Failed(val message: String) : DesktopPairingState
+}
+
+/**
+ * Windows NoteLink host. The native GATT server and the TCP listener feed one [NoteLinkServer];
+ * this class maps its callbacks onto the queue, the inbox and the Note update cache.
+ */
 class DesktopTransferService(
   private val native: WindowsNativeApi,
   private val settings: DesktopSettings,
@@ -69,22 +97,21 @@ class DesktopTransferService(
   updateCache: File,
   private val onPairingChanged: () -> Unit = {},
 ) : AutoCloseable,
-  TransferObservable {
+  TransferObservable,
+  NoteLinkHost {
   private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-  private val leases = ConcurrentHashMap<UUID, DesktopSenderLease>()
-  private val leaseOwners = ConcurrentHashMap<UUID, String>()
-  private val startedLeases = ConcurrentHashMap.newKeySet<UUID>()
-  private val replay = WindowsReplayCache()
-  private val peerCapabilities = ConcurrentHashMap<String, DeviceCapabilities>()
-  private val pushed = ConcurrentHashMap<UUID, PushState>()
-  private val pushedOwners = ConcurrentHashMap<UUID, String>()
-  private val transferJobs = ConcurrentHashMap<UUID, Job>()
-  private val receiveAttemptTokens = ConcurrentHashMap<UUID, Any>()
+  private val leases = ConcurrentHashMap<UUID, Pair<String, DesktopSenderLease>>()
+  private val meters = ConcurrentHashMap<UUID, TransferProgressMeter>()
+  private val updateOperations = ConcurrentHashMap<String, UUID>()
   private val mutableStatus = MutableStateFlow(DesktopTransferStatus())
   val status: StateFlow<DesktopTransferStatus> = mutableStatus.asStateFlow()
   private val mutableSnapshot = MutableStateFlow(TransferSnapshot())
   private val mutableEvents = MutableSharedFlow<TransferEvent>(extraBufferCapacity = 64)
   private val eventLog = TransferEventLog()
+  private val timelines = LinkTimelineRecorder()
+  private val mutablePairing = MutableStateFlow<DesktopPairingState>(DesktopPairingState.Idle)
+  val pairingState: StateFlow<DesktopPairingState> = mutablePairing.asStateFlow()
+  @Volatile private var responder: PairingResponder? = null
   private val noteUpdate =
     NoteAppUpdateCoordinator(scope, updateCache) { file, descriptor, peerId ->
       val item = queue.enqueueAppPackage(file, descriptor, peerId)
@@ -95,27 +122,23 @@ class DesktopTransferService(
   override val snapshot: StateFlow<TransferSnapshot> = mutableSnapshot.asStateFlow()
   override val events: SharedFlow<TransferEvent> = mutableEvents.asSharedFlow()
   val eventHistory: StateFlow<List<TransferLogEntry>> = eventLog.entries
-  private var pollJob: Job? = null
-
-  @Volatile
-  private var listeningSocket: ServerSocket? = null
+  @Volatile private var server: NoteLinkServer? = null
+  /** False when Windows has no usable BLE peripheral; NoteLink then runs over LAN only. */
+  @Volatile private var bleRunning = false
+  private var eventJob: Job? = null
+  private var lanError: String? = null
 
   init {
-    scope.launch {
-      snapshot.collect {
-        mutableStatus.value = mutableStatus.value.copy(transfer = it)
-      }
-    }
-    scope.launch {
-      eventHistory.collect {
-        mutableStatus.value = mutableStatus.value.copy(transferLog = it)
-      }
-    }
+    scope.launch { snapshot.collect { mutableStatus.value = mutableStatus.value.copy(transfer = it) } }
+    scope.launch { eventHistory.collect { mutableStatus.value = mutableStatus.value.copy(transferLog = it) } }
   }
+
+  override val localDeviceId: String get() = settings.localDeviceId
+  override val localDeviceName: String get() = settings.displayName
 
   @Synchronized
   fun start() {
-    if (pollJob?.isActive == true) return
+    if (eventJob?.isActive == true) return
     val version = windowsVersion()
     if (!version.supported) {
       DesktopLog.info("transfer.readiness.unsupported-os", version.message)
@@ -135,94 +158,98 @@ class DesktopTransferService(
       )
       return
     }
-    if (!capabilities.ready) {
-      val missing = buildList {
-        if (!capabilities.blePeripheral) {
-          add(
-            noteLinkText(
-              "BLE 外设模式（请开启蓝牙；若设备管理器中的蓝牙适配器报错，请重启或重装驱动）",
-              "BLE peripheral mode (turn Bluetooth on; if the adapter shows an error in Device Manager, " +
-                "restart or reinstall its driver)",
-            ),
-          )
-        }
-        if (!capabilities.lan) add(noteLinkText("活动的 Wi-Fi 连接", "Active Wi-Fi"))
-        if (!capabilities.dataProtection) {
-          add(noteLinkText("Windows 数据保护", "Windows data protection"))
-        }
-      }
+    if (!capabilities.dataProtection) {
       mutableStatus.value = DesktopTransferStatus(
         running = false,
         capabilities = capabilities,
         summary = noteLinkText("设备能力不足", "Missing device capabilities"),
-        detail = missing.joinToString(noteLinkText("；", "; ")),
+        detail = noteLinkText("Windows 数据保护", "Windows data protection"),
         transferLog = eventLog.entries.value,
       )
-      DesktopLog.info("transfer.readiness.missing", missing.joinToString(","))
+      DesktopLog.info("transfer.readiness.missing", "dpapi")
       return
     }
-    val counts = queue.counts()
-    runCatching {
-      native.startBle(
-        settings.localDeviceId,
-        settings.displayName,
-        counts.images,
-        counts.texts,
-        counts.pdfs
+    adoptOrphanedItems()
+    val created = NoteLinkServer(this, sendBle = { client, record -> native.notifyBle(client, record) })
+    lanError = runCatching { created.start() }.exceptionOrNull()?.let {
+      DesktopLog.error("transfer.lan.bind", it)
+      noteLinkText(
+        "端口 $NOTELINK_LAN_PORT 被占用，无法通过局域网连接",
+        "Port $NOTELINK_LAN_PORT is in use; the Note cannot connect over the network",
       )
     }
-      .onFailure {
+    server = created
+    // Bluetooth is optional: the Note finds this PC by LAN discovery (UDP 39818) and connects over
+    // TCP 39817. BLE only adds reach when the two devices share no network.
+    val bleProblem: String? = if (!capabilities.blePeripheral) {
+      noteLinkText(
+        "蓝牙不可用，仅通过局域网连接（Note 需与本机在同一网络）",
+        "Bluetooth is unavailable; connecting over the network only (the Note must be on the same network)",
+      )
+    } else {
+      val counts = queue.counts()
+      runCatching {
+        native.startBle(settings.localDeviceId, settings.displayName, counts.images, counts.texts, counts.pdfs, advertisementFlags())
+      }.exceptionOrNull()?.let {
         DesktopLog.error("transfer.ble.start", it)
-        mutableStatus.value = DesktopTransferStatus(
-          running = false,
-          capabilities = capabilities,
-          summary = "BLE failed to start",
-          detail = it.message.orEmpty(),
-          transferLog = eventLog.entries.value,
-        )
-        return
+        noteLinkText("蓝牙启动失败，仅通过局域网连接：", "Bluetooth failed to start; network only: ") + it.message.orEmpty()
       }
+    }
+    bleRunning = bleProblem == null
+    if (!bleRunning && lanError != null) {
+      created.close()
+      server = null
+      mutableStatus.value = DesktopTransferStatus(
+        running = false,
+        capabilities = capabilities,
+        summary = noteLinkText("无法接收", "Cannot receive"),
+        detail = listOfNotNull(bleProblem, lanError).joinToString(noteLinkText("；", "; ")),
+        transferLog = eventLog.entries.value,
+      )
+      return
+    }
     mutableStatus.value = DesktopTransferStatus(
       true,
       capabilities,
-      if (settings.pairing == null) {
-        noteLinkText("生成配对码后在 Note 上输入", "Generate a pairing code and enter it on Note")
-      } else if (counts.images + counts.texts + counts.pdfs > 0) {
-        noteLinkText(
-          "LAN 已就绪，正在等待 Note 获取",
-          "LAN ready; waiting for Note",
-        )
-      } else {
-        noteLinkText("LAN 已就绪，暂无待发送内容", "LAN ready; nothing queued")
-      },
+      readySummary(),
+      detail = listOfNotNull(lanError, bleProblem).joinToString(noteLinkText("；", "; ")),
       transferLog = eventLog.entries.value,
     )
-    pollJob = scope.launch {
-      while (isActive) {
-        runCatching { native.pollBleCommand(1_000)?.let(::processCommand) }
-          .onFailure {
-            if (isActive) {
-              DesktopLog.error("transfer.ble.poll", it)
-              mutableStatus.value = mutableStatus.value.copy(
-                summary = "BLE communication error",
-                detail = it.message.orEmpty(),
-              )
-              delay(500)
-            }
-          }
+    if (!bleRunning) return
+    eventJob = scope.launch { pumpBleEvents(created) }
+  }
+
+  /** Native event pump: blocks in the DLL until a record or connection event arrives. */
+  private suspend fun pumpBleEvents(server: NoteLinkServer) {
+    while (scope.isActive) {
+      val event = runCatching { native.pollBleEvent(EVENT_WAIT_MILLIS) }.getOrElse {
+        if (!scope.isActive) return
+        DesktopLog.error("transfer.ble.event", it)
+        delay(EVENT_ERROR_BACKOFF_MILLIS)
+        null
+      } ?: continue
+      when (event) {
+        is BleControlEvent.Record -> server.onBleRecord(event.client, event.bytes)
+        is BleControlEvent.Mtu -> server.onBleMtu(event.client, event.mtu)
+        is BleControlEvent.Connected -> DesktopLog.info("transfer.ble.connected", event.client.takeLast(17))
+        is BleControlEvent.Disconnected -> {
+          DesktopLog.info("transfer.ble.disconnected", event.client.takeLast(17))
+          server.onBleClosed(event.client)
+        }
       }
     }
   }
 
   @Synchronized
   fun stop() {
-    pollJob?.cancel();
-    pollJob = null
-    cancel()
-    leases.values.forEach { runCatching { it.release() } }
-    leases.clear();
-    startedLeases.clear()
-    runCatching { native.stopBle() }
+    eventJob?.cancel()
+    eventJob = null
+    server?.close()
+    server = null
+    leases.values.forEach { (_, lease) -> runCatching { lease.release() } }
+    leases.clear()
+    if (bleRunning) runCatching { native.stopBle() }
+    bleRunning = false
     mutableStatus.value = mutableStatus.value.copy(
       running = false,
       summary = noteLinkText("接收已暂停", "Receiving paused"),
@@ -232,533 +259,339 @@ class DesktopTransferService(
 
   @Synchronized
   fun restart() {
-    stop();
+    stop()
     start()
   }
 
   fun refreshCounts() {
     if (!mutableStatus.value.running) return
     val counts = queue.counts()
-    runCatching { native.updateBleCounts(counts.images, counts.texts, counts.pdfs) }
-      .onFailure { mutableStatus.value = mutableStatus.value.copy(detail = it.message.orEmpty()) }
+    if (bleRunning) {
+      runCatching { native.updateBleCounts(counts.images, counts.texts, counts.pdfs, advertisementFlags()) }
+        .onFailure { mutableStatus.value = mutableStatus.value.copy(detail = it.message.orEmpty()) }
+    }
+    server?.publishQueueChanged()
+    if (mutableStatus.value.running) mutableStatus.value = mutableStatus.value.copy(summary = readySummary())
   }
 
-  @Suppress("CyclomaticComplexMethod")
-  private fun processCommand(envelope: ByteArray) {
-    val senderId = WindowsSecureEnvelope.senderDeviceId(envelope)
-    val authenticated = authenticate(envelope, senderId)
-    var pairing = authenticated.pairing
-    val provisional = pairing.deviceId.startsWith("pending:")
-    var command: BleCommand? = null
-    val response = runCatching {
-      BleQueueProtocol.decodeCommand(authenticated.plaintext).also { command = it }.let {
-        handle(it, pairing.deviceId, pairing.sharedKey)
-      }.also {
-        if (provisional) {
-          settings.completeOwnerPairing(senderId ?: "betterhv-note")
-          pairing = requireNotNull(settings.pairing)
-          onPairingChanged()
-        } else if (senderId != null && senderId != pairing.deviceId) {
-          pairing = settings.resolveIdentity(pairing.deviceId, senderId)
-          onPairingChanged()
-        } else {
-          settings.markLastUsed(pairing.deviceId)
-        }
-      }
-    }.getOrElse { error ->
-      val failure = when (error) {
-        is com.betterhv.transfer.core.UnsupportedBleProtocolException -> TransferFailure(
-          TransferErrorCode.UNSUPPORTED_PROTOCOL,
-          error.message.orEmpty(),
-          false,
-        )
+  private fun advertisementFlags(): Int =
+    if (responder?.isActive() == true) NoteLinkAdvertisementCodec.FLAG_PAIRING else 0
 
-        is TransferChannelException -> error.failure
-
-        else -> TransferFailure(TransferErrorCode.INTERNAL, error.message ?: "Command failed", true)
-      }
-      mutableSnapshot.value = mutableSnapshot.value.copy(
-        phase = TransferPhase.FAILED,
-        lastFailure = failure,
-        canRetry = failure.recoverable,
-        canCancel = false,
-      )
-      emitEvent(TransferEvent.Failed(mutableSnapshot.value.operationId, failure))
-      BleResponse.Failure(failure)
-    }
-    val encoded = BleQueueProtocol.encode(response)
-    native.respondBle(
-      if (senderId == null) {
-        WindowsSecureEnvelope.seal(pairing.sharedKey, encoded)
-      } else {
-        WindowsSecureEnvelope.seal(pairing.sharedKey, settings.localDeviceId, encoded)
-      },
-    )
-    if (command is BleCommand.Commit || command is BleCommand.Release) {
-      // Updating counts recreates the Windows GATT provider. Let the final response
-      // leave the current connection before replacing its characteristic handles.
-      scope.launch {
-        delay(BLE_FINAL_RESPONSE_SETTLE_MILLIS)
-        refreshCounts()
-      }
-    }
-  }
-
-  private fun authenticate(envelope: ByteArray, senderId: String?): AuthenticatedDesktopCommand {
-    val stored = settings.pairings
-    val candidates = buildList {
-      val identified = senderId?.let { id -> stored.firstOrNull { it.deviceId == id } }
-      if (senderId == null) {
-        addAll(stored)
-        val provisional =
-          settings.pendingOwnerPairing ?: if (stored.isEmpty()) settings.ownerPairing else null
-        provisional?.let(::add)
-      } else if (identified != null) {
-        add(identified)
-        settings.pendingOwnerPairing?.let(::add)
-      } else {
-        settings.pendingOwnerPairing?.let(::add)
-      }
-    }
-    candidates.forEach { pairing ->
-      runCatching { WindowsSecureEnvelope.open(pairing.sharedKey, envelope, replay) }
-        .getOrNull()?.let { return AuthenticatedDesktopCommand(pairing, it) }
-    }
-    error("Could not authenticate paired device")
-  }
-
-  private fun handle(command: BleCommand, peerId: String, key: ByteArray): BleResponse =
-    when (command) {
-      BleCommand.Counts -> queue.counts(peerId)
-        .let { BleResponse.Counts(it.images, it.texts, it.pdfs) }
-
-      is BleCommand.Lease -> queue.leaseNext(command.kind, peerId)?.let {
-        leases[it.item.id] = it
-        leaseOwners[it.item.id] = peerId
-        BleResponse.Offer(it.item)
-      } ?: BleResponse.Empty
-
-      is BleCommand.TextChunk -> {
-        val lease = requireLease(command.itemId, peerId)
-        val content = requireNotNull(lease.text) { "Item is not text" }.encodeToByteArray()
-        require(command.offset in 0..content.size)
-        val end = (command.offset + BleQueueProtocol.TEXT_CHUNK_BYTES).coerceAtMost(content.size)
-        lease.heartbeat()
-        BleResponse.TextChunk(
-          command.itemId,
-          command.offset,
-          content.size,
-          content.copyOfRange(command.offset, end)
-        )
-      }
-
-      is BleCommand.Heartbeat -> {
-        requireLease(command.itemId, peerId).heartbeat();
-        BleResponse.Ok
-      }
-
-      is BleCommand.Commit -> {
-        val lease = requireLease(command.itemId, peerId)
-        startedLeases.remove(command.itemId)
-        leases.remove(command.itemId)
-        leaseOwners.remove(command.itemId)
-        lease.commit()
-        complete(command.itemId);
-        BleResponse.Ok
-      }
-
-      is BleCommand.Release -> {
-        val lease = requireLease(command.itemId, peerId)
-        transferJobs.remove(command.itemId)?.cancel();
-        startedLeases.remove(command.itemId)
-        leases.remove(command.itemId)
-        leaseOwners.remove(command.itemId)
-        lease.release();
-        BleResponse.Ok
-      }
-
-      is BleCommand.Capabilities -> {
-        peerCapabilities[peerId] = command.localCapabilities
-        val local = localCapabilities(key)
-        val match = TransferNetworkSecurity.compare(
-          local.ssidFingerprint,
-          command.localCapabilities.ssidFingerprint
-        )
-        DesktopLog.info(
-          "capabilities.ssid",
-          "localKnown=${local.ssidFingerprint != null} " +
-            "remoteKnown=${command.localCapabilities.ssidFingerprint != null} match=$match",
-        )
-        mutableSnapshot.value = mutableSnapshot.value.copy(
-          phase = TransferPhase.NEGOTIATING_CAPABILITIES,
-          localModes = local.modes,
-          remoteModes = command.localCapabilities.modes,
-          ssidMatch = match,
-        )
-        emitEvent(
-          TransferEvent.CapabilityNegotiated(
-            local.modes,
-            command.localCapabilities.modes,
-            match
-          )
-        )
-        BleResponse.Capabilities(CapabilityNegotiation(local, match))
-      }
-
-      is BleCommand.PrepareFileTransfer -> prepare(command, peerId, key)
-
-      is BleCommand.PushOffer -> when (val begin = beginPush(peerId, command)) {
-        DesktopInboxBegin.AlreadyReceived -> BleResponse.AlreadyReceived(command.offer.artifactId)
-
-        is DesktopInboxBegin.Receive -> {
-          pushed[command.offer.artifactId] = PushState.Waiting(command.offer, begin.partial)
-          BleResponse.Ok
-        }
-      }
-
-      is BleCommand.PushStatus -> pushStatus(command.artifactId, peerId)
-
-      is BleCommand.PushCancel -> cancelPush(command.artifactId, peerId)
-
-      is BleCommand.RequestNoteAppUpdate -> updateResponse(
-        command.operationId,
-        noteUpdate.begin(command.operationId, peerId, command.currentVersion),
-      )
-
-      is BleCommand.NoteAppUpdateStatus -> updateResponse(
-        command.operationId,
-        noteUpdate.status(command.operationId, peerId),
-      )
-
-      is BleCommand.NoteAppUpdateCancel -> {
-        noteUpdate.cancel(command.operationId, peerId)
-        BleResponse.Ok
-      }
-    }
-
-  private fun updateResponse(id: UUID, state: NoteAppUpdateTaskState): BleResponse = when (state) {
-    NoteAppUpdateTaskState.Resolving -> BleResponse.UpdateResolving(id)
-    is NoteAppUpdateTaskState.Downloading -> BleResponse.UpdateDownloading(
-      id, state.version, state.bytesDownloaded, state.totalBytes,
-    )
-
-    is NoteAppUpdateTaskState.UpToDate -> BleResponse.UpdateUpToDate(id, state.latestVersion)
-    is NoteAppUpdateTaskState.Ready -> BleResponse.UpdateReady(
-      id,
-      state.version,
-      PreparedQueueItemSummary(
-        state.itemId,
-        ContentKind.APP_PACKAGE,
-        com.betterhv.update.NotePackageResolver.NOTE_PACKAGE_MIME,
-        state.byteLength,
-        state.sha256,
-        state.displayName,
-      ),
-    )
-
-    is NoteAppUpdateTaskState.Failed -> BleResponse.Failure(
-      TransferFailure(TransferErrorCode.INTERNAL, state.message, state.recoverable),
-    )
-  }
-
-  fun importNotePackage(file: File): String {
-    val descriptor = noteUpdate.importLatest(file)
-    return descriptor.version.display
-  }
-
-  private fun pushStatus(artifactId: UUID, peerId: String): BleResponse =
-    when (val state = pushed[artifactId]) {
-      null -> inbox.find(artifactId)?.takeIf {
-        it.sourceDeviceId == peerId && it.state == DesktopInboxState.COMPLETE
-      }
-        ?.let { BleResponse.AlreadyReceived(artifactId) }
-        ?: BleResponse.Failure(
-          TransferFailure(
-            TransferErrorCode.INTERNAL,
-            "Receive task does not exist",
-            false
-          )
-        )
-
-      is PushState.Waiting, is PushState.Receiving -> {
-        requirePushOwner(artifactId, peerId)
-        BleResponse.Pending
-      }
-
-      PushState.Complete -> {
-        requirePushOwner(artifactId, peerId)
-        BleResponse.PushComplete(artifactId)
-      }
-
-      is PushState.Failed -> {
-        requirePushOwner(artifactId, peerId)
-        BleResponse.Failure(state.failure)
-      }
-    }
-
-  private fun cancelPush(artifactId: UUID, peerId: String): BleResponse {
-    requirePushOwner(artifactId, peerId)
-    transferJobs.remove(artifactId)?.cancel()
-    listeningSocket?.close()
-    listeningSocket = null
-    pushed.remove(artifactId)
-    pushedOwners.remove(artifactId)
-    inbox.find(artifactId)
-      ?.takeIf { it.state != DesktopInboxState.COMPLETE }
-      ?.let { inbox.delete(artifactId) }
-    return BleResponse.Ok
-  }
-
-  private fun prepare(
-    command: BleCommand.PrepareFileTransfer,
-    peerId: String,
-    pairingKey: ByteArray
-  ): BleResponse {
-    if (command.selectedMode != TransferMode.LAN) {
-      return BleResponse.Failure(
-        TransferFailure(
-          TransferErrorCode.UNSUPPORTED_MODE,
-          "Windows NoteLink only supports LAN",
-          false,
-          command.selectedMode,
-        )
-      )
-    }
-    val endpoint = runCatching { command.receiverEndpoint.validated() }.getOrElse {
-      return BleResponse.Failure(
-        TransferFailure(
-          TransferErrorCode.INVALID_ENDPOINT,
-          it.message.orEmpty(),
-          false
-        )
-      )
-    }
-    val previousReceiving = pushed[command.itemId] as? PushState.Receiving
-    if (previousReceiving != null) receiveAttemptTokens[command.itemId] = Any()
-    transferJobs.remove(command.itemId)?.cancel()
-    listeningSocket?.close()
-    listeningSocket = null
-    previousReceiving?.let {
-      pushed[command.itemId] = PushState.Waiting(it.offer, it.partial)
-    }
-    val fileKey =
-      TransferNetworkSecurity.sessionKey(pairingKey, command.itemId, command.sessionNonce, "file")
-    val probeKey =
-      TransferNetworkSecurity.sessionKey(pairingKey, command.itemId, command.sessionNonce, "probe")
+  private fun readySummary(): String {
+    val counts = queue.counts()
+    val connected = server?.connected?.value.orEmpty()
     return when {
-      leases.containsKey(command.itemId) -> {
-        requireLease(command.itemId, peerId)
-        prepareSend(command.itemId, peerId, endpoint, fileKey, probeKey)
-      }
+      settings.pairing == null -> noteLinkText("点击“新增设备”与 Note 配对", "Choose Add device to pair with a Note")
+      connected.isNotEmpty() -> noteLinkText(
+        "已连接 Note（${connected.values.first().joinToString("+")}）",
+        "Note connected (${connected.values.first().joinToString("+")})",
+      )
+      counts.images + counts.texts + counts.pdfs > 0 -> noteLinkText("已就绪，正在等待 Note", "Ready; waiting for Note")
+      else -> noteLinkText("已就绪，暂无待发送内容", "Ready; nothing queued")
+    }
+  }
 
-      pushed[command.itemId] is PushState.Waiting -> {
-        requirePushOwner(command.itemId, peerId)
-        prepareReceive(command.itemId, peerId, endpoint, fileKey, probeKey)
-      }
+  // --- Pairing ---------------------------------------------------------------------------
 
-      else -> BleResponse.Failure(
-        TransferFailure(
-          TransferErrorCode.INTERNAL,
-          "Transfer item does not exist",
-          false
-        )
+  fun openPairing() {
+    responder = null
+    mutablePairing.value = if (mutableStatus.value.running) {
+      DesktopPairingState.Entering
+    } else {
+      notReadyForPairing()
+    }
+  }
+
+  /** Pairing runs over BLE or LAN; with neither running the Note can never find this PC. */
+  private fun notReadyForPairing(): DesktopPairingState.Failed = DesktopPairingState.Failed(
+    noteLinkText("接收未运行，无法配对：", "Receiving is not running, so pairing cannot start: ") +
+      mutableStatus.value.detail.ifBlank { mutableStatus.value.summary },
+  )
+
+  /** Starts responding to a Note that shows [code]; the BLE advertisement gains the pairing flag. */
+  fun submitPairingCode(code: String) {
+    if (!mutableStatus.value.running) {
+      mutablePairing.value = notReadyForPairing()
+      return
+    }
+    responder = PairingResponder(code, settings.localDeviceId, settings.displayName)
+    mutablePairing.value = DesktopPairingState.Waiting(code)
+    refreshCounts()
+  }
+
+  fun cancelPairing() {
+    responder = null
+    mutablePairing.value = DesktopPairingState.Idle
+    refreshCounts()
+  }
+
+  override fun pairingResponder(): PairingResponder? {
+    val current = responder ?: return null
+    if (current.isActive()) return current
+    responder = null
+    mutablePairing.value = DesktopPairingState.Failed(
+      noteLinkText("配对码已过期，请重新输入", "The pairing code expired; enter it again"),
+    )
+    refreshCounts()
+    return null
+  }
+
+  override fun onPaired(outcome: PairingOutcome) {
+    // Queue items without a destination already match every paired Note.
+    val stored = settings.storePairing(outcome.peerDeviceId, outcome.peerDeviceName, outcome.psk)
+    adoptOrphanedItems()
+    responder = null
+    mutablePairing.value = DesktopPairingState.Paired(stored.deviceName)
+    DesktopLog.info("transfer.pairing.complete", stored.deviceId.takeLast(8))
+    refreshCounts()
+    onPairingChanged()
+  }
+
+  /** Items queued for a Note that was unpaired go to the most recently used paired Note. */
+  private fun adoptOrphanedItems() {
+    val target = settings.pairing ?: return
+    val ids = settings.pairings.map(DesktopPairing::deviceId).toSet()
+    runCatching { queue.adoptOrphans(ids, target.deviceId) }
+      .onSuccess { if (it > 0) DesktopLog.info("transfer.queue.adopted", "$it -> ${target.deviceId.takeLast(8)}") }
+      .onFailure { DesktopLog.error("transfer.queue.adopt", it) }
+  }
+
+  override fun onPairingFailed(attemptsLeft: Int) {
+    val current = mutablePairing.value as? DesktopPairingState.Waiting ?: return
+    if (attemptsLeft <= 0) {
+      responder = null
+      mutablePairing.value = DesktopPairingState.Failed(
+        noteLinkText("配对码多次错误，请重新输入", "Too many wrong codes; enter the code again"),
+      )
+      refreshCounts()
+    } else {
+      mutablePairing.value = current.copy(
+        message = noteLinkText("配对码与 Note 不符（剩余 $attemptsLeft 次）", "Code did not match the Note ($attemptsLeft left)"),
       )
     }
   }
 
-  private fun prepareSend(
-    id: UUID,
-    peerId: String,
-    endpoint: NetworkEndpoint,
-    fileKey: ByteArray,
-    probeKey: ByteArray,
-  ): BleResponse {
-    val lease = requireLease(id, peerId)
-    val file = requireNotNull(lease.file) { "Item is not a file" }
-    begin(id, peerId, file.length(), endpoint)
-    runCatching { WindowsFileTransfer.probe(endpoint.host, id, probeKey) }.getOrElse {
-      val failure = failure(it)
-      fail(id, failure)
-      return BleResponse.Failure(failure)
+  override fun pairings(): PairingKeyStore = PairingKeyStore { keyId ->
+    settings.pairings.firstNotNullOfOrNull { pairing ->
+      if (SessionKeys.keyId(pairing.sharedKey) == keyId) PairingKey(pairing.deviceId, pairing.sharedKey) else null
     }
-    if (startedLeases.add(id)) lease.markTransferring()
-    transferJobs[id] = scope.launch {
-      try {
-        val meter = TransferProgressMeter(System.currentTimeMillis())
-        WindowsFileTransfer.send(endpoint.host, id, file, fileKey) { done, total ->
-          progress(
-            id,
-            done,
-            total,
-            meter
-          )
-        }
-        lease.markAwaitingCommit();
-        phase(id, TransferPhase.AWAITING_COMMIT)
-      } catch (cancelled: CancellationException) {
-        throw cancelled
-      } catch (error: Throwable) {
-        fail(id, failure(error))
-      } finally {
-        transferJobs.remove(id)
-      }
-    }
-    return BleResponse.Prepared(id, TransferMode.LAN, endpoint)
   }
 
-  private fun prepareReceive(
-    id: UUID,
-    peerId: String,
-    endpoint: NetworkEndpoint,
-    fileKey: ByteArray,
-    probeKey: ByteArray,
-  ): BleResponse {
-    val waiting = pushed[id] as PushState.Waiting
-    val attemptToken = Any().also { receiveAttemptTokens[id] = it }
-    val listening = CountDownLatch(1)
-    begin(id, peerId, waiting.offer.byteLength, endpoint)
-    val receiving = PushState.Receiving(waiting.offer, waiting.partial)
-    pushed[id] = receiving
-    transferJobs[id] = scope.launch {
-      try {
-        val meter = TransferProgressMeter(System.currentTimeMillis())
-        val received = WindowsFileTransfer.receive(
-          waiting.partial,
-          id,
-          fileKey,
-          probeKey,
-          progress = { done, total -> progress(id, done, total, meter) },
-          onListening = {
-            listeningSocket = it;
-            listening.countDown()
-          },
-        )
-        if (receiveAttemptTokens[id] !== attemptToken) return@launch
-        phase(id, TransferPhase.VERIFYING)
-        require(
-          received.byteLength == waiting.offer.byteLength && received.sha256.contentEquals(
-            waiting.offer.sha256
-          )
-        )
-        inbox.complete(id, waiting.partial);
-        pushed[id] = PushState.Complete;
-        complete(id)
-      } catch (cancelled: CancellationException) {
-        if (receiveAttemptTokens[id] === attemptToken) {
-          pushed.remove(id, receiving)
-          pushedOwners.remove(id)
-        }
-        throw cancelled
-      } catch (error: Throwable) {
-        if (receiveAttemptTokens[id] === attemptToken) {
-          val failure = failure(error)
-          inbox.fail(id, failure.message)
-          pushed[id] = PushState.Failed(failure)
-          fail(id, failure)
-        }
-      } finally {
-        if (receiveAttemptTokens.remove(id, attemptToken)) {
-          listeningSocket = null
-          transferJobs.remove(id)
-        }
-        listening.countDown()
-      }
-    }
-    if (!listening.await(2, TimeUnit.SECONDS)) {
-      transferJobs.remove(id)?.cancel()
-      return BleResponse.Failure(
-        TransferFailure(
-          TransferErrorCode.CONNECTION_TIMEOUT,
-          "Receive port did not start in time",
-          true
+  // --- NoteLinkHost ------------------------------------------------------------------------
+
+  override fun capabilities(): CapabilitySet {
+    val addresses = runCatching { native.lanInfo().addresses }.getOrDefault(emptyList())
+    val port = server?.lanBoundPort?.takeIf { it > 0 } ?: NOTELINK_LAN_PORT
+    val builder = CapabilitySet.newBuilder()
+      .setTransports(TRANSPORT_LAN)
+      .setMaxRecordBytes(64 * 1024)
+      .addAllKinds(
+        listOf(
+          ProtoContentKind.CONTENT_IMAGE,
+          ProtoContentKind.CONTENT_TEXT,
+          ProtoContentKind.CONTENT_PDF,
+          ProtoContentKind.CONTENT_APP_PACKAGE,
         ),
       )
+      // No Wi-Fi Direct on Windows: FEATURE_P2P_* is never advertised.
+      .setFeatures(Feature.FEATURE_LAN_TICKET_VALUE)
+      .setDeviceName(settings.displayName)
+    if (lanError == null) {
+      addresses.firstOrNull()?.let { builder.setLan(Endpoint.newBuilder().setHost(it).setPort(port)) }
+      addresses.forEach { builder.addLanCandidates(Endpoint.newBuilder().setHost(it).setPort(port)) }
     }
-    return BleResponse.Prepared(id, TransferMode.LAN, endpoint)
+    return builder.build()
   }
 
-  private fun localCapabilities(key: ByteArray): DeviceCapabilities {
-    val lan = native.lanInfo()
-    return DeviceCapabilities(
-      modes = TransferModes.LAN,
-      lanEndpoint = NetworkEndpoint(lan.ipv4),
-      ssidFingerprint = TransferNetworkSecurity.ssidFingerprint(key, lan.ssid),
-      extensions = BleQueueProtocol.CAPABILITY_EXPORT_PUSH or BleQueueProtocol.CAPABILITY_NOTE_APP_UPDATE,
+  override fun advertisedCounts(): ContentCounts = queue.counts()
+
+  override fun counts(peerDeviceId: String): ContentCounts {
+    queue.releaseExpired(System.currentTimeMillis())
+    return queue.counts(peerDeviceId)
+  }
+
+  override fun lease(peerDeviceId: String, kind: ContentKind): HostLease? {
+    val lease = queue.leaseNext(kind, peerDeviceId) ?: return null
+    leases[lease.item.id] = peerDeviceId to lease
+    runCatching { lease.markTransferring() }
+    refreshAdvertisementOnly()
+    return hostLease(lease)
+  }
+
+  private fun hostLease(lease: DesktopSenderLease): HostLease {
+    val item = lease.item
+    val text = lease.text?.encodeToByteArray()
+    val payload = when {
+      text != null -> PayloadSource.of(text)
+      else -> lease.file?.let { PayloadSource.of(it, item.sha256) }
+    }
+    val offer = NoteLinkProto.offer(
+      id = item.id,
+      kind = item.kind,
+      mimeType = item.mimeType,
+      byteLength = payload?.length ?: item.byteLength,
+      sha256 = payload?.sha256 ?: item.sha256,
+      displayName = item.displayName,
+      leaseTtlMillis = TransferLimits.LEASE_TIMEOUT_MILLIS,
+      inlineData = text?.takeIf { it.size <= NoteLinkProto.INLINE_TEXT_BYTES },
     )
+    return HostLease(offer, payload)
   }
 
-  private fun begin(id: UUID, peerId: String, total: Long, endpoint: NetworkEndpoint) {
-    val now = System.currentTimeMillis()
-    mutableSnapshot.value = TransferSnapshot(
-      operationId = id,
-      itemId = id,
-      deviceId = peerId,
-      phase = TransferPhase.WAITING_FOR_PEER,
-      mode = TransferMode.LAN,
-      localModes = TransferModes.LAN,
-      remoteModes = mutableSnapshot.value.remoteModes,
-      ssidMatch = mutableSnapshot.value.ssidMatch,
-      endpoint = endpoint,
-      totalBytes = total,
-      attempt = 1,
-      startedAtMillis = now,
-      phaseStartedAtMillis = now,
-      canCancel = true,
-    )
-    emitEvent(TransferEvent.TransportSelected(id, TransferMode.LAN, endpoint))
+  override fun leased(peerDeviceId: String, itemId: UUID): HostLease? {
+    val (owner, lease) = leases[itemId] ?: return null
+    if (owner != peerDeviceId) return null
+    runCatching { lease.heartbeat() }
+    return hostLease(lease)
   }
 
-  private fun progress(id: UUID, done: Long, total: Long, meter: TransferProgressMeter) {
-    val sample = meter.sample(done, total)
-    mutableSnapshot.value = mutableSnapshot.value.copy(
-      phase = TransferPhase.TRANSFERRING,
-      bytesTransferred = done,
-      totalBytes = total,
-      bytesPerSecond = sample.bytesPerSecond,
-      averageBytesPerSecond = sample.averageBytesPerSecond,
-      etaMillis = sample.etaMillis,
-    )
-    emitEvent(TransferEvent.Progress(id, done, total, sample.bytesPerSecond, sample.etaMillis))
+  override fun heartbeat(peerDeviceId: String, itemId: UUID): Boolean {
+    val (owner, lease) = leases[itemId] ?: return false
+    return owner == peerDeviceId && runCatching { lease.heartbeat() }.isSuccess
   }
 
-  private fun phase(id: UUID, next: TransferPhase) {
-    val previous = mutableSnapshot.value.phase
-    mutableSnapshot.value =
-      mutableSnapshot.value.copy(phase = next, phaseStartedAtMillis = System.currentTimeMillis())
-    emitEvent(TransferEvent.PhaseChanged(id, previous, next))
+  override fun commit(peerDeviceId: String, itemId: UUID): Boolean {
+    val entry = leases[itemId] ?: return false
+    if (entry.first != peerDeviceId) return false
+    leases.remove(itemId)
+    return runCatching { entry.second.commit() }.onSuccess {
+      settings.markLastUsed(peerDeviceId)
+      refreshAdvertisementOnly()
+      emitEvent(TransferEvent.Completed(itemId, itemId))
+    }.isSuccess
   }
 
-  private fun complete(id: UUID) {
-    phase(id, TransferPhase.COMPLETE);
-    emitEvent(TransferEvent.Completed(id, id))
+  override fun release(peerDeviceId: String, itemId: UUID): Boolean {
+    val entry = leases[itemId] ?: return false
+    if (entry.first != peerDeviceId) return false
+    leases.remove(itemId)
+    return runCatching { entry.second.release() }.onSuccess { refreshAdvertisementOnly() }.isSuccess
   }
 
-  private fun failure(error: Throwable): TransferFailure =
-    (error as? TransferChannelException)?.failure
-      ?: TransferFailure(
-        TransferErrorCode.INTERNAL,
-        error.message ?: "LAN transfer failed",
-        true,
-        TransferMode.LAN
-      )
-
-  private fun fail(id: UUID, failure: TransferFailure) {
-    mutableSnapshot.value = mutableSnapshot.value.copy(
-      phase = TransferPhase.FAILED,
-      lastFailure = failure,
-      canRetry = failure.recoverable,
-      canCancel = false,
-    )
-    emitEvent(TransferEvent.Failed(id, failure))
-    mutableStatus.value =
-      mutableStatus.value.copy(summary = "LAN transfer failed", detail = failure.message)
+  /** Counts changed through the protocol; the server already published them to the peer. */
+  private fun refreshAdvertisementOnly() {
+    if (!mutableStatus.value.running || !bleRunning) return
+    val counts = queue.counts()
+    runCatching { native.updateBleCounts(counts.images, counts.texts, counts.pdfs, advertisementFlags()) }
   }
+
+  override fun push(peerDeviceId: String, offer: PushOffer): PushDecision {
+    val id = NoteLinkProto.uuid(offer.itemId)
+    val export = runCatching {
+      ExportTransferOffer(id, offer.displayName, offer.mimeType, offer.byteLength, offer.sha256.toByteArray())
+    }.getOrElse { return PushDecision.Reject(it.message ?: "Invalid export") }
+    return when (val begin = inbox.begin(peerDeviceId, export)) {
+      DesktopInboxBegin.AlreadyReceived -> PushDecision.AlreadyReceived
+      is DesktopInboxBegin.Receive -> {
+        val file = FileByteSink(begin.partial)
+        val sink = object : ByteSink by file {
+          override fun abort() {
+            file.abort()
+            inbox.fail(id, "Transfer interrupted")
+          }
+        }
+        PushDecision.Receive(sink) { inbox.complete(id, begin.partial) }
+      }
+    }
+  }
+
+  override fun updateCheck(peerDeviceId: String, check: UpdateCheck): UpdateResult {
+    val operationKey = "$peerDeviceId:${check.operationId.toStringUtf8()}:${check.versionName}"
+    val operation = updateOperations.getOrPut(operationKey) { UUID.randomUUID() }
+    val state = noteUpdate.begin(operation, peerDeviceId, check.versionName.ifBlank { "0.0.0" })
+    val result = UpdateResult.newBuilder()
+    when (state) {
+      NoteAppUpdateTaskState.Resolving -> result.setState(UpdateState.UPDATE_PREPARING)
+      is NoteAppUpdateTaskState.Downloading -> result.setState(UpdateState.UPDATE_PREPARING)
+        .setLatestVersion(state.version)
+        .setBytesPrepared(state.bytesDownloaded)
+        .setTotalBytes(state.totalBytes)
+      is NoteAppUpdateTaskState.UpToDate -> {
+        updateOperations.remove(operationKey)
+        result.setState(UpdateState.UPDATE_UP_TO_DATE).setLatestVersion(state.latestVersion.orEmpty())
+      }
+      is NoteAppUpdateTaskState.Failed -> {
+        updateOperations.remove(operationKey)
+        result.setState(UpdateState.UPDATE_FAILED).setMessage(state.message)
+      }
+      is NoteAppUpdateTaskState.Ready -> {
+        updateOperations.remove(operationKey)
+        val lease = queue.leaseNext(ContentKind.APP_PACKAGE, peerDeviceId)
+          ?: return result.setState(UpdateState.UPDATE_FAILED).setMessage("Update package is not queued").build()
+        leases[lease.item.id] = peerDeviceId to lease
+        result.setState(UpdateState.UPDATE_AVAILABLE).setLatestVersion(state.version).setOffer(hostLease(lease).offer)
+      }
+    }
+    return result.build()
+  }
+
+  override fun onSessionChanged(peerDeviceId: String, links: List<String>) {
+    DesktopLog.info("transfer.session", "peer=${peerDeviceId.takeLast(8)} links=$links")
+    if (lanError == null && mutableStatus.value.running) {
+      mutableStatus.value = mutableStatus.value.copy(summary = readySummary())
+    }
+  }
+
+  override fun onTransfer(event: NoteLinkTransferEvent) {
+    when (event) {
+      is NoteLinkTransferEvent.Started -> {
+        meters[event.itemId] = TransferProgressMeter(System.currentTimeMillis())
+        val now = System.currentTimeMillis()
+        mutableSnapshot.value = TransferSnapshot(
+          operationId = event.itemId,
+          itemId = event.itemId,
+          deviceId = event.peerDeviceId,
+          phase = TransferPhase.TRANSFERRING,
+          mode = if (event.link == "ble") null else TransferMode.LAN,
+          totalBytes = event.totalBytes,
+          startedAtMillis = now,
+          phaseStartedAtMillis = now,
+        )
+        emitEvent(TransferEvent.PhaseChanged(event.itemId, TransferPhase.IDLE, TransferPhase.TRANSFERRING))
+      }
+      is NoteLinkTransferEvent.Progress -> {
+        val meter = meters[event.itemId] ?: return
+        val sample = meter.sample(event.bytes, event.totalBytes)
+        mutableSnapshot.value = mutableSnapshot.value.copy(
+          bytesTransferred = event.bytes,
+          totalBytes = event.totalBytes,
+          bytesPerSecond = sample.bytesPerSecond,
+          averageBytesPerSecond = sample.averageBytesPerSecond,
+          etaMillis = sample.etaMillis,
+        )
+      }
+      is NoteLinkTransferEvent.Finished -> {
+        meters.remove(event.itemId)
+        mutableSnapshot.value = mutableSnapshot.value.copy(
+          phase = TransferPhase.COMPLETE,
+          bytesTransferred = mutableSnapshot.value.totalBytes,
+          phaseStartedAtMillis = System.currentTimeMillis(),
+        )
+        timelines.record(
+          LinkTimeline(
+            operation = "stream",
+            transport = mutableSnapshot.value.mode?.name?.lowercase() ?: "ble",
+            totalMillis = event.millis,
+          ),
+        )
+        mutableStatus.value = mutableStatus.value.copy(timelineSummary = timelines.summary())
+        emitEvent(TransferEvent.PhaseChanged(event.itemId, TransferPhase.TRANSFERRING, TransferPhase.COMPLETE))
+      }
+      is NoteLinkTransferEvent.Failed -> {
+        meters.remove(event.itemId)
+        val failure = TransferFailure(TransferErrorCode.INTERNAL, event.message, true)
+        mutableSnapshot.value = mutableSnapshot.value.copy(phase = TransferPhase.FAILED, lastFailure = failure, canRetry = true)
+        emitEvent(TransferEvent.Failed(event.itemId, failure))
+      }
+    }
+  }
+
+  override fun log(message: String) = DesktopLog.info("transfer.v4", message)
+
+  fun importNotePackage(file: File): String = noteUpdate.importLatest(file).version.display
 
   private fun emitEvent(event: TransferEvent) {
-    if (!mutableEvents.tryEmit(event)) DesktopLog.info(
-      "transfer.event.dropped",
-      event.javaClass.simpleName
-    )
+    if (!mutableEvents.tryEmit(event)) DesktopLog.info("transfer.event.dropped", event.javaClass.simpleName)
     val entry = eventLog.record(event)
     val detail = "operation=${entry.operationId ?: "none"} ${entry.detail}"
     when (entry.level) {
@@ -768,72 +601,16 @@ class DesktopTransferService(
     }
   }
 
-  private companion object {
-    const val BLE_FINAL_RESPONSE_SETTLE_MILLIS = 500L
-  }
-
-  private fun requireLease(id: UUID, peerId: String): DesktopSenderLease {
-    require(leaseOwners[id] == peerId) { "Lease does not belong to the current device" }
-    return requireNotNull(leases[id]) { "Lease does not exist" }
-  }
-
-  private fun beginPush(peerId: String, command: BleCommand.PushOffer): DesktopInboxBegin {
-    val id = command.offer.artifactId
-    val storedOwner = inbox.find(id)?.sourceDeviceId
-    require(storedOwner == null || storedOwner == peerId) { "Export task does not belong to the current device" }
-    val result = inbox.begin(peerId, command.offer)
-    if (result is DesktopInboxBegin.Receive) {
-      val activeOwner = pushedOwners.putIfAbsent(id, peerId)
-      require(activeOwner == null || activeOwner == peerId) { "Export task does not belong to the current device" }
-    }
-    return result
-  }
-
-  private fun requirePushOwner(id: UUID, peerId: String) {
-    require(pushedOwners[id] == peerId) { "Export task does not belong to the current device" }
-  }
-
-  @Synchronized
   override fun cancel() {
-    listeningSocket?.close();
-    listeningSocket = null
-    transferJobs.values.forEach(Job::cancel);
-    transferJobs.clear()
-    val current = snapshot.value
-    val operationId = current.operationId
-    if (operationId != null && current.canCancel) {
-      val failure =
-        TransferFailure(TransferErrorCode.CANCELLED, "Transfer cancelled", true, current.mode)
-      fail(operationId, failure)
-    }
+    mutableSnapshot.value = TransferSnapshot()
   }
 
   override fun close() {
-    stop();
+    stop()
     noteUpdate.close()
-    scope.cancel();
+    scope.cancel()
     native.close()
   }
-
-  private sealed interface PushState {
-    data class Waiting(
-      val offer: com.betterhv.transfer.core.ExportTransferOffer,
-      val partial: File
-    ) : PushState
-
-    data class Receiving(
-      val offer: com.betterhv.transfer.core.ExportTransferOffer,
-      val partial: File
-    ) : PushState
-
-    data object Complete : PushState
-    data class Failed(val failure: TransferFailure) : PushState
-  }
-
-  private data class AuthenticatedDesktopCommand(
-    val pairing: DesktopPairing,
-    val plaintext: ByteArray
-  )
 
   private data class WindowsVersion(val supported: Boolean, val message: String)
 
@@ -842,15 +619,18 @@ class DesktopTransferService(
       return WindowsVersion(false, "Only Windows 10 1903+ and Windows 11 x64 are supported")
     }
     val architecture = System.getProperty("os.arch")
-    if (architecture != "amd64" && architecture != "x86_64") return WindowsVersion(
-      false,
-      "Only x64 is supported"
-    )
+    if (architecture != "amd64" && architecture != "x86_64") return WindowsVersion(false, "Only x64 is supported")
     val version = System.getProperty("os.version").split('.').mapNotNull(String::toIntOrNull)
     return if ((version.firstOrNull() ?: 0) < 10) {
       WindowsVersion(false, "Windows 10 1903 or later is required")
     } else {
       WindowsVersion(true, "")
     }
+  }
+
+  private companion object {
+    const val TRANSPORT_LAN = 1
+    const val EVENT_WAIT_MILLIS = 5_000
+    const val EVENT_ERROR_BACKOFF_MILLIS = 500L
   }
 }

@@ -142,69 +142,16 @@ class DesktopSettings(private val paths: DesktopPaths, private val native: Windo
 
   val pairing: DesktopPairing? get() = pairings.maxByOrNull(DesktopPairing::lastUsedAt)
 
-  /** Owner-side pairing used while the N10Pro enters the code shown by NoteLink. */
-  val ownerPairing: DesktopPairing
-    get() = synchronized(lock) {
-      val code = ownerPairingCodeLocked()
-      DesktopPairing(ownerPairingPendingIdLocked(), "N10Pro", derivePairingKey(code))
-    }
-
-  val ownerPairingCode: String get() = synchronized(lock) { ownerPairingCodeLocked() }
-  val pendingOwnerPairingCode: String?
-    get() = synchronized(lock) {
-      values.getProperty(
-        KEY_OWNER_CODE
-      )
-    }
-  val pendingOwnerPairing: DesktopPairing?
-    get() = synchronized(lock) {
-      val code = values.getProperty(KEY_OWNER_CODE) ?: return@synchronized null
-      DesktopPairing(ownerPairingPendingIdLocked(), "N10Pro", derivePairingKey(code))
-    }
-
-  fun beginOwnerPairing() = synchronized(lock) {
-    values.remove(KEY_OWNER_CODE)
-    values.remove(KEY_OWNER_PENDING_ID)
-    ownerPairingCodeLocked()
-    persist()
-  }
-
-  fun pairWithCode(
-    code: String,
-    deviceId: String = "betterhv-note",
-    deviceName: String = "N10Pro"
-  ) {
-    require(
-      code.length == 6 && code.all(Char::isDigit),
-    ) { "Pairing code must contain six digits" }
-    val key = TransferCrypto.hkdfSha256(
-      code.encodeToByteArray(),
-      "BetterHv-manual-v1".encodeToByteArray(),
-      "paired-device".encodeToByteArray(),
-      32,
-    )
-    val protected = native.protect(key)
-    synchronized(lock) {
-      savePairingLocked(
-        DesktopPairing(deviceId, deviceName, key, nextLastUsedLocked()),
-        protected,
-      )
-    }
-  }
-
-  /** Persists the key used by the owner-side manual pairing after authentication succeeds. */
-  fun completeOwnerPairing(deviceId: String = "betterhv-note", deviceName: String = "N10Pro") {
-    val key = ownerPairing.sharedKey
-    val protected = native.protect(key)
-    synchronized(lock) {
-      savePairingLocked(
-        DesktopPairing(deviceId, deviceName, key, nextLastUsedLocked()),
-        protected,
-        persist = false,
-      )
-      values.remove(KEY_OWNER_CODE)
-      values.remove(KEY_OWNER_PENDING_ID)
-      persist()
+  /**
+   * Stores the result of an SRP pairing run: the Note's full device id and the derived PSK.
+   * Re-pairing the same Note replaces its key and keeps its custom name.
+   */
+  fun storePairing(deviceId: String, deviceName: String, psk: ByteArray): DesktopPairing {
+    require(psk.size == 32) { "Pairing key must be 32 bytes" }
+    val protected = native.protect(psk)
+    return synchronized(lock) {
+      val name = pairingsLocked().firstOrNull { it.deviceId == deviceId }?.deviceName ?: deviceName
+      DesktopPairing(deviceId, name, psk, nextLastUsedLocked()).also { savePairingLocked(it, protected) }
     }
   }
 
@@ -216,26 +163,9 @@ class DesktopSettings(private val paths: DesktopPaths, private val native: Windo
     )
   }
 
-  fun resolveIdentity(oldDeviceId: String, deviceId: String): DesktopPairing = synchronized(lock) {
-    val old = requireNotNull(pairingsLocked().firstOrNull { it.deviceId == oldDeviceId })
-    if (oldDeviceId == deviceId) {
-      markLastUsed(deviceId)
-      return@synchronized requireNotNull(pairing)
-    }
-    require(pairingsLocked().none { it.deviceId == deviceId }) { "This device identity already exists" }
-    removePairingLocked(oldDeviceId)
-    old.copy(deviceId = deviceId, lastUsedAt = nextLastUsedLocked()).also {
-      savePairingLocked(it, native.protect(it.sharedKey))
-    }
-  }
-
   fun unpair(deviceId: String? = null) = synchronized(lock) {
     val ids = if (deviceId == null) pairingIdsLocked() else listOf(deviceId)
     ids.forEach(::removePairingLocked)
-    if (deviceId == null) {
-      values.remove(KEY_OWNER_CODE)
-      values.remove(KEY_OWNER_PENDING_ID)
-    }
     persist()
   }
 
@@ -249,18 +179,6 @@ class DesktopSettings(private val paths: DesktopPaths, private val native: Windo
       pairingIdsLocked().filterNot { it == deviceId }.joinToString(",") { pairingToken(it) },
     )
   }
-
-  private fun ownerPairingCodeLocked(): String = values.getProperty(KEY_OWNER_CODE)
-    ?: (0..999999).random().toString().padStart(6, '0').also {
-      values.setProperty(KEY_OWNER_CODE, it);
-      persist()
-    }
-
-  private fun ownerPairingPendingIdLocked(): String = values.getProperty(KEY_OWNER_PENDING_ID)
-    ?: "pending:${UUID.randomUUID()}".also {
-      values.setProperty(KEY_OWNER_PENDING_ID, it);
-      persist()
-    }
 
   private fun pairingsLocked(): List<DesktopPairing> = pairingIdsLocked().mapNotNull { id ->
     val token = pairingToken(id)
@@ -323,13 +241,6 @@ class DesktopSettings(private val paths: DesktopPaths, private val native: Windo
     (pairingsLocked().maxOfOrNull(DesktopPairing::lastUsedAt) ?: 0L) + 1L,
   )
 
-  private fun derivePairingKey(code: String): ByteArray = TransferCrypto.hkdfSha256(
-    code.encodeToByteArray(),
-    "BetterHv-manual-v1".encodeToByteArray(),
-    "paired-device".encodeToByteArray(),
-    32,
-  )
-
   private fun persist() {
     paths.settings.parentFile?.mkdirs()
     val temporary = File(paths.settings.parentFile, "${paths.settings.name}.tmp")
@@ -356,8 +267,6 @@ class DesktopSettings(private val paths: DesktopPaths, private val native: Windo
     const val KEY_PEER_ID = "peerDeviceId"
     const val KEY_PEER_NAME = "peerDeviceName"
     const val KEY_SECRET = "protectedSharedKey"
-    const val KEY_OWNER_CODE = "ownerPairingCode"
-    const val KEY_OWNER_PENDING_ID = "ownerPairingPendingId"
     const val KEY_PAIRING_IDS = "pairedDeviceIds"
     const val PAIRING_PREFIX = "paired."
   }
@@ -397,6 +306,12 @@ class DesktopQueueRepository(
 
   init {
     if (!databaseExisted) SenderQueueDatabase.Schema.create(driver)
+    if (databaseExisted) {
+      // SQLDelight's generated mapper reads SELECT * positionally, so older databases need the
+      // new nullable columns before the first query.
+      runCatching { driver.execute(null, "ALTER TABLE queue_items ADD COLUMN content_id TEXT", 0) }
+      runCatching { driver.execute(null, "ALTER TABLE queue_items ADD COLUMN delivery_group TEXT", 0) }
+    }
     driver.execute(null, "PRAGMA journal_mode=WAL", 0)
     driver.execute(null, "PRAGMA busy_timeout=5000", 0)
     publish()
@@ -496,6 +411,22 @@ class DesktopQueueRepository(
     ).also { insertWithPayload(it, target.absolutePath, null); publish() }
   }
 
+  /**
+   * Re-targets unsent items addressed to a Note that is no longer paired (it was removed or
+   * re-paired under a new device id) to [deviceId]; otherwise no paired Note could ever see them.
+   */
+  @Synchronized
+  fun adoptOrphans(pairedIds: Set<String>, deviceId: String): Int {
+    val orphans = items().filter {
+      val destination = it.destinationDeviceId
+      destination != null && destination !in pairedIds &&
+        it.state in setOf(QueueState.PENDING, QueueState.FAILED)
+    }
+    orphans.forEach { update(it.copy(destinationDeviceId = deviceId)) }
+    if (orphans.isNotEmpty()) publish()
+    return orphans.size
+  }
+
   @Synchronized
   fun counts(): ContentCounts = items().filter { it.state == QueueState.PENDING }.let { available ->
     available.contentCounts()
@@ -561,7 +492,7 @@ class DesktopQueueRepository(
     queries.updateItem(
       item.destinationDeviceId, item.kind.name, item.mimeType, item.byteLength, item.sha256,
       item.createdAt, item.position, item.state.name, item.displayName, item.leaseExpiresAt,
-      item.failureReason, item.id.toString(),
+      item.failureReason, item.contentId, item.deliveryGroup, item.id.toString(),
     )
     publish()
   }
@@ -600,7 +531,7 @@ class DesktopQueueRepository(
     queries.insertItem(
       item.id.toString(), item.destinationDeviceId, item.kind.name, item.mimeType, item.byteLength,
       item.sha256, item.createdAt, item.position, item.state.name, item.displayName,
-      item.leaseExpiresAt, item.failureReason, payload, text,
+      item.leaseExpiresAt, item.failureReason, payload, text, item.contentId, item.deliveryGroup,
     )
   }
 
@@ -894,6 +825,8 @@ private fun Queue_items.queueItem() = QueueItem(
   display_name,
   lease_expires_at,
   failure_reason,
+  content_id,
+  delivery_group,
 )
 
 private fun Inbox_exports.inboxItem() = DesktopInboxItem(

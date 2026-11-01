@@ -64,25 +64,21 @@ class DesktopSettingsTest {
   }
 
   @Test
-  fun ownerPairingPersistsAfterAuthentication() {
+  fun srpPairingPersistsTheFullIdentityAndKey() {
     val root = createTempDirectory("notelink-settings-").toFile()
     try {
       val native = PassthroughNativeApi()
       val paths = DesktopPaths(root)
       val settings = DesktopSettings(paths, native)
-      val code = settings.ownerPairingCode
-      val ownerKey = settings.ownerPairing.sharedKey
-
-      assertEquals(6, code.length)
-      assertEquals(true, code.all(Char::isDigit))
+      val key = ByteArray(32) { it.toByte() }
       assertNull(settings.pairing)
 
-      settings.completeOwnerPairing()
+      settings.storePairing("note-device-id", "N10Pro", key)
 
       val reloaded = DesktopSettings(paths, native).pairing
-      assertEquals("betterhv-note", reloaded?.deviceId)
+      assertEquals("note-device-id", reloaded?.deviceId)
       assertEquals("N10Pro", reloaded?.deviceName)
-      assertContentEquals(ownerKey, reloaded?.sharedKey)
+      assertContentEquals(key, reloaded?.sharedKey)
     } finally {
       root.deleteRecursively()
     }
@@ -95,8 +91,8 @@ class DesktopSettingsTest {
       val native = PassthroughNativeApi()
       val paths = DesktopPaths(root)
       val settings = DesktopSettings(paths, native)
-      settings.pairWithCode("111111", "note-1", "书房")
-      settings.pairWithCode("222222", "note-2", "办公室")
+      settings.storePairing("note-1", "书房", ByteArray(32) { 1 })
+      settings.storePairing("note-2", "办公室", ByteArray(32) { 2 })
 
       val reloaded = DesktopSettings(paths, native)
       assertEquals(setOf("note-1", "note-2"), reloaded.pairings.map { it.deviceId }.toSet())
@@ -120,12 +116,13 @@ class DesktopSettingsTest {
       deviceName: String,
       imageCount: Int,
       textCount: Int,
-      pdfCount: Int
+      pdfCount: Int,
+      flags: Int,
     ) = Unit
 
-    override fun updateBleCounts(imageCount: Int, textCount: Int, pdfCount: Int) = Unit
-    override fun pollBleCommand(timeoutMillis: Int): ByteArray? = null
-    override fun respondBle(value: ByteArray) = Unit
+    override fun updateBleCounts(imageCount: Int, textCount: Int, pdfCount: Int, flags: Int) = Unit
+    override fun pollBleEvent(timeoutMillis: Int): com.betterhv.transfer.windows.BleControlEvent? = null
+    override fun notifyBle(client: String, value: ByteArray) = Unit
     override fun stopBle() = Unit
     override fun lanInfo() =
       com.betterhv.transfer.windows.WindowsLanInfo("192.168.1.10", "Test WiFi")

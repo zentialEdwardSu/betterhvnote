@@ -33,6 +33,7 @@ import com.betterhv.note.sender.shared.DashboardHistoryItem
 import com.betterhv.note.sender.shared.DashboardItem
 import com.betterhv.note.sender.shared.DashboardItemState
 import com.betterhv.note.sender.shared.DashboardPairedDevice
+import com.betterhv.note.sender.shared.DashboardPairing
 import com.betterhv.note.sender.shared.DashboardState
 import com.betterhv.note.sender.shared.NoteLinkDashboard
 import com.betterhv.note.sender.shared.NoteLinkI18n
@@ -342,6 +343,8 @@ private class DesktopAppController(private val native: JnaWindowsNativeApi) : Au
     setReceiveEnabled = ::setReceiveEnabled,
     saveDisplayName = ::saveDisplayName,
     beginPairing = ::beginPairing,
+    submitPairingCode = transfer::submitPairingCode,
+    cancelPairing = transfer::cancelPairing,
     selectDevice = ::selectDevice,
     unpair = ::unpair,
     refreshStatus = ::refreshStatus,
@@ -363,7 +366,7 @@ private class DesktopAppController(private val native: JnaWindowsNativeApi) : Au
     }
     scope.launch {
       val revisionAndUpdate =
-        combine(pairingRevision, updateUiState, notePackageStatus) { _, update, packageStatus ->
+        combine(pairingRevision, updateUiState, notePackageStatus, transfer.pairingState) { _, update, packageStatus, _ ->
           update to packageStatus
         }
       val queueAndHistory = combine(queue.itemFlow, queue.historyFlow) { items, history ->
@@ -385,6 +388,7 @@ private class DesktopAppController(private val native: JnaWindowsNativeApi) : Au
           statusDetail = status.detail,
           transfer = status.transfer,
           transferLog = status.transferLog,
+          timelineSummary = status.timelineSummary,
           showRecentTransferEvents = settings.showRecentTransferEvents,
           language = settings.language,
           receiveEnabled = settings.receiveEnabled,
@@ -392,10 +396,12 @@ private class DesktopAppController(private val native: JnaWindowsNativeApi) : Au
           selectedDeviceId = pairing?.deviceId,
           sendOrder = settings.sendOrder,
           nextQueueItemId = nextQueueItemId(queued, settings.sendOrder, pairing?.deviceId),
-          pairingCode = if (pairings.isEmpty()) {
-            settings.ownerPairingCode
-          } else {
-            settings.pendingOwnerPairingCode
+          pairing = when (val pairingState = transfer.pairingState.value) {
+            DesktopPairingState.Idle -> null
+            DesktopPairingState.Entering -> DashboardPairing()
+            is DesktopPairingState.Waiting -> DashboardPairing(waitingCode = pairingState.code, message = pairingState.message)
+            is DesktopPairingState.Paired -> DashboardPairing(pairedName = pairingState.deviceName)
+            is DesktopPairingState.Failed -> DashboardPairing(message = pairingState.message)
           },
           queue = queued.map { item ->
             DashboardItem(
@@ -653,13 +659,8 @@ private class DesktopAppController(private val native: JnaWindowsNativeApi) : Au
   }
 
   fun beginPairing() {
-    runCatching {
-      settings.beginOwnerPairing();
-      pairingRevision.value++;
-      transfer.restart()
-    }
-      .onSuccess { notice.value = noteLinkText("新的配对码已生成", "New pairing code generated") }
-      .onFailure { notice.value = it.message ?: "Could not generate pairing code" }
+    if (!transfer.status.value.running && settings.receiveEnabled) transfer.start()
+    transfer.openPairing()
   }
 
   fun selectDevice(deviceId: String) {
