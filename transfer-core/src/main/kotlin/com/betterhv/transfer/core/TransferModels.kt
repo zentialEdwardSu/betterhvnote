@@ -51,6 +51,10 @@ data class QueueItem(
   val displayName: String? = null,
   val leaseExpiresAt: Long? = null,
   val failureReason: String? = null,
+  /** Immutable content identity shared by every fan-out delivery of the same bytes. */
+  val contentId: String? = null,
+  /** Groups deliveries that were enqueued for multiple targets in one action. */
+  val deliveryGroup: String? = null,
 ) {
   init {
     require(byteLength >= 0) { "byteLength must be non-negative" }
@@ -62,7 +66,8 @@ data class QueueItem(
     kind == other.kind && mimeType == other.mimeType && byteLength == other.byteLength &&
     sha256.contentEquals(other.sha256) && createdAt == other.createdAt &&
     position == other.position && state == other.state && displayName == other.displayName &&
-    leaseExpiresAt == other.leaseExpiresAt && failureReason == other.failureReason
+    leaseExpiresAt == other.leaseExpiresAt && failureReason == other.failureReason &&
+    contentId == other.contentId && deliveryGroup == other.deliveryGroup
 
   override fun hashCode(): Int = 31 * id.hashCode() + sha256.contentHashCode()
 

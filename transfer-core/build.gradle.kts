@@ -4,6 +4,16 @@ plugins {
     id("org.jetbrains.kotlin.jvm")
     id("com.android.lint")
     id("dev.detekt")
+    id("com.google.protobuf")
+}
+
+protobuf {
+    protoc { artifact = "com.google.protobuf:protoc:4.36.2" }
+    generateProtoTasks {
+        all().forEach { task ->
+            task.builtins.getByName("java").option("lite")
+        }
+    }
 }
 
 java {
@@ -32,6 +42,7 @@ lint {
 
 dependencies {
     api("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.11.0")
+    api("com.google.protobuf:protobuf-javalite:4.36.2")
     testImplementation(kotlin("test"))
     testImplementation("junit:junit:4.13.2")
 }

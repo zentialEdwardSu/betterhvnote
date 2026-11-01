@@ -99,27 +99,6 @@ class TransferCoreTest {
     assertArrayEquals(frame.payload, decoded.payload)
   }
 
-  @Test fun `BLE queue protocol golden bytes are owned by transfer core`() {
-    val capabilities = DeviceCapabilities(
-      modes = TransferModes.LAN,
-      lanEndpoint = NetworkEndpoint("192.168.1.20"),
-      ssidFingerprint = ByteArray(8) { it.toByte() },
-    )
-    assertArrayEquals(
-      byteArrayOf(3, 1, 0, 2, 0, 3, 0, 4),
-      BleQueueProtocol.encode(BleResponse.Counts(2, 3, 4)),
-    )
-    val command = BleCommand.Capabilities(capabilities)
-    assertEquals(command, BleQueueProtocol.decodeCommand(BleQueueProtocol.encode(command)))
-    assertEquals(
-      BleResponse.Counts(2, 3, 4),
-      BleQueueProtocol.decodeResponse(byteArrayOf(3, 1, 0, 2, 0, 3, 0, 4)),
-    )
-    org.junit.Assert.assertThrows(UnsupportedBleProtocolException::class.java) {
-      BleQueueProtocol.decodeCommand(byteArrayOf(1, 11))
-    }
-  }
-
   @Test fun `ssid normalization fingerprint and session keys are stable`() {
     val key = ByteArray(32) { it.toByte() }
     assertArrayEquals(

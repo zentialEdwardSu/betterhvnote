@@ -30,21 +30,22 @@ class CommonProtocolTest {
 
     @Test fun advertisementGoldenBytesRemainCompatibleAcrossPlatforms() {
         val encoded = NoteLinkAdvertisementCodec.encode(
-            byteArrayOf(0x10, 0x20, 0x30, 0x40, 0x50), "NoteLink", 2, 3, 4
+            byteArrayOf(0x10, 0x20, 0x30, 0x40, 0x50), "NoteLink", 2, 3, 4, NoteLinkAdvertisementCodec.FLAG_PAIRING
         )
 
         assertContentEquals(
             byteArrayOf(
-                3, 2, 3, 4, 0x10, 0x20, 0x30, 0x40, 0x50,
+                4, 3, 2, 3, 4, 0x10, 0x20, 0x30, 0x40, 0x50,
                 0x4e, 0x6f, 0x74, 0x65, 0x4c, 0x69, 0x6e, 0x6b
             ),
             encoded
         )
         val decoded = NoteLinkAdvertisementCodec.decode(encoded)
-        assertEquals(NoteLinkIdentityCodec.PROTOCOL_VERSION, decoded.protocolVersion)
+        assertEquals(NoteLinkAdvertisementCodec.VERSION, decoded.protocolVersion)
         assertEquals(2, decoded.imageCount)
         assertEquals(3, decoded.textCount)
         assertEquals(4, decoded.pdfCount)
+        assertEquals(true, decoded.pairing)
         assertContentEquals(byteArrayOf(0x10, 0x20, 0x30, 0x40, 0x50), decoded.identityHash)
         assertEquals("NoteLink", decoded.deviceName)
     }

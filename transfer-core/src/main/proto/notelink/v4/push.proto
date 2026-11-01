@@ -1,0 +1,68 @@
+syntax = "proto3";
+
+package notelink.v4;
+
+import "notelink/v4/common.proto";
+import "notelink/v4/queue.proto";
+
+option java_package = "com.betterhv.transfer.proto.v4";
+option java_multiple_files = true;
+option java_outer_classname = "NoteLinkV4Push";
+option optimize_for = LITE_RUNTIME;
+
+enum PushState {
+  PUSH_STATE_UNSPECIFIED = 0;
+  PUSH_PENDING = 1;
+  PUSH_ACCEPTED = 2;
+  PUSH_COMPLETE = 3;
+  PUSH_REJECTED = 4;
+}
+
+message PushOffer {
+  bytes item_id = 1;
+  ContentKind kind = 2;
+  string mime_type = 3;
+  uint64 byte_length = 4;
+  bytes sha256 = 5;
+  string display_name = 6;
+  uint32 flags = 7;
+  reserved 8 to 15;
+}
+
+message PushStatus {
+  bytes item_id = 1;
+  PushState state = 2;
+  uint64 bytes_transferred = 3;
+  reserved 4 to 11;
+}
+
+// Client -> server: "do you hold a newer build of my app?"
+message UpdateCheck {
+  string package_name = 1;
+  uint64 version_code = 2;
+  string version_name = 3;
+  bytes signer_sha256 = 4;
+  // One check run; repeated results of the same run report preparation progress.
+  bytes operation_id = 5;
+  reserved 6 to 15;
+}
+
+enum UpdateState {
+  UPDATE_STATE_UNSPECIFIED = 0;
+  UPDATE_UP_TO_DATE = 1;
+  UPDATE_AVAILABLE = 2;
+  UPDATE_PREPARING = 3;
+  UPDATE_FAILED = 4;
+}
+
+// Server -> client. When AVAILABLE, `offer` is a leased CONTENT_APP_PACKAGE item streamed like
+// any other offer and committed after the installer accepted it.
+message UpdateResult {
+  UpdateState state = 1;
+  string latest_version = 2;
+  Offer offer = 3;
+  string message = 4;
+  uint64 bytes_prepared = 5;
+  uint64 total_bytes = 6;
+  reserved 7 to 15;
+}

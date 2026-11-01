@@ -5,6 +5,8 @@ import java.net.InetAddress
 import java.text.Normalizer
 import java.util.UUID
 
+const val NOTELINK_LAN_PORT = 39817
+
 enum class TransferMode(val bit: Int) {
   LAN(1),
   WIFI_DIRECT(2),
@@ -30,7 +32,7 @@ object TransferModes {
 
 enum class SsidMatch { MATCH, MISMATCH, UNKNOWN }
 
-data class NetworkEndpoint(val host: String, val port: Int = SharedFileTransfer.PORT) {
+data class NetworkEndpoint(val host: String, val port: Int = NOTELINK_LAN_PORT) {
   init {
     require(port in 1..65535) { "Invalid endpoint port: $port" }
     require(host.isNotBlank()) { "Endpoint host is blank" }
@@ -55,7 +57,7 @@ data class HighBandwidthEndpoint(
   val ownerIp: String,
   val networkName: String,
   val passphrase: String,
-  val port: Int = SharedFileTransfer.PORT,
+  val port: Int = NOTELINK_LAN_PORT,
 ) {
   init {
     require(deviceAddress.isNotBlank())
@@ -66,7 +68,7 @@ data class HighBandwidthEndpoint(
 }
 
 data class DeviceCapabilities(
-  val protocolVersion: Int = BleQueueProtocol.VERSION,
+  val protocolVersion: Int = PROTOCOL_VERSION_V4,
   val modes: Int,
   val lanEndpoint: NetworkEndpoint? = null,
   val ssidFingerprint: ByteArray? = null,
@@ -74,7 +76,6 @@ data class DeviceCapabilities(
   val extensions: Int = 0,
 ) {
   init {
-    require(protocolVersion == BleQueueProtocol.VERSION) { "Unsupported capability version $protocolVersion" }
     TransferModes.requireValid(modes)
     require(ssidFingerprint == null || ssidFingerprint.size == SSID_FINGERPRINT_BYTES)
     require(!TransferModes.contains(modes, TransferMode.LAN) || lanEndpoint != null) {
@@ -92,6 +93,7 @@ data class DeviceCapabilities(
 
   companion object {
     const val SSID_FINGERPRINT_BYTES = 8
+    const val PROTOCOL_VERSION_V4 = 4
   }
 }
 

@@ -1,0 +1,73 @@
+syntax = "proto3";
+
+package notelink.v4;
+
+import "notelink/v4/common.proto";
+
+option java_package = "com.betterhv.transfer.proto.v4";
+option java_multiple_files = true;
+option java_outer_classname = "NoteLinkV4Queue";
+option optimize_for = LITE_RUNTIME;
+
+enum LeaseKind {
+  LEASE_KIND_UNSPECIFIED = 0;
+  LEASE_HEARTBEAT = 1;
+  LEASE_COMMIT = 2;
+  LEASE_RELEASE = 3;
+}
+
+message Offer {
+  bytes item_id = 1;
+  ContentKind kind = 2;
+  string mime_type = 3;
+  uint64 byte_length = 4;
+  bytes sha256 = 5;
+  string display_name = 6;
+  uint32 lease_ttl_ms = 7;
+  uint64 queue_position = 8;
+  uint32 flags = 9;
+  // Small text payloads ride in the offer so a text insert needs no stream.
+  bytes inline_data = 10;
+  reserved 11 to 23;
+}
+
+message FetchRequest {
+  ContentKind kind = 1;
+  uint32 max_items = 2;
+  uint32 flags = 3;
+  reserved 4 to 15;
+}
+
+message FetchResult {
+  repeated Offer offers = 1;
+  uint64 queue_revision = 2;
+  bool more = 3;
+  reserved 4 to 15;
+}
+
+message LeaseUpdate {
+  repeated LeaseAction actions = 1;
+  reserved 2 to 7;
+}
+
+message LeaseAction {
+  bytes item_id = 1;
+  LeaseKind action = 2;
+  uint32 result = 3;
+  reserved 4 to 11;
+}
+
+message KindCount {
+  ContentKind kind = 1;
+  uint32 count = 2;
+  reserved 3 to 7;
+}
+
+// Server -> client whenever its queue for this peer changes. `heads` carries the next offer per
+// kind (not leased yet), so the client can start a transfer without a FetchRequest round trip.
+message QueueChanged {
+  repeated KindCount counts = 1;
+  repeated Offer heads = 2;
+  uint64 queue_revision = 3;
+  reserved 4 to 15;
+}

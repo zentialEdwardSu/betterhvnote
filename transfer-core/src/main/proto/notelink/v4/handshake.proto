@@ -1,0 +1,80 @@
+syntax = "proto3";
+
+package notelink.v4;
+
+import "notelink/v4/common.proto";
+import "notelink/v4/queue.proto";
+
+option java_package = "com.betterhv.transfer.proto.v4";
+option java_multiple_files = true;
+option java_outer_classname = "NoteLinkV4Handshake";
+option optimize_for = LITE_RUNTIME;
+
+message ClientHello {
+  uint32 major = 1;
+  uint32 minor_min = 2;
+  uint32 minor_max = 3;
+  string device_id = 4;
+  uint64 client_time_ms = 5;
+  CapabilitySet capabilities = 6;
+  Request request = 7;
+  bytes resume_token = 8;
+  uint32 max_record_bytes = 9;
+  SessionTicket listener_ticket = 10;
+  reserved 11 to 31;
+}
+
+message Request {
+  oneof kind {
+    FetchRequest fetch = 1;
+    PushIntent push = 2;
+    Ping ping = 3;
+    ResumeRequest resume = 4;
+  }
+}
+
+message PushIntent {
+  bytes item_id = 1;
+  ContentKind kind = 2;
+  string mime_type = 3;
+  uint64 byte_length = 4;
+  bytes sha256 = 5;
+  string display_name = 6;
+  reserved 7 to 15;
+}
+
+message ResumeRequest {
+  bytes session_id = 1;
+  uint64 received_bytes = 2;
+  reserved 3 to 15;
+}
+
+message ServerHello {
+  uint32 major = 1;
+  uint32 minor = 2;
+  bytes session_id = 3;
+  bytes server_nonce = 4;
+  CapabilitySet capabilities = 5;
+  repeated Offer offers = 6;
+  uint32 accepted_features = 7;
+  uint32 keepalive_ms = 8;
+  uint64 server_time_ms = 9;
+  SessionTicket listener_ticket = 10;
+  Reject reject = 11;
+  reserved 12 to 31;
+}
+
+message Ping {
+  uint64 sent_at_ms = 1;
+  reserved 2 to 7;
+}
+
+message Ack {
+  uint32 message_id = 1;
+  reserved 2 to 7;
+}
+
+message CapabilityUpdate {
+  CapabilitySet capabilities = 1;
+  reserved 2 to 7;
+}

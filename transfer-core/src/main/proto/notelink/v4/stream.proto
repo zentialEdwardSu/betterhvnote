@@ -1,0 +1,62 @@
+syntax = "proto3";
+
+package notelink.v4;
+
+import "notelink/v4/common.proto";
+
+option java_package = "com.betterhv.transfer.proto.v4";
+option java_multiple_files = true;
+option java_outer_classname = "NoteLinkV4Stream";
+option optimize_for = LITE_RUNTIME;
+
+enum StreamKind {
+  STREAM_KIND_UNSPECIFIED = 0;
+  STREAM_FILE = 1;
+  STREAM_TEXT = 2;
+  STREAM_CONTROL = 3;
+}
+
+message StreamOpen {
+  bytes item_id = 1;
+  uint64 total_bytes = 2;
+  bytes sha256 = 3;
+  uint64 offset = 4;
+  StreamKind kind = 5;
+  uint32 priority = 6;
+  uint32 initial_credit = 7;
+  string display_name = 8;
+  string mime_type = 9;
+  uint32 flags = 10;
+  reserved 11 to 23;
+}
+
+message StreamData {
+  bytes data = 1;
+  uint64 offset = 2;
+  reserved 3 to 7;
+}
+
+message StreamAck {
+  uint64 received_bytes = 1;
+  uint32 credit = 2;
+  reserved 3 to 7;
+}
+
+message StreamClose {
+  bytes sha256 = 1;
+  uint64 total_bytes = 2;
+  reserved 3 to 7;
+}
+
+message StreamComplete {
+  bytes sha256 = 1;
+  uint64 total_bytes = 2;
+  reserved 3 to 7;
+}
+
+message StreamReset {
+  ErrorCode code = 1;
+  string reason = 2;
+  bool retryable = 3;
+  reserved 4 to 11;
+}

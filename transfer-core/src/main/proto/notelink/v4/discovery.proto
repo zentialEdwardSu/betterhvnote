@@ -1,0 +1,35 @@
+syntax = "proto3";
+
+package notelink.v4;
+
+option java_package = "com.betterhv.transfer.proto.v4";
+option java_multiple_files = true;
+option java_outer_classname = "NoteLinkV4Discovery";
+option optimize_for = LITE_RUNTIME;
+
+// Compact advertisement payload. Over LAN it is the body of a UDP datagram
+// `"NLD4" | u8 type (1 = probe, 2 = announce) | Discovery`: the Note broadcasts a probe and every
+// NoteLink host replies with an announce sent straight to the prober.
+// Bits of `Discovery.flags` and of the manufacturer-data flags byte.
+enum DiscoveryFlag {
+  DISCOVERY_FLAG_UNSPECIFIED = 0;
+  DISCOVERY_PAIRING = 1;
+  DISCOVERY_HAS_ITEMS = 2;
+}
+
+message Discovery {
+  uint32 major = 1;
+  bytes identity_hash = 2;
+  uint32 flags = 3;
+  uint32 image_count = 4;
+  uint32 text_count = 5;
+  uint32 pdf_count = 6;
+  bytes connectable_address = 7;
+  uint32 features = 8;
+  // LAN discovery (UDP 39818) only: where the control/data TCP listener accepts connections.
+  uint32 tcp_port = 9;
+  string device_name = 10;
+  // Echoed from the probe so a client can ignore stale replies.
+  bytes probe_nonce = 11;
+  reserved 12 to 15;
+}

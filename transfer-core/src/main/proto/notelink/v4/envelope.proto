@@ -1,0 +1,41 @@
+syntax = "proto3";
+
+package notelink.v4;
+
+import "notelink/v4/common.proto";
+import "notelink/v4/handshake.proto";
+import "notelink/v4/queue.proto";
+import "notelink/v4/stream.proto";
+import "notelink/v4/push.proto";
+
+option java_package = "com.betterhv.transfer.proto.v4";
+option java_multiple_files = true;
+option java_outer_classname = "NoteLinkV4Envelope";
+option optimize_for = LITE_RUNTIME;
+
+// The oneof field number is the message type. Session, stream, sequence and
+// fragment information live in the record header, not in this message.
+message Frame {
+  oneof body {
+    ClientHello client_hello = 1;
+    ServerHello server_hello = 2;
+    FetchRequest fetch_request = 3;
+    FetchResult fetch_result = 4;
+    LeaseUpdate lease_update = 5;
+    StreamOpen stream_open = 6;
+    StreamData stream_data = 7;
+    StreamClose stream_close = 8;
+    StreamReset stream_reset = 9;
+    Ack ack = 10;
+    Ping ping = 11;
+    ProtocolError error = 12;
+    PushOffer push_offer = 13;
+    CapabilityUpdate capability_update = 14;
+    StreamComplete stream_complete = 15;
+    PushStatus push_status = 16;
+    QueueChanged queue_changed = 17;
+    UpdateCheck update_check = 18;
+    UpdateResult update_result = 19;
+    StreamAck stream_ack = 20;
+  }
+}

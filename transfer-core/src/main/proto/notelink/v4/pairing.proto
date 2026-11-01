@@ -1,0 +1,55 @@
+syntax = "proto3";
+
+package notelink.v4;
+
+import "notelink/v4/common.proto";
+
+option java_package = "com.betterhv.transfer.proto.v4";
+option java_multiple_files = true;
+option java_outer_classname = "NoteLinkV4Pairing";
+option optimize_for = LITE_RUNTIME;
+
+// SRP-6a pairing (RFC 5054 2048-bit group, SHA-256) keyed by the six-digit code the Note shows.
+// The records are clear text: every field is either public SRP material or a proof, and a wrong
+// code yields a failed proof without revealing anything that allows an offline guess.
+//
+// Note (initiator)            Phone / PC (responder, user typed the code)
+//   PairInit      ----------->
+//                 <-----------  PairChallenge
+//   PairConfirm   ----------->
+//                 <-----------  PairResult
+message PairInit {
+  string device_id = 1;
+  string device_name = 2;
+  bytes client_public = 3;
+  reserved 4 to 15;
+}
+
+message PairChallenge {
+  string device_id = 1;
+  string device_name = 2;
+  bytes salt = 3;
+  bytes server_public = 4;
+  reserved 5 to 15;
+}
+
+message PairConfirm {
+  bytes client_proof = 1;
+  reserved 2 to 15;
+}
+
+message PairResult {
+  bytes server_proof = 1;
+  ErrorCode error = 2;
+  uint32 attempts_left = 3;
+  reserved 4 to 15;
+}
+
+message PairingFrame {
+  oneof body {
+    PairInit init = 1;
+    PairChallenge challenge = 2;
+    PairConfirm confirm = 3;
+    PairResult result = 4;
+  }
+}

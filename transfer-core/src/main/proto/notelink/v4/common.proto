@@ -1,0 +1,146 @@
+syntax = "proto3";
+
+package notelink.v4;
+
+option java_package = "com.betterhv.transfer.proto.v4";
+option java_multiple_files = true;
+option java_outer_classname = "NoteLinkV4Common";
+option optimize_for = LITE_RUNTIME;
+
+// Field-number policy for every message in this package:
+//   * 1-15   hot fields, one-byte tags
+//   * 16-127 optional/feature fields
+//   * 128+   diagnostic fields
+// Numbers and names are append-only. A deleted field must be reserved by both
+// number and name before the next release. Enum zero is always UNSPECIFIED.
+
+enum ContentKind {
+  CONTENT_KIND_UNSPECIFIED = 0;
+  CONTENT_IMAGE = 1;
+  CONTENT_TEXT = 2;
+  CONTENT_PDF = 3;
+  CONTENT_APP_PACKAGE = 4;
+}
+
+enum ErrorCode {
+  ERROR_CODE_UNSPECIFIED = 0;
+  ERROR_UNSUPPORTED_PROTOCOL = 1;
+  ERROR_UNSUPPORTED_MODE = 2;
+  ERROR_INVALID_ENDPOINT = 3;
+  ERROR_NETWORK_UNKNOWN = 4;
+  ERROR_SSID_MISMATCH = 5;
+  ERROR_CONNECTION_TIMEOUT = 6;
+  ERROR_CONNECTION_REFUSED = 7;
+  ERROR_UNREACHABLE = 8;
+  ERROR_AUTHENTICATION_FAILED = 9;
+  ERROR_INTEGRITY_FAILED = 10;
+  ERROR_CANCELLED = 11;
+  ERROR_BUSY = 12;
+  ERROR_INTERNAL = 13;
+  ERROR_PROTOCOL_MISMATCH = 14;
+  ERROR_REPLAY_REJECTED = 15;
+  ERROR_CLOCK_SKEW = 16;
+  ERROR_UNKNOWN_PAIRING = 17;
+  ERROR_MESSAGE_TOO_LARGE = 18;
+  ERROR_STREAM_RESET = 19;
+  ERROR_GROUP_LOST = 20;
+  ERROR_RESOURCE_EXHAUSTED = 21;
+  ERROR_RATE_LIMITED = 22;
+  ERROR_STALLED = 23;
+  ERROR_PENDING_APPROVAL = 24;
+  ERROR_BLUETOOTH_UNAVAILABLE = 25;
+  ERROR_LAN_UNAVAILABLE = 26;
+  ERROR_TICKET_EXPIRED = 27;
+  ERROR_TOO_MANY_SESSIONS = 28;
+}
+
+// Values are bit masks, not enum semantics.
+enum Feature {
+  FEATURE_UNSPECIFIED = 0;
+  FEATURE_LAN_TICKET = 1;
+  FEATURE_MULTI_STREAM = 2;
+  FEATURE_BATCH_LEASE = 4;
+  FEATURE_P2P_5GHZ = 8;
+  FEATURE_P2P_CONCURRENT = 16;
+  FEATURE_P2P_CREDENTIAL_JOIN = 32;
+  FEATURE_STANDALONE_TICKET = 64;
+  FEATURE_ECDH_RESUME = 128;
+}
+
+enum Band {
+  BAND_UNSPECIFIED = 0;
+  BAND_2_4_GHZ = 1;
+  BAND_5_GHZ = 2;
+  BAND_AUTO = 3;
+}
+
+enum P2pState {
+  P2P_STATE_UNSPECIFIED = 0;
+  P2P_STATE_STARTING = 1;
+  P2P_STATE_READY = 2;
+}
+
+message Endpoint {
+  string host = 1;
+  uint32 port = 2;
+  reserved 3 to 7;
+}
+
+message CapabilitySet {
+  uint32 transports = 1;
+  Endpoint lan = 2;
+  P2pGroup p2p = 3;
+  bytes ssid_fingerprint = 4;
+  uint32 max_streams = 5;
+  uint32 max_record_bytes = 6;
+  uint64 max_inflight_bytes = 7;
+  repeated ContentKind kinds = 8;
+  uint32 features = 9;
+  string app_version = 10;
+  // Every usable unicast IPv4 endpoint of the listener, most preferred first. `lan` stays the
+  // primary candidate so a peer that only reads field 2 still works.
+  repeated Endpoint lan_candidates = 11;
+  string device_name = 12;
+  reserved 13 to 31;
+}
+
+message P2pGroup {
+  string ssid = 1;
+  bytes group_owner_ip = 2;
+  uint32 port = 3;
+  Band band = 4;
+  P2pState state = 5;
+  // Only ever sent inside an established session: some vendor stacks refuse a configured
+  // group and fall back to system-chosen credentials, which the joiner must learn.
+  string passphrase = 6;
+  reserved 7 to 15;
+}
+
+message SessionTicket {
+  uint32 version = 1;
+  bytes session_id = 2;
+  string listener_device_id = 3;
+  string peer_device_id = 4;
+  uint64 expires_at_ms = 5;
+  uint32 listener_port = 6;
+  bytes connection_nonce = 7;
+  reserved 8 to 15;
+}
+
+message Reject {
+  ErrorCode code = 1;
+  string message = 2;
+  bool recoverable = 3;
+  uint32 retry_after_ms = 4;
+  uint64 server_time_ms = 5;
+  reserved 6 to 15;
+}
+
+message ProtocolError {
+  ErrorCode code = 1;
+  string message = 2;
+  bool recoverable = 3;
+  uint32 retry_after_ms = 4;
+  uint64 detail = 5;
+  reserved 6 to 15;
+}
