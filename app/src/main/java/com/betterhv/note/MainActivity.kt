@@ -424,12 +424,10 @@ private fun AppRoot(
     var onlineNoteLinks by remember {
       mutableStateOf<List<PhoneTransferClient.AvailableNoteLink>>(emptyList())
     }
-    var pairingCandidates by remember {
-      mutableStateOf<List<PhoneTransferClient.PairingCandidate>>(emptyList())
-    }
-    var pairingScanActive by remember { mutableStateOf(false) }
+    var pairingCode by remember { mutableStateOf<String?>(null) }
+    var pairingMessage by remember { mutableStateOf<String?>(null) }
+    var pairingJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
     var pairingInProgress by remember { mutableStateOf(false) }
-    var suppressNextOnlineDiscovery by remember { mutableStateOf(false) }
     var transferStatusRevision by remember { mutableIntStateOf(0) }
     val updateViaNoteLink: (String) -> Unit = { clientId ->
       if (!TransferPermissions.hasAllNotePermissions(context)) {
@@ -459,7 +457,7 @@ private fun AppRoot(
               is PhoneTransferClient.NoteAppUpdateOutcome.Package -> {
                 val payload = outcome.lease.payload as? RemotePayload.AppPackage
                 if (payload == null) {
-                  runCatching { outcome.lease.commitAndAwait() }
+                  runCatching { outcome.lease.releaseAndAwait() }
                   noteAppUpdateState = NoteAppUpdateUiState.Failed("NoteLink returned a non-APK payload")
                 } else {
                   val staged = runCatching {
@@ -467,8 +465,8 @@ private fun AppRoot(
                       noteAppInstaller.validateAndStage(payload.stagedFile, outcome.version)
                     }
                   }
-                  runCatching { outcome.lease.commitAndAwait() }
                   staged.onSuccess { pending ->
+                    runCatching { outcome.lease.commitAndAwait() }
                     noteAppUpdateState = NoteAppUpdateUiState.Ready(pending.versionName)
                     if (!noteAppInstaller.launch(pending)) {
                       showNotice(
@@ -479,6 +477,7 @@ private fun AppRoot(
                       )
                     }
                   }.onFailure { error ->
+                    runCatching { outcome.lease.releaseAndAwait() }
                     payload.stagedFile.delete()
                     noteAppUpdateState = NoteAppUpdateUiState.Failed(error.message ?: "APK validation failed")
                   }
@@ -496,9 +495,13 @@ private fun AppRoot(
       var stopped = false
       val observer = LifecycleEventObserver { _, event ->
         when (event) {
-          Lifecycle.Event.ON_STOP -> stopped = true
+          Lifecycle.Event.ON_STOP -> {
+            stopped = true
+            phoneTransfer.releaseWarmLinks()
+          }
 
           Lifecycle.Event.ON_RESUME -> {
+            phoneTransfer.startLinks()
             noteAppInstaller.pending()?.let { noteAppUpdateState = NoteAppUpdateUiState.Ready(it.versionName) }
             if (stopped) {
               stopped = false
@@ -527,19 +530,12 @@ private fun AppRoot(
     val transferStatus = remember(transferStatusRevision, pairedClients, language) {
       noteTransferStatus(context, pairedClients.isNotEmpty(), missingTransferPermissions.isEmpty())
     }
-    LaunchedEffect(transferStatusRevision, pairedClients) {
-      if (suppressNextOnlineDiscovery) {
-        suppressNextOnlineDiscovery = false
-        onlineNoteLinks = emptyList()
-        return@LaunchedEffect
-      }
-      onlineNoteLinks = if (missingTransferPermissions.isEmpty() && pairedClients.isNotEmpty()) {
-        runCatching {
-          phoneTransfer.discoverAvailable(timeoutMillis = 3_000L) { onlineNoteLinks = it }
-        }.getOrDefault(emptyList())
-      } else {
-        emptyList()
-      }
+    val peerLinkStates by phoneTransfer.connections.states.collectAsState()
+    LaunchedEffect(transferStatusRevision, pairedClients, missingTransferPermissions.size) {
+      if (missingTransferPermissions.isEmpty() && pairedClients.isNotEmpty()) phoneTransfer.startLinks()
+    }
+    LaunchedEffect(peerLinkStates, pairedClients) {
+      onlineNoteLinks = phoneTransfer.onlineNoteLinks()
     }
 
     val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
@@ -1133,7 +1129,7 @@ private fun AppRoot(
               modifier = Modifier.fillMaxWidth(),
               shape = RectangleShape,
             ) {
-              Text(noteText("${available.client.name} · $count 项", "${available.client.name} · $count items"))
+              Text(noteText("${available.label} · $count 项", "${available.label} · $count items"))
             }
           }
           EinkDialogAction(noteText("取消", "Cancel"), onClick = insertion::cancel)
@@ -1487,9 +1483,9 @@ private fun AppRoot(
           startupBehavior = startupBehavior,
           pairedClients = pairedClients,
           onlineClients = onlineNoteLinks,
-          pairingCandidates = pairingCandidates,
-          pairingScanActive = pairingScanActive,
+          pairingCode = pairingCode,
           pairingInProgress = pairingInProgress,
+          pairingMessage = pairingMessage,
           transferStatus = transferStatus,
           transferSnapshot = transferSnapshot,
           transferEvents = transferEvents,
@@ -1550,45 +1546,41 @@ private fun AppRoot(
             shortcutBindings = shortcutBindings.clear(scene)
             appSettingsStore.clearHardwareShortcuts(scene)
           },
-          onScanClients = {
+          onStartPairing = {
             if (missingTransferPermissions.isNotEmpty()) {
               showNotice("Grant Nearby devices permission first")
-            } else if (!pairingScanActive) {
-              pairingScanActive = true
-              appScope.launch {
-                runCatching { phoneTransfer.discoverPairingCandidates() }
-                  .onSuccess { pairingCandidates = it }
-                  .onFailure { showNotice("Scan failed: ${it.message}") }
-                onlineNoteLinks = runCatching {
-                  phoneTransfer.discoverAvailable(timeoutMillis = 2_000L) { onlineNoteLinks = it }
-                }.getOrDefault(emptyList())
-                pairingScanActive = false
+            } else {
+              val code = phoneTransfer.newPairingCode()
+              pairingCode = code
+              pairingMessage = null
+              pairingInProgress = true
+              pairingJob?.cancel()
+              pairingJob = appScope.launch {
+                EventLog.log("NoteLinkPairing", "start code shown")
+                runCatching { phoneTransfer.pair(code, PAIRING_WINDOW_MILLIS) }
+                  .onSuccess {
+                    pairedClients = phoneTransfer.pairing.pairedClients
+                    transferStatusRevision++
+                    pairingMessage = null
+                    EventLog.log("NoteLinkPairing", "complete device=${it.id}")
+                    showNotice(noteText("${it.name} 配对完成", "Paired with ${it.name}"))
+                  }
+                  .onFailure {
+                    if (it !is kotlinx.coroutines.CancellationException) {
+                      EventLog.log("NoteLinkPairing", "failed error=${it.message}")
+                      pairingMessage = it.message ?: "Pairing failed"
+                    }
+                  }
+                pairingCode = null
+                pairingInProgress = false
               }
             }
           },
-          onPairClient = { candidate, code ->
-            appScope.launch {
-              pairingInProgress = true
-              EventLog.log(
-                "NoteLinkPairing",
-                "start device=${candidate.deviceId} address=${candidate.bluetoothAddress}",
-              )
-              runCatching { phoneTransfer.pair(candidate, code) }
-                .onSuccess {
-                  suppressNextOnlineDiscovery = true
-                  pairedClients = phoneTransfer.pairing.pairedClients
-                  pairingCandidates = pairingCandidates.filterNot { value -> value.deviceId == it.id }
-                  onlineNoteLinks = emptyList()
-                  transferStatusRevision++
-                  EventLog.log("NoteLinkPairing", "complete device=${it.id}")
-                  showNotice(noteText("${it.name} 配对完成", "Paired with ${it.name}"))
-                }
-                .onFailure {
-                  EventLog.log("NoteLinkPairing", "failed device=${candidate.deviceId} error=${it.message}")
-                  showNotice("Pairing failed: ${it.message}")
-                }
-              pairingInProgress = false
-            }
+          onCancelPairing = {
+            pairingJob?.cancel()
+            pairingJob = null
+            pairingCode = null
+            pairingInProgress = false
           },
           onRenameClient = { id, name ->
             runCatching { phoneTransfer.pairing.rename(id, name) }
@@ -1599,7 +1591,7 @@ private fun AppRoot(
               .onFailure { showNotice("Rename failed: ${it.message}") }
           },
           onUnpairClient = { id ->
-            phoneTransfer.pairing.unpair(id)
+            phoneTransfer.unpair(id)
             pairedClients = phoneTransfer.pairing.pairedClients
             transferStatusRevision++
             showNotice(noteText("已移除 NoteLink 配对", "NoteLink pairing removed"))
@@ -1934,6 +1926,9 @@ private fun noteTransferStatus(context: Context, isPaired: Boolean, permissionsG
 }
 
 private const val THUMBNAIL_SCREEN_SCALE = 10f
+
+/** The pairing code stays valid on NoteLink for 2 min; the Note keeps looking for that long. */
+private const val PAIRING_WINDOW_MILLIS = 120_000L
 private const val NOTEBOOK_THUMBNAIL_SCREEN_SCALE = 4f
 
 @Composable

@@ -33,6 +33,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.betterhv.note.storage.StartupBehavior
 import com.betterhv.note.toolbar.ToolbarCatalog
 import com.betterhv.note.ui.EinkChoiceCell
@@ -76,9 +77,10 @@ data class SettingsState(
   val startupBehavior: StartupBehavior,
   val pairedClients: List<PairedDevice>,
   val onlineClients: List<PhoneTransferClient.AvailableNoteLink>,
-  val pairingCandidates: List<PhoneTransferClient.PairingCandidate>,
-  val pairingScanActive: Boolean,
+  /** Code shown while waiting for a NoteLink user to type it; null when not pairing. */
+  val pairingCode: String?,
   val pairingInProgress: Boolean,
+  val pairingMessage: String?,
   val transferStatus: String,
   val transferSnapshot: TransferSnapshot,
   val transferEvents: List<TransferLogEntry>,
@@ -108,8 +110,8 @@ data class SettingsActions(
   val onShortcutBindingRequestConsumed: () -> Unit,
   val onShortcutBind: (ShortcutScene, HardwareKeyId, CommandBinding?) -> Unit,
   val onShortcutSceneClear: (ShortcutScene) -> Unit,
-  val onScanClients: () -> Unit,
-  val onPairClient: (PhoneTransferClient.PairingCandidate, String) -> Unit,
+  val onStartPairing: () -> Unit,
+  val onCancelPairing: () -> Unit,
   val onRenameClient: (String, String) -> Unit,
   val onUnpairClient: (String) -> Unit,
   val onTransferPermissions: () -> Unit,
@@ -134,9 +136,9 @@ private fun SettingsScreenContent(state: SettingsState, actions: SettingsActions
   val startupBehavior = state.startupBehavior
   val pairedClients = state.pairedClients
   val onlineClients = state.onlineClients
-  val pairingCandidates = state.pairingCandidates
-  val pairingScanActive = state.pairingScanActive
+  val pairingCode = state.pairingCode
   val pairingInProgress = state.pairingInProgress
+  val pairingMessage = state.pairingMessage
   val transferStatus = state.transferStatus
   val transferSnapshot = state.transferSnapshot
   val transferEvents = state.transferEvents
@@ -163,8 +165,8 @@ private fun SettingsScreenContent(state: SettingsState, actions: SettingsActions
   val onShortcutBindingRequestConsumed = actions.onShortcutBindingRequestConsumed
   val onShortcutBind = actions.onShortcutBind
   val onShortcutSceneClear = actions.onShortcutSceneClear
-  val onScanClients = actions.onScanClients
-  val onPairClient = actions.onPairClient
+  val onStartPairing = actions.onStartPairing
+  val onCancelPairing = actions.onCancelPairing
   val onRenameClient = actions.onRenameClient
   val onUnpairClient = actions.onUnpairClient
   val onTransferPermissions = actions.onTransferPermissions
@@ -175,15 +177,12 @@ private fun SettingsScreenContent(state: SettingsState, actions: SettingsActions
   val onUpdateViaNoteLink = actions.onUpdateViaNoteLink
   val onContinueNoteAppInstall = actions.onContinueNoteAppInstall
   val onClose = actions.onClose
-  var pairingCode by remember { mutableStateOf("") }
-  var selectedCandidateId by remember { mutableStateOf<String?>(null) }
   var renameTarget by remember { mutableStateOf<PairedDevice?>(null) }
   var shortcutScene by remember { mutableStateOf(ShortcutScene.EDITOR) }
   var shortcutKey by remember { mutableStateOf<HardwareKeyId?>(null) }
   var showOpenSourceLicenses by remember { mutableStateOf(false) }
   val uriHandler = LocalUriHandler.current
   var selectedTab by rememberSaveable { mutableStateOf(SettingsTab.GENERAL) }
-  val selectedCandidate = pairingCandidates.firstOrNull { it.deviceId == selectedCandidateId }
   LaunchedEffect(shortcutBindingRequest) {
     shortcutBindingRequest?.let { (scene, key) ->
       selectedTab = SettingsTab.SHORTCUTS
@@ -418,7 +417,7 @@ private fun SettingsScreenContent(state: SettingsState, actions: SettingsActions
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
               ) {
                 Column(Modifier.weight(1f)) {
-                  Text(client.name, style = EinkType.Body)
+                  Text(online?.label ?: client.name, style = EinkType.Body)
                   Text(
                     if (client.legacy) {
                       noteText(
@@ -472,12 +471,14 @@ private fun SettingsScreenContent(state: SettingsState, actions: SettingsActions
               horizontalArrangement = Arrangement.spacedBy(8.dp),
               verticalAlignment = Alignment.CenterVertically,
             ) {
-              Button(
-                onClick = onScanClients,
-                enabled = !pairingScanActive && !pairingInProgress,
-                shape = RectangleShape,
-              ) {
-                Text(if (pairingScanActive) noteText("正在扫描", "Scanning") else noteText("扫描新客户端", "Scan for clients"))
+              if (pairingCode == null) {
+                Button(onClick = onStartPairing, shape = RectangleShape) {
+                  Text(noteText("配对新设备", "Pair new device"))
+                }
+              } else {
+                OutlinedButton(onClick = onCancelPairing, shape = RectangleShape) {
+                  Text(noteText("取消配对", "Cancel pairing"))
+                }
               }
               if (!transferPermissionsGranted) {
                 OutlinedButton(
@@ -489,29 +490,33 @@ private fun SettingsScreenContent(state: SettingsState, actions: SettingsActions
                 Text(noteText("刷新状态", "Refresh status"))
               }
             }
-            pairingCandidates.forEach { candidate ->
-              SettingRow(candidate.name, onClick = { selectedCandidateId = candidate.deviceId }) {
-                EinkRadioMark(
-                  selected = candidate.deviceId == selectedCandidateId,
-                  contentDescription = candidate.name,
+            pairingCode?.let { code ->
+              Column(Modifier.fillMaxWidth().padding(top = EinkDimens.SpaceMd)) {
+                Text(
+                  noteText(
+                    "在手机或电脑的 NoteLink 中选择“新增设备”，输入下面的配对码：",
+                    "In NoteLink on the phone or PC choose Add device and enter this code:",
+                  ),
+                  style = EinkType.Body,
+                )
+                Text(
+                  code.chunked(3).joinToString(" "),
+                  style = EinkType.ScreenTitle.copy(fontSize = 44.sp, letterSpacing = 6.sp),
+                  modifier = Modifier.padding(vertical = EinkDimens.SpaceSm),
+                )
+                Text(
+                  if (pairingInProgress) {
+                    noteText("正在寻找输入了配对码的 NoteLink…", "Looking for the NoteLink with this code…")
+                  } else {
+                    noteText("等待中", "Waiting")
+                  },
+                  style = EinkType.Caption,
+                  color = EinkColors.Muted,
                 )
               }
             }
-            if (pairingCandidates.isNotEmpty()) {
-              OutlinedTextField(
-                pairingCode,
-                { pairingCode = it.filter(Char::isDigit).take(6) },
-                label = { Text(noteText("所选 NoteLink 显示的六位配对码", "Six-digit code shown by the selected NoteLink")) },
-                singleLine = true,
-                shape = RectangleShape,
-                modifier = Modifier.fillMaxWidth().padding(top = EinkDimens.SpaceSm),
-              )
-              Button(
-                onClick = { selectedCandidate?.let { onPairClient(it, pairingCode) } },
-                enabled = selectedCandidate != null && pairingCode.length == 6 && !pairingInProgress,
-                modifier = Modifier.padding(top = EinkDimens.SpaceSm),
-                shape = RectangleShape,
-              ) { Text(if (pairingInProgress) noteText("正在配对", "Pairing") else noteText("完成配对", "Pair")) }
+            pairingMessage?.let {
+              Text(it, style = EinkType.Caption, color = EinkColors.Ink, modifier = Modifier.padding(top = EinkDimens.SpaceSm))
             }
           }
         }
