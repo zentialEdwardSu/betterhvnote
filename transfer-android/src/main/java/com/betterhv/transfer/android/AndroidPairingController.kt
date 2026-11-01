@@ -11,6 +11,10 @@ import androidx.core.content.edit
 import androidx.core.database.sqlite.transaction
 import com.betterhv.transfer.core.PairedDevice
 import com.betterhv.transfer.core.TransferCrypto
+import com.betterhv.transfer.core.v4.crypto.SessionKeys
+import com.betterhv.transfer.core.v4.pairing.PairingOutcome
+import com.betterhv.transfer.core.v4.session.PairingKey
+import com.betterhv.transfer.core.v4.session.PairingKeyStore
 import java.nio.charset.StandardCharsets
 import java.security.KeyPair
 import java.security.KeyStore
@@ -154,59 +158,31 @@ class AndroidPairingController(context: Context) : PairingController {
     if (!cursor.moveToFirst()) null else decrypt(cursor.getString(0))
   }
 
-  /** Numeric fallback for devices whose vendor BLE stack cannot complete GATT pairing. */
-  fun confirmManual(remoteDeviceId: String, remoteDeviceName: String, sixDigitCode: String): PairedDevice {
-    require(sixDigitCode.length == 6 && sixDigitCode.all(Char::isDigit)) { "Pairing code must contain six digits" }
-    val key = TransferCrypto.hkdfSha256(
-      sixDigitCode.encodeToByteArray(),
-      "BetterHv-manual-v1".encodeToByteArray(),
-      "paired-device".encodeToByteArray(),
-      32,
+  /**
+   * Stores the result of an SRP pairing run. Re-pairing the same device replaces its key and keeps
+   * its custom name; the full device id is known from the pairing exchange itself.
+   */
+  fun store(outcome: PairingOutcome): PairedDevice {
+    require(outcome.psk.size == 32) { "Pairing key must be 32 bytes" }
+    val now = System.currentTimeMillis()
+    val existing = pairedClient(outcome.peerDeviceId)
+    val value = PairedDevice(
+      outcome.peerDeviceId,
+      existing?.name ?: outcome.peerDeviceName,
+      now,
+      identityHash = identityHash(outcome.peerDeviceId),
+      lastUsedAt = now,
     )
-    return confirm(PairingConfirmation(localDeviceId, remoteDeviceId, remoteDeviceName, sixDigitCode, key))
+    upsert(value, encrypt(outcome.psk))
+    return value
   }
 
-  /** Replaces a migrated legacy alias after the old key authenticates the sender's full GATT identity. */
-  fun resolveLegacyIdentity(oldDeviceId: String, identity: BleIdentity): PairedDevice {
-    val old = requireNotNull(pairedClient(oldDeviceId)) { "Previous paired device does not exist" }
-    require(old.legacy) { "Paired device does not require identity migration" }
-    return replaceIdentity(old, identity.deviceId, identity.deviceName)
-  }
-
-  /** Binds a manual-code pairing placeholder to the authenticated peer identity. */
-  fun resolveIdentity(oldDeviceId: String, deviceId: String, deviceName: String? = null): PairedDevice {
-    val old = requireNotNull(pairedClient(oldDeviceId)) { "Paired device does not exist" }
-    if (old.id == deviceId) return markLastUsed(deviceId)
-    return replaceIdentity(old, deviceId, deviceName ?: old.name)
-  }
-
-  private fun replaceIdentity(old: PairedDevice, deviceId: String, deviceName: String): PairedDevice {
-    require(pairedClient(deviceId) == null) { "This device identity already exists" }
-    val secret = database.readableDatabase.query(
-      TABLE,
-      arrayOf("encrypted_secret"),
-      "device_id=?",
-      arrayOf(old.id),
-      null,
-      null,
-      null,
-    ).use { cursor ->
-      require(cursor.moveToFirst());
-      cursor.getString(0)
+  /** Resolves the PSK selected by a v4 record's key id. */
+  fun pairingKeyStore(): PairingKeyStore = PairingKeyStore { keyId ->
+    pairedClients.firstNotNullOfOrNull { client ->
+      val key = sharedKey(client.id) ?: return@firstNotNullOfOrNull null
+      if (SessionKeys.keyId(key) == keyId) PairingKey(client.id, key) else null
     }
-    val resolved = old.copy(
-      id = deviceId,
-      name = deviceName,
-      identityHash = identityHash(deviceId),
-      lastUsedAt = System.currentTimeMillis(),
-      legacy = false,
-    )
-    val writable = database.writableDatabase
-    writable.transaction {
-      delete(TABLE, "device_id=?", arrayOf(old.id))
-      insert(this, resolved, secret)
-    }
-    return resolved
   }
 
   private fun upsert(device: PairedDevice, encryptedSecret: String) {

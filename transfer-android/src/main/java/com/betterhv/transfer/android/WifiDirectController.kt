@@ -13,12 +13,14 @@ import android.net.wifi.p2p.WifiP2pManager
 import android.os.Build
 import android.util.Log
 import kotlinx.coroutines.CompletableDeferred
+import com.betterhv.transfer.core.v4.p2p.P2pGroupPolicy
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withTimeoutOrNull
 import java.security.SecureRandom
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
@@ -33,8 +35,17 @@ data class WifiDirectSession(
   val passphrase: String? = null,
 )
 
-class WifiDirectController(context: Context) : AutoCloseable {
+private const val GROUP_OWNER_CAPABILITY = 1
+
+class WifiDirectController(
+  context: Context,
+  pairingKey: ByteArray? = null,
+) : AutoCloseable {
+  /** Derives the hosted group's SSID/passphrase; set per peer before [ensureHostedGroup]. */
+  @Volatile var pairingKey: ByteArray? = pairingKey
   private val appContext = context.applicationContext
+  private val groupPolicy = P2pGroupPolicy()
+  private var lastGroupUsedAtMillis = 0L
   private val manager = appContext.getSystemService(WifiP2pManager::class.java)
     ?: error("Wi-Fi Direct is unsupported")
   private val channel = manager.initialize(appContext, appContext.mainLooper, null)
@@ -83,7 +94,22 @@ class WifiDirectController(context: Context) : AutoCloseable {
     timeoutMillis: Long = 30_000L,
     preferTemporaryConfig: Boolean = true,
   ): WifiDirectSession {
-    currentSession?.takeIf(WifiDirectSession::isGroupOwner)?.let { return it }
+    currentSession?.takeIf(WifiDirectSession::isGroupOwner)?.let {
+      lastGroupUsedAtMillis = System.currentTimeMillis()
+      return it
+    }
+    val existingGroup = requestGroupInfo()
+    if (existingGroup != null && groupPolicy.shouldReuse(true, lastGroupUsedAtMillis)) {
+      val existingInfo = requestConnectionInfo()
+      if (existingInfo.groupFormed && existingInfo.groupOwnerAddress != null) {
+        val localDevice = requestDeviceInfo()
+        return sessionFrom(existingInfo, existingGroup, localDevice).also {
+          currentSession = it
+          mutableSession.value = it
+          lastGroupUsedAtMillis = System.currentTimeMillis()
+        }
+      }
+    }
     prepareForOperation()
     connectionWaiter = CompletableDeferred()
     val configured = if (
@@ -100,19 +126,31 @@ class WifiDirectController(context: Context) : AutoCloseable {
     }
     val info = awaitConnectionInfo(timeoutMillis)
     val group = requestGroupInfo()
+    val localDevice = requestDeviceInfo()
+    Log.i(TAG, "Created group ${group?.networkName}; owner=${group?.owner?.deviceAddress} ip=${info.groupOwnerAddress}")
+    return sessionFrom(info, group, localDevice).also {
+      currentSession = it
+      mutableSession.value = it
+      lastGroupUsedAtMillis = System.currentTimeMillis()
+    }
+  }
+
+  private fun sessionFrom(
+    info: WifiP2pInfo,
+    group: WifiP2pGroup?,
+    localDevice: WifiP2pDevice?,
+  ): WifiDirectSession {
     activeNetworkId = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
       group?.networkId?.takeIf { it >= 0 }
     } else {
       null
     }
-    val localDevice = requestDeviceInfo()
     val ownerAddress = group?.owner?.deviceAddress
       ?.takeUnless(::isRedactedAddress)
       ?: localDevice?.deviceAddress
       ?: group?.owner?.deviceAddress
     val ownerName = group?.owner?.deviceName?.takeIf(String::isNotBlank)
       ?: localDevice?.deviceName?.takeIf(String::isNotBlank)
-    Log.i(TAG, "Created group ${group?.networkName}; owner=$ownerAddress ip=${info.groupOwnerAddress}")
     return WifiDirectSession(
       requireNotNull(info.groupOwnerAddress).hostAddress ?: "192.168.49.1",
       ownerAddress,
@@ -121,10 +159,7 @@ class WifiDirectController(context: Context) : AutoCloseable {
       info.groupOwnerAddress?.hostAddress,
       group?.networkName,
       group?.passphrase,
-    ).also {
-      currentSession = it;
-      mutableSession.value = it
-    }
+    )
   }
 
   @SuppressLint("MissingPermission")
@@ -139,20 +174,23 @@ class WifiDirectController(context: Context) : AutoCloseable {
       !it.isGroupOwner &&
         (ownerDeviceAddress.isBlank() || it.ownerDeviceName == ownerDeviceName)
     }?.let { return it }
-    prepareForOperation()
     val canJoinWithCredentials = !networkName.isNullOrBlank() && !passphrase.isNullOrBlank()
-    val owner = if (canJoinWithCredentials) {
-      null
-    } else {
+    // With credentials derived from the pairing key the join needs no peer discovery, no WPS
+    // approval and no teardown of a group that does not exist.
+    if (requestGroupInfo() != null || !canJoinWithCredentials) prepareForOperation()
+    val owner = if (!canJoinWithCredentials && (ownerDeviceAddress.isNotBlank() || ownerDeviceName.isNotBlank())) {
       discoverPeer(ownerDeviceAddress, ownerDeviceName, (timeoutMillis / 2).coerceAtLeast(5_000L))
+    } else {
+      null
     }
     connectionWaiter = CompletableDeferred()
     val config = WifiP2pConfig.Builder().apply {
       if (canJoinWithCredentials) {
         setNetworkName(requireNotNull(networkName))
         setPassphrase(requireNotNull(passphrase))
-      } else {
-        setDeviceAddress(android.net.MacAddress.fromString(requireNotNull(owner).deviceAddress))
+      }
+      if (owner != null && !isRedactedAddress(owner.deviceAddress)) {
+        setDeviceAddress(android.net.MacAddress.fromString(owner.deviceAddress))
       }
       setGroupOperatingBand(WifiP2pConfig.GROUP_OWNER_BAND_AUTO)
       enablePersistentMode(false)
@@ -194,10 +232,11 @@ class WifiDirectController(context: Context) : AutoCloseable {
       return withTimeout(timeoutMillis) {
         while (true) {
           requestExpectedPeer()
-          val peer = requestPeers().firstOrNull {
+          val peers = requestPeers()
+          val peer = peers.firstOrNull {
             it.deviceAddress.equals(ownerDeviceAddress, ignoreCase = true) ||
               (ownerDeviceName.isNotBlank() && it.deviceName == ownerDeviceName)
-          }
+          } ?: peers.firstOrNull { it.isGroupOwner }
           if (peer != null) {
             discovered = true
             Log.i(TAG, "Discovered expected owner ${peer.deviceAddress}")
@@ -238,10 +277,14 @@ class WifiDirectController(context: Context) : AutoCloseable {
 
   @SuppressLint("MissingPermission")
   private suspend fun awaitConnectionInfo(timeoutMillis: Long): WifiP2pInfo = withTimeout(timeoutMillis) {
+    val waiter = connectionWaiter ?: CompletableDeferred<WifiP2pInfo>().also { connectionWaiter = it }
+    val current = requestConnectionInfo()
+    if (current.groupFormed && current.groupOwnerAddress != null) return@withTimeout current
+    // WIFI_P2P_CONNECTION_CHANGED completes the waiter; the slow re-check only covers vendor
+    // stacks that drop the broadcast.
     while (true) {
-      val info = requestConnectionInfo()
+      val info = withTimeoutOrNull(BROADCAST_RECHECK_MILLIS) { waiter.await() } ?: requestConnectionInfo()
       if (info.groupFormed && info.groupOwnerAddress != null) return@withTimeout info
-      delay(150L)
     }
     error("unreachable")
   }
@@ -254,6 +297,7 @@ class WifiDirectController(context: Context) : AutoCloseable {
   @SuppressLint("MissingPermission")
   suspend fun closeHostedGroup() {
     runCatching { action { listener -> manager.removeGroup(channel, listener) } }
+    lastGroupUsedAtMillis = 0L
     clearSession()
   }
 
@@ -275,6 +319,7 @@ class WifiDirectController(context: Context) : AutoCloseable {
         }
       )
     }.onFailure { Log.w(TAG, "Unable to request Wi-Fi Direct group removal", it) }
+    lastGroupUsedAtMillis = 0L
     clearSession()
   }
 
@@ -289,7 +334,7 @@ class WifiDirectController(context: Context) : AutoCloseable {
     runCatching { action { listener -> manager.stopPeerDiscovery(channel, listener) } }
     runCatching { action { listener -> manager.cancelConnect(channel, listener) } }
     runCatching { action { listener -> manager.removeGroup(channel, listener) } }
-    delay(750L)
+    delay(groupPolicy.teardownDelay())
   }
 
   @SuppressLint("MissingPermission")
@@ -315,24 +360,32 @@ class WifiDirectController(context: Context) : AutoCloseable {
   private fun ephemeralGroupConfig(): WifiP2pConfig {
     val random = ByteArray(8).also(SecureRandom()::nextBytes)
       .joinToString("") { "%02x".format(it) }
-    return WifiP2pConfig.Builder()
-      .setNetworkName("DIRECT-BH-BetterHv-${random.take(6)}")
-      .setPassphrase("BetterHv-$random")
-      .setGroupOperatingBand(WifiP2pConfig.GROUP_OWNER_BAND_AUTO)
-      .enablePersistentMode(false)
-      .build()
+    val credentials = pairingKey?.let(groupPolicy::credentials)
+    val builder = WifiP2pConfig.Builder()
+      .setNetworkName(credentials?.ssid ?: "DIRECT-BH-BetterHv-${random.take(6)}")
+      .setPassphrase(credentials?.passphrase ?: "BetterHv-$random")
+      .enablePersistentMode(credentials != null)
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+      builder.setGroupOperatingBand(WifiP2pConfig.GROUP_OWNER_BAND_5GHZ)
+    } else {
+      builder.setGroupOperatingBand(WifiP2pConfig.GROUP_OWNER_BAND_AUTO)
+    }
+    return builder.build()
   }
 
   private suspend fun action(call: (WifiP2pManager.ActionListener) -> Unit): Unit =
-    suspendCancellableCoroutine { continuation ->
-      call(object : WifiP2pManager.ActionListener {
-        override fun onSuccess() {
-          if (continuation.isActive) continuation.resume(Unit)
-        }
-        override fun onFailure(reason: Int) {
-          if (continuation.isActive) continuation.resumeWithException(WifiP2pOperationException(reason))
-        }
-      })
+    withTimeout(5_000L) {
+      suspendCancellableCoroutine { continuation ->
+        call(object : WifiP2pManager.ActionListener {
+          override fun onSuccess() {
+            if (continuation.isActive) continuation.resume(Unit)
+          }
+
+          override fun onFailure(reason: Int) {
+            if (continuation.isActive) continuation.resumeWithException(WifiP2pOperationException(reason))
+          }
+        })
+      }
     }
 
   private suspend fun actionWithBusyRetry(call: (WifiP2pManager.ActionListener) -> Unit) {
@@ -344,7 +397,7 @@ class WifiDirectController(context: Context) : AutoCloseable {
         val transient = failure.reason == WifiP2pManager.BUSY || failure.reason == WifiP2pManager.ERROR
         if (!transient || attempt == 3) throw failure
         Log.w(TAG, "Transient Wi-Fi Direct failure ${failure.reason}; retry ${attempt + 1}/3")
-        delay(750L * (attempt + 1))
+        delay(groupPolicy.reconnectDelay(attempt))
       }
     }
   }
@@ -367,6 +420,7 @@ class WifiDirectController(context: Context) : AutoCloseable {
     )
 
   private companion object {
+    const val BROADCAST_RECHECK_MILLIS = 1_000L
     const val TAG = "BetterHvWifi"
   }
 }

@@ -1,6 +1,5 @@
 package com.betterhv.transfer.android
 
-import android.bluetooth.BluetoothDevice
 import android.content.Context
 import com.betterhv.transfer.core.ContentKind
 import com.betterhv.transfer.core.TransferErrorCode
@@ -26,7 +25,7 @@ class AndroidSenderEndpoint(
   private val deviceId: String,
   private val deviceName: String,
   private val provider: SenderContentProvider,
-  commandHandler: (BluetoothDevice, ByteArray) -> ByteArray,
+  listener: ControlPeripheralListener,
 ) : SenderEndpoint {
   private val mutableSnapshot = MutableStateFlow(TransferSnapshot())
   private val mutableEvents = MutableSharedFlow<TransferEvent>(extraBufferCapacity = 16)
@@ -37,8 +36,13 @@ class AndroidSenderEndpoint(
     deviceId,
     deviceName,
     provider::counts,
-    commandHandler,
+    listener,
   )
+
+  /** Sends one control record to [peerKey]; suspends until the notification was delivered. */
+  suspend fun notifyControl(peerKey: String, record: ByteArray) = peripheral.notify(peerKey, record)
+
+  fun setPairingMode(enabled: Boolean) = peripheral.setPairingMode(enabled)
 
   override fun start() {
     provider.releaseExpired()

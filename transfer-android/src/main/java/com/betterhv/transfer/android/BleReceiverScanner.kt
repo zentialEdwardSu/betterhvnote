@@ -134,6 +134,7 @@ class BleReceiverScanner(context: Context) {
       advertisement.imageCount,
       advertisement.textCount,
       advertisement.pdfCount,
+      advertisement.pairing,
     )
   }
 }

@@ -2,7 +2,7 @@ package com.betterhv.transfer.android
 
 import android.content.Context
 import com.betterhv.transfer.core.HighBandwidthEndpoint
-import com.betterhv.transfer.core.SharedFileTransfer
+import com.betterhv.transfer.core.NOTELINK_LAN_PORT
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -10,6 +10,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
@@ -21,11 +22,30 @@ sealed interface HostedGroupState {
 }
 
 /** Owns one Android Wi-Fi Direct group for the enclosing foreground-service lifetime. */
-class HighBandwidthSessionManager(context: Context, private val scope: CoroutineScope) : AutoCloseable {
-  private val controller = WifiDirectController(context)
+class HighBandwidthSessionManager(
+  context: Context,
+  private val scope: CoroutineScope,
+  pairingKey: ByteArray? = null,
+) : AutoCloseable {
+  private val controller = WifiDirectController(context, pairingKey)
   private val mutableState = MutableStateFlow<HostedGroupState>(HostedGroupState.Stopped)
   val state: StateFlow<HostedGroupState> = mutableState.asStateFlow()
   private var job: Job? = null
+
+  /** Starts hosting for [pairingKey]'s peer; a running group for another key is rebuilt. */
+  @Synchronized fun start(pairingKey: ByteArray?) {
+    if (job?.isActive == true && controller.pairingKey.contentEqualsNullable(pairingKey)) return
+    job?.cancel()
+    if (!controller.pairingKey.contentEqualsNullable(pairingKey)) controller.requestCloseGroup()
+    controller.pairingKey = pairingKey
+    start()
+  }
+
+  /** Waits until the group is ready; null on timeout. */
+  suspend fun awaitReady(timeoutMillis: Long): HighBandwidthEndpoint? =
+    kotlinx.coroutines.withTimeoutOrNull(timeoutMillis) {
+      state.first { it is HostedGroupState.Ready }.let { (it as HostedGroupState.Ready).endpoint }
+    }
 
   @Synchronized fun start() {
     if (job?.isActive == true) return
@@ -40,7 +60,7 @@ class HighBandwidthSessionManager(context: Context, private val scope: Coroutine
             ownerIp = session.groupOwnerAddress,
             networkName = requireNotNull(session.networkName) { "Wi-Fi Direct network name unavailable" },
             passphrase = requireNotNull(session.passphrase) { "Wi-Fi Direct passphrase unavailable" },
-            port = SharedFileTransfer.PORT,
+            port = NOTELINK_LAN_PORT,
           )
           mutableState.value = HostedGroupState.Ready(endpoint)
           while (isActive && controller.session.value != null) delay(1_000L)
@@ -67,6 +87,14 @@ class HighBandwidthSessionManager(context: Context, private val scope: Coroutine
     start()
   }
 
+  /** Stops hosting; the next [start] creates a fresh group. */
+  @Synchronized fun stop() {
+    job?.cancel()
+    job = null
+    controller.requestCloseGroup()
+    mutableState.value = HostedGroupState.Stopped
+  }
+
   @Synchronized override fun close() {
     job?.cancel()
     job = null
@@ -78,4 +106,10 @@ class HighBandwidthSessionManager(context: Context, private val scope: Coroutine
   private companion object {
     val BACKOFF_MILLIS = longArrayOf(1_000L, 2_000L, 4_000L, 8_000L, 30_000L)
   }
+}
+
+private fun ByteArray?.contentEqualsNullable(other: ByteArray?): Boolean = when {
+  this == null -> other == null
+  other == null -> false
+  else -> contentEquals(other)
 }

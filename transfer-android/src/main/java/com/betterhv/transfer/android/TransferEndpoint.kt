@@ -34,6 +34,7 @@ data class DiscoveredSender(
   val imageCount: Int,
   val textCount: Int,
   val pdfCount: Int = 0,
+  val pairing: Boolean = false,
 ) {
   /** Version-1 advertisements carry the first five SHA-256 bytes, not the full device ID. */
   val identityHash: String get() = deviceId

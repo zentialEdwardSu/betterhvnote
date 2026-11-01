@@ -8,76 +8,76 @@ import android.bluetooth.BluetoothGattCharacteristic
 import android.bluetooth.BluetoothGattDescriptor
 import android.bluetooth.BluetoothGattServer
 import android.bluetooth.BluetoothGattServerCallback
+import android.bluetooth.BluetoothGattService
 import android.bluetooth.BluetoothManager
+import android.bluetooth.BluetoothProfile
 import android.bluetooth.BluetoothStatusCodes
-import android.bluetooth.le.AdvertiseCallback
 import android.bluetooth.le.AdvertiseData
-import android.bluetooth.le.AdvertiseSettings
+import android.bluetooth.le.AdvertisingSet
+import android.bluetooth.le.AdvertisingSetCallback
+import android.bluetooth.le.AdvertisingSetParameters
 import android.content.Context
-import android.os.Handler
-import android.os.Looper
+import android.os.Build
 import android.os.ParcelUuid
 import android.util.Log
-import com.betterhv.transfer.core.BleTransportFrameCodec
-import com.betterhv.transfer.core.BleTransportReassembler
 import com.betterhv.transfer.core.ContentCounts
 import com.betterhv.transfer.core.NoteLinkAdvertisementCodec
 import com.betterhv.transfer.core.TransferCrypto
-import java.util.ArrayDeque
-import java.util.concurrent.atomic.AtomicInteger
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.withTimeoutOrNull
+import java.util.concurrent.ConcurrentHashMap
 
-/** BLE peripheral used by the phone. Control payloads are deliberately small and MTU-safe. */
+/** GATT-server side events for the NoteLink control characteristic. */
+interface ControlPeripheralListener {
+  fun onRecord(peerKey: String, record: ByteArray)
+  fun onMtu(peerKey: String, mtu: Int)
+  fun onDisconnected(peerKey: String)
+}
+
+/**
+ * NoteLink BLE peripheral: one write-without-response + notify control characteristic.
+ *
+ * Advertising runs as one [AdvertisingSet], so queue-count changes are applied in place with
+ * `setScanResponseData` instead of a stop/start cycle that hid the device for ~400 ms.
+ * Notifications are sent one at a time per device, gated by `onNotificationSent`.
+ */
 class BleSenderPeripheral(
   context: Context,
   private val deviceId: String,
   private val deviceName: String,
   private val counts: () -> ContentCounts,
-  private val onCommand: (BluetoothDevice, ByteArray) -> ByteArray,
+  private val listener: ControlPeripheralListener,
 ) : AutoCloseable {
   private val appContext = context.applicationContext
   private val manager = appContext.getSystemService(BluetoothManager::class.java)
   private val adapter: BluetoothAdapter get() = manager.adapter
-  private var server: BluetoothGattServer? = null
-  private var response: BluetoothGattCharacteristic? = null
-  private val subscribed = LinkedHashSet<BluetoothDevice>()
-  private val commandReassemblers = mutableMapOf<String, BleTransportReassembler>()
-  private val framedPeers = mutableMapOf<String, Boolean>()
-  private val negotiatedMtus = mutableMapOf<String, Int>()
-  private val pendingNotifications = mutableMapOf<String, ArrayDeque<ByteArray>>()
-  private val notificationInFlight = mutableSetOf<String>()
-  private val mainHandler = Handler(Looper.getMainLooper())
-  private var lastAdvertisement: ByteArray? = null
-  private var advertiseGeneration = 0
-  private var closed = false
+  @Volatile private var server: BluetoothGattServer? = null
+  @Volatile private var control: BluetoothGattCharacteristic? = null
+  private val devices = ConcurrentHashMap<String, BluetoothDevice>()
+  private val subscribed = ConcurrentHashMap.newKeySet<String>()
+  private val notifyWaiters = ConcurrentHashMap<String, CompletableDeferred<Int>>()
+  @Volatile private var advertisingSet: AdvertisingSet? = null
+  @Volatile private var lastScanResponse: ByteArray? = null
+  @Volatile private var pairingMode = false
+  @Volatile private var closed = false
 
   private val callback = object : BluetoothGattServerCallback() {
     override fun onConnectionStateChange(device: BluetoothDevice, status: Int, newState: Int) {
-      if (newState != BluetoothGatt.STATE_CONNECTED) {
-        subscribed.remove(device)
-        synchronized(this@BleSenderPeripheral) {
-          commandReassemblers.remove(device.address)
-          framedPeers.remove(device.address)
-          negotiatedMtus.remove(device.address)
-          pendingNotifications.remove(device.address)
-          notificationInFlight.remove(device.address)
-        }
+      if (newState == BluetoothProfile.STATE_CONNECTED) {
+        devices[device.address] = device
+        Log.i(TAG, "central connected ${device.address}")
+      } else {
+        devices.remove(device.address)
+        subscribed.remove(device.address)
+        notifyWaiters.remove(device.address)?.complete(BluetoothGatt.GATT_FAILURE)
+        Log.i(TAG, "central disconnected ${device.address} status=$status")
+        listener.onDisconnected(device.address)
       }
     }
 
     override fun onMtuChanged(device: BluetoothDevice, mtu: Int) {
-      synchronized(this@BleSenderPeripheral) { negotiatedMtus[device.address] = mtu }
-    }
-
-    @SuppressLint("MissingPermission")
-    override fun onCharacteristicReadRequest(
-      device: BluetoothDevice,
-      requestId: Int,
-      offset: Int,
-      characteristic: BluetoothGattCharacteristic,
-    ) {
-      val bytes = identityBytes()
-      val value = if (offset in 0..bytes.size) bytes.copyOfRange(offset, bytes.size) else ByteArray(0)
-      server?.sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, offset, value)
+      Log.i(TAG, "mtu ${device.address} = $mtu")
+      listener.onMtu(device.address, mtu)
     }
 
     @SuppressLint("MissingPermission")
@@ -90,29 +90,11 @@ class BleSenderPeripheral(
       offset: Int,
       value: ByteArray,
     ) {
-      val reassembler = synchronized(this@BleSenderPeripheral) {
-        commandReassemblers.getOrPut(device.address) { BleTransportReassembler() }
-      }
-      val result = runCatching {
-        if (BleTransportFrameCodec.isFrame(value)) {
-          synchronized(this@BleSenderPeripheral) { framedPeers[device.address] = true }
-          reassembler.add(value)
-        } else {
-          synchronized(this@BleSenderPeripheral) { framedPeers[device.address] = false }
-          value.also { reassembler.reset() }
-        }
-      }.mapCatching { complete -> complete?.let { onCommand(device, it) } }
-      if (result.isFailure) reassembler.reset()
-      if (responseNeeded) {
-        server?.sendResponse(
-          device,
-          requestId,
-          if (result.isSuccess) BluetoothGatt.GATT_SUCCESS else BluetoothGatt.GATT_FAILURE,
-          offset,
-          null,
-        )
-      }
-      result.getOrNull()?.let { notify(device, it) }
+      if (responseNeeded) server?.sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, offset, null)
+      if (characteristic.uuid != BleConstants.CONTROL_UUID || preparedWrite || offset != 0) return
+      devices[device.address] = device
+      runCatching { listener.onRecord(device.address, value) }
+        .onFailure { Log.w(TAG, "control record rejected", it) }
     }
 
     @SuppressLint("MissingPermission")
@@ -126,210 +108,154 @@ class BleSenderPeripheral(
       value: ByteArray,
     ) {
       if (descriptor.uuid == BleConstants.CCCD_UUID) {
-        if (value.contentEquals(BluetoothGattDescriptor.ENABLE_INDICATION_VALUE) ||
-          value.contentEquals(BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE)
-        ) {
-          subscribed += device
+        if (value.contentEquals(BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE)) {
+          subscribed += device.address
         } else {
-          subscribed -= device
+          subscribed -= device.address
         }
       }
       if (responseNeeded) server?.sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, offset, null)
     }
 
     override fun onNotificationSent(device: BluetoothDevice, status: Int) {
-      synchronized(this@BleSenderPeripheral) {
-        notificationInFlight.remove(device.address)
-        if (status != BluetoothGatt.GATT_SUCCESS) pendingNotifications.remove(device.address)
-      }
-      if (status == BluetoothGatt.GATT_SUCCESS) {
-        sendNextNotification(device)
-      } else {
-        Log.e(TAG, "BLE response frame failed: $status")
-      }
+      notifyWaiters.remove(device.address)?.complete(status)
     }
   }
 
   @SuppressLint("MissingPermission")
   fun start() {
-    check(adapter.isEnabled) { "Bluetooth is disabled" }
-    check(adapter.bluetoothLeAdvertiser != null) { "BLE peripheral advertising is unsupported" }
-    val identity = BluetoothGattCharacteristic(
-      BleConstants.IDENTITY_UUID,
-      BluetoothGattCharacteristic.PROPERTY_READ,
-      BluetoothGattCharacteristic.PERMISSION_READ,
-    )
-    val command = BluetoothGattCharacteristic(
-      BleConstants.COMMAND_UUID,
-      BluetoothGattCharacteristic.PROPERTY_WRITE,
+    check(adapter.isEnabled) { "Bluetooth is off" }
+    val advertiser = adapter.bluetoothLeAdvertiser ?: error("BLE peripheral advertising is unsupported")
+    closed = false
+    val characteristic = BluetoothGattCharacteristic(
+      BleConstants.CONTROL_UUID,
+      BluetoothGattCharacteristic.PROPERTY_WRITE_NO_RESPONSE or BluetoothGattCharacteristic.PROPERTY_NOTIFY,
       BluetoothGattCharacteristic.PERMISSION_WRITE,
-    )
-    response = BluetoothGattCharacteristic(
-      BleConstants.RESPONSE_UUID,
-      BluetoothGattCharacteristic.PROPERTY_INDICATE or BluetoothGattCharacteristic.PROPERTY_NOTIFY,
-      BluetoothGattCharacteristic.PERMISSION_READ,
     ).also {
       it.addDescriptor(
         BluetoothGattDescriptor(
           BleConstants.CCCD_UUID,
           BluetoothGattDescriptor.PERMISSION_READ or BluetoothGattDescriptor.PERMISSION_WRITE,
-        )
+        ),
       )
     }
-    val service = android.bluetooth.BluetoothGattService(
-      BleConstants.SERVICE_UUID,
-      android.bluetooth.BluetoothGattService.SERVICE_TYPE_PRIMARY,
-    ).apply {
-      addCharacteristic(identity);
-      addCharacteristic(command);
-      addCharacteristic(response)
-    }
-    server = manager.openGattServer(appContext, callback).also { it.addService(service) }
-    synchronized(this) {
-      closed = false
-      lastAdvertisement = null
-      advertiseGeneration++
-    }
-    startAdvertisement()
-  }
-
-  @SuppressLint("MissingPermission")
-  fun refreshAdvertisement() {
-    val bytes = advertisementBytes()
-    if (lastAdvertisement?.contentEquals(bytes) == true) return
-    synchronized(this) {
-      if (closed) return
-      advertiseGeneration++
-      val generation = advertiseGeneration
-      adapter.bluetoothLeAdvertiser?.stopAdvertising(advertiseCallback)
-      // A stop is asynchronous. Restarting immediately can leave the old advertising set
-      // running beside the new one; on some ROMs each set also gets a fresh random address,
-      // which invalidates an address a paired peer has just scanned.
-      mainHandler.postDelayed({
-        synchronized(this) {
-          if (closed || generation != advertiseGeneration) return@synchronized
-          startAdvertisement()
-        }
-      }, ADVERTISE_RESTART_DELAY_MILLIS)
-    }
-  }
-
-  @SuppressLint("MissingPermission")
-  private fun startAdvertisement() {
+    val service = BluetoothGattService(BleConstants.SERVICE_UUID, BluetoothGattService.SERVICE_TYPE_PRIMARY)
+      .apply { addCharacteristic(characteristic) }
+    control = characteristic
+    server = manager.openGattServer(appContext, callback)?.also { it.addService(service) }
+      ?: error("Could not open the GATT server")
+    val parameters = AdvertisingSetParameters.Builder()
+      .setLegacyMode(true)
+      .setConnectable(true)
+      .setScannable(true)
+      .setInterval(AdvertisingSetParameters.INTERVAL_LOW)
+      .setTxPowerLevel(AdvertisingSetParameters.TX_POWER_MEDIUM)
+      .build()
     val data = AdvertiseData.Builder()
       .addServiceUuid(ParcelUuid(BleConstants.SERVICE_UUID))
-      .setIncludeDeviceName(false).build()
-    val scanResponse = AdvertiseData.Builder()
-      .addManufacturerData(NoteLinkAdvertisementCodec.MANUFACTURER_ID, advertisementBytes())
-      .setIncludeDeviceName(false).build()
-    val settings = AdvertiseSettings.Builder()
-      .setAdvertiseMode(AdvertiseSettings.ADVERTISE_MODE_LOW_LATENCY)
-      .setTxPowerLevel(AdvertiseSettings.ADVERTISE_TX_POWER_MEDIUM)
-      .setConnectable(true).build()
-    val advertiser = requireNotNull(adapter.bluetoothLeAdvertiser) { "BLE advertiser unavailable" }
-    advertiser.startAdvertising(settings, data, scanResponse, advertiseCallback)
+      .setIncludeDeviceName(false)
+      .build()
+    val response = scanResponse()
+    lastScanResponse = response.second
+    advertiser.startAdvertisingSet(parameters, data, response.first, null, null, advertiseCallback)
   }
 
+  /** Re-publishes queue counts and the pairing flag without interrupting advertising. */
   @SuppressLint("MissingPermission")
-  fun notify(device: BluetoothDevice, value: ByteArray) {
-    if (device !in subscribed) return
-    val framed = synchronized(this) { framedPeers[device.address] != false }
-    val maxFrameBytes = synchronized(this) {
-      ((negotiatedMtus[device.address] ?: 23) - 3)
-        .coerceAtLeast(BleTransportFrameCodec.HEADER_BYTES)
-        .coerceAtMost(BleTransportFrameCodec.DEFAULT_FRAME_BYTES)
-    }
-    val frames = if (framed) {
-      BleTransportFrameCodec.fragment(value, NEXT_MESSAGE_ID.getAndIncrement(), maxFrameBytes)
-    } else {
-      listOf(value)
-    }
-    synchronized(this) {
-      pendingNotifications.getOrPut(device.address) { ArrayDeque() }.addAll(frames)
-    }
-    sendNextNotification(device)
+  fun refreshAdvertisement() {
+    val set = advertisingSet ?: return
+    val (data, bytes) = scanResponse()
+    if (lastScanResponse?.contentEquals(bytes) == true) return
+    lastScanResponse = bytes
+    set.setScanResponseData(data)
   }
 
-  @SuppressLint("MissingPermission")
-  private fun sendNextNotification(device: BluetoothDevice) {
-    val characteristic = response ?: return
-    val frame = synchronized(this) {
-      if (device.address in notificationInFlight) return
-      val queue = pendingNotifications[device.address] ?: return
-      queue.pollFirst()?.also { notificationInFlight += device.address }
-    } ?: return
-    val accepted = if (android.os.Build.VERSION.SDK_INT >= 33) {
-      server?.notifyCharacteristicChanged(device, characteristic, true, frame) == BluetoothStatusCodes.SUCCESS
-    } else {
-      @Suppress("DEPRECATION")
-      characteristic.value = frame
-      @Suppress("DEPRECATION")
-      server?.notifyCharacteristicChanged(device, characteristic, true) == true
-    }
-    if (!accepted) {
-      synchronized(this) {
-        notificationInFlight.remove(device.address)
-        pendingNotifications.remove(device.address)
-      }
-      Log.e(TAG, "BLE response frame was rejected")
-    } else {
-      synchronized(this) {
-        if (pendingNotifications[device.address]?.isEmpty() == true) pendingNotifications.remove(device.address)
-      }
-    }
+  fun setPairingMode(enabled: Boolean) {
+    pairingMode = enabled
+    refreshAdvertisement()
   }
 
-  private fun advertisementBytes(): ByteArray {
-    val counts = counts()
-    return NoteLinkAdvertisementCodec.encode(
+  private fun scanResponse(): Pair<AdvertiseData, ByteArray> {
+    val counts = runCatching(counts).getOrDefault(ContentCounts(0, 0))
+    val bytes = NoteLinkAdvertisementCodec.encode(
       TransferCrypto.sha256(deviceId.encodeToByteArray()),
       deviceName,
       counts.images,
       counts.texts,
       counts.pdfs,
+      if (pairingMode) NoteLinkAdvertisementCodec.FLAG_PAIRING else 0,
     )
+    val data = AdvertiseData.Builder()
+      .addManufacturerData(NoteLinkAdvertisementCodec.MANUFACTURER_ID, bytes)
+      .setIncludeDeviceName(false)
+      .build()
+    return data to bytes
   }
 
-  private fun identityBytes(): ByteArray {
-    val counts = counts()
-    return BleIdentityCodec.encode(deviceId, deviceName, counts.images, counts.texts, counts.pdfs)
+  /** Sends one record as a notification and waits until the stack reported it sent. */
+  @SuppressLint("MissingPermission")
+  suspend fun notify(peerKey: String, record: ByteArray) {
+    val device = devices[peerKey] ?: throw V4LinkException("Central $peerKey is not connected")
+    if (peerKey !in subscribed) throw V4LinkException("Central $peerKey has not subscribed")
+    val characteristic = control ?: throw V4LinkException("GATT server is closed")
+    val active = server ?: throw V4LinkException("GATT server is closed")
+    repeat(NOTIFY_ATTEMPTS) { attempt ->
+      val waiter = CompletableDeferred<Int>()
+      notifyWaiters[peerKey] = waiter
+      val accepted = if (Build.VERSION.SDK_INT >= 33) {
+        active.notifyCharacteristicChanged(device, characteristic, false, record) == BluetoothStatusCodes.SUCCESS
+      } else {
+        @Suppress("DEPRECATION")
+        characteristic.value = record
+        @Suppress("DEPRECATION")
+        active.notifyCharacteristicChanged(device, characteristic, false)
+      }
+      if (accepted) {
+        val status = withTimeoutOrNull(NOTIFY_TIMEOUT_MILLIS) { waiter.await() }
+        if (status == BluetoothGatt.GATT_SUCCESS) return
+        if (devices[peerKey] == null) throw V4LinkException("Central $peerKey disconnected")
+      }
+      notifyWaiters.remove(peerKey, waiter)
+      kotlinx.coroutines.delay(BUSY_BACKOFF_MILLIS * (attempt + 1))
+    }
+    throw V4LinkException("Notification to $peerKey failed repeatedly")
   }
 
   @SuppressLint("MissingPermission")
   override fun close() {
-    synchronized(this) {
-      closed = true
-      advertiseGeneration++
-    }
-    mainHandler.removeCallbacksAndMessages(null)
-    runCatching { adapter.bluetoothLeAdvertiser?.stopAdvertising(advertiseCallback) }
+    closed = true
+    runCatching { adapter.bluetoothLeAdvertiser?.stopAdvertisingSet(advertiseCallback) }
+    advertisingSet = null
+    notifyWaiters.values.forEach { it.complete(BluetoothGatt.GATT_FAILURE) }
+    notifyWaiters.clear()
+    devices.keys.toList().forEach(listener::onDisconnected)
+    devices.clear()
     subscribed.clear()
-    synchronized(this) {
-      lastAdvertisement = null
-      commandReassemblers.clear()
-      framedPeers.clear()
-      negotiatedMtus.clear()
-      pendingNotifications.clear()
-      notificationInFlight.clear()
-    }
-    server?.close();
+    runCatching { server?.close() }
     server = null
+    control = null
   }
 
-  private val advertiseCallback = object : AdvertiseCallback() {
-    override fun onStartSuccess(settingsInEffect: AdvertiseSettings) {
-      lastAdvertisement = advertisementBytes()
-      Log.i(TAG, "BLE advertising started")
+  private val advertiseCallback = object : AdvertisingSetCallback() {
+    override fun onAdvertisingSetStarted(set: AdvertisingSet?, txPower: Int, status: Int) {
+      if (status == ADVERTISE_SUCCESS && set != null) {
+        advertisingSet = set
+        Log.i(TAG, "BLE advertising started tx=$txPower")
+        if (closed) runCatching { adapter.bluetoothLeAdvertiser?.stopAdvertisingSet(this) }
+      } else {
+        Log.e(TAG, "BLE advertising failed: $status")
+      }
     }
 
-    override fun onStartFailure(errorCode: Int) {
-      Log.e(TAG, "BLE advertising failed: $errorCode")
+    override fun onAdvertisingSetStopped(set: AdvertisingSet?) {
+      if (advertisingSet === set) advertisingSet = null
     }
   }
 
   private companion object {
-    const val TAG = "BetterHvBle"
-    const val ADVERTISE_RESTART_DELAY_MILLIS = 400L
-    val NEXT_MESSAGE_ID = AtomicInteger(1)
+    const val TAG = "NoteLinkPeripheral"
+    const val NOTIFY_ATTEMPTS = 6
+    const val NOTIFY_TIMEOUT_MILLIS = 2_000L
+    const val BUSY_BACKOFF_MILLIS = 8L
   }
 }
