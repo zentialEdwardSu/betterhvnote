@@ -102,3 +102,35 @@ jobs:
               throw "Missing -Elevated parameter in $_"
             }
           }
+
+  proto-schema:
+    name: Proto schema
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - name: Check out sources
+        uses: actions/checkout@v6.0.2
+        with:
+          fetch-depth: 0
+          submodules: recursive
+
+      - name: Set up buf
+        uses: bufbuild/buf-setup-action@v1
+        with:
+          version: '1.75.0'
+
+      - name: Lint the v4 schema
+        run: buf lint
+
+      - name: Check for breaking changes
+        if: github.event_name == 'pull_request'
+        shell: bash
+        run: |
+          base="${{ github.base_ref }}"
+          git fetch --no-tags origin "$base"
+          if git cat-file -e "origin/${base}:buf.yaml" 2>/dev/null; then
+            buf breaking --against ".git#branch=origin/${base}"
+          else
+            echo "Base branch has no buf.yaml yet; skipping the breaking check"
+          fi

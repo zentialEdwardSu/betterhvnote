@@ -1,0 +1,13 @@
+version: v2
+modules:
+  - path: transfer-core/src/main/proto
+lint:
+  use:
+    - STANDARD
+  except:
+    # Enum values are already namespaced by their distinct enum names; forcing the enum-name
+    # prefix would rename ERROR_* and LEASE_* values without adding information.
+    - ENUM_VALUE_PREFIX
+breaking:
+  use:
+    - FILE

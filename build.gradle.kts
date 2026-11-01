@@ -7,6 +7,7 @@ plugins {
     id("org.jetbrains.compose") version "1.12.0" apply false
     id("app.cash.sqldelight") version "2.3.2" apply false
     id("dev.detekt") version "2.0.0-alpha.6" apply false
+    id("com.google.protobuf") version "0.10.0" apply false
 }
 
 subprojects {
