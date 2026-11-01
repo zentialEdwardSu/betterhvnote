@@ -14,11 +14,15 @@ import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
 import androidx.core.content.edit
 import com.betterhv.note.sender.shared.noteLinkText
+import com.betterhv.transfer.android.AndroidNetworkInfoProvider
 import com.betterhv.transfer.android.AndroidPairingController
 import com.betterhv.transfer.android.AndroidSenderEndpoint
+import com.betterhv.transfer.android.ControlPeripheralListener
 import com.betterhv.transfer.android.HighBandwidthSessionManager
 import com.betterhv.transfer.android.HostedGroupState
+import com.betterhv.transfer.core.NOTELINK_LAN_PORT
 import com.betterhv.transfer.core.TransferPhase
+import com.betterhv.transfer.core.v4.notelink.NoteLinkServer
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -33,6 +37,11 @@ class TransferForegroundService : Service() {
   private lateinit var highBandwidth: HighBandwidthSessionManager
   private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
   private var endpoint: AndroidSenderEndpoint? = null
+  private var server: NoteLinkServer? = null
+  private var networkWatch: AutoCloseable? = null
+  // Android drops incoming broadcast datagrams in Wi-Fi power save unless a multicast lock is
+  // held; without it the Note's LAN discovery probe never reaches this phone.
+  private var multicastLock: android.net.wifi.WifiManager.MulticastLock? = null
   private var foregroundStarted = false
 
   override fun onCreate() {
@@ -47,8 +56,13 @@ class TransferForegroundService : Service() {
       },
     )
     inbox = ExportInboxRepository(this)
-    highBandwidth = HighBandwidthSessionManager(this, serviceScope).also { it.start() }
+    // The Wi-Fi Direct group is hosted only on request from a Note that could not reach the LAN.
+    highBandwidth = HighBandwidthSessionManager(this, serviceScope)
     processor = PhoneCommandProcessor(this, queue, inbox, pairing, highBandwidth, ::refreshOrStop)
+    serviceScope.launch {
+      PhonePairingMode.responder.collect { endpoint?.setPairingMode(it != null) }
+    }
+    networkWatch = AndroidNetworkInfoProvider(this).watch { server?.publishCapabilities() }
     NoteLinkTransferRuntime.attach(serviceScope, processor)
     serviceScope.launch {
       processor.snapshot.collect { if (foregroundStarted) showNotification() }
@@ -79,26 +93,56 @@ class TransferForegroundService : Service() {
     }
     showNotification()
     foregroundStarted = true
-    if (intent?.action == ACTION_SETTINGS_CHANGED) {
-      endpoint?.close()
-      endpoint = null
-    }
-    if (endpoint == null) {
-      endpoint = AndroidSenderEndpoint(
-        this,
-        pairing.localDeviceId,
-        NoteLinkSettings(this).displayName,
-        queue,
-        { _, bytes -> processor.handle(bytes) },
-      ).also(AndroidSenderEndpoint::start)
-    }
+    if (intent?.action == ACTION_SETTINGS_CHANGED) stopTransport()
+    if (endpoint == null) startTransport()
     return START_STICKY
+  }
+
+  private fun startTransport() {
+    multicastLock = runCatching {
+      getSystemService(android.net.wifi.WifiManager::class.java)
+        ?.createMulticastLock("NoteLinkDiscovery")
+        ?.apply {
+          setReferenceCounted(false)
+          acquire()
+        }
+    }.getOrNull()
+    val created = NoteLinkServer(processor, sendBle = { peer, record -> endpoint?.notifyControl(peer, record) })
+    runCatching { created.start() }.onFailure {
+      Log.e(TAG, "LAN listener could not bind port $NOTELINK_LAN_PORT; only BLE is available", it)
+    }
+    processor.server = created
+    server = created
+    endpoint = AndroidSenderEndpoint(
+      this,
+      pairing.localDeviceId,
+      NoteLinkSettings(this).displayName,
+      queue,
+      object : ControlPeripheralListener {
+        override fun onRecord(peerKey: String, record: ByteArray) = created.onBleRecord(peerKey, record)
+        override fun onMtu(peerKey: String, mtu: Int) = created.onBleMtu(peerKey, mtu)
+        override fun onDisconnected(peerKey: String) = created.onBleClosed(peerKey)
+      },
+    ).also { peripheral ->
+      peripheral.start()
+      peripheral.setPairingMode(PhonePairingMode.responder.value != null)
+    }
+  }
+
+  private fun stopTransport() {
+    runCatching { multicastLock?.release() }
+    multicastLock = null
+    endpoint?.close()
+    endpoint = null
+    server?.close()
+    server = null
+    processor.server = null
   }
 
   override fun onDestroy() {
     foregroundStarted = false
-    endpoint?.close()
-    endpoint = null
+    networkWatch?.close()
+    stopTransport()
     NoteLinkTransferRuntime.detach(processor)
     processor.close()
     highBandwidth.close()
@@ -116,6 +160,7 @@ class TransferForegroundService : Service() {
     } else {
       showNotification()
       endpoint?.refreshAdvertisement()
+      server?.publishQueueChanged()
     }
   }
 
@@ -242,7 +287,7 @@ class TransferForegroundService : Service() {
     )
   }
 
-  private fun shouldRun(): Boolean = queue.items().isNotEmpty() ||
+  private fun shouldRun(): Boolean = queue.items().isNotEmpty() || PhonePairingMode.responder.value != null ||
     (pairing.pairedDevice != null && isReceiveEnabled(this))
 
   companion object {
@@ -256,7 +301,7 @@ class TransferForegroundService : Service() {
     fun sync(context: Context, hasItems: Boolean) {
       val intent = Intent(context, TransferForegroundService::class.java)
       val paired = AndroidPairingController(context).pairedDevice != null
-      if (hasItems || (paired && isReceiveEnabled(context))) {
+      if (hasItems || PhonePairingMode.responder.value != null || (paired && isReceiveEnabled(context))) {
         ContextCompat.startForegroundService(context, intent)
       } else {
         context.stopService(intent)

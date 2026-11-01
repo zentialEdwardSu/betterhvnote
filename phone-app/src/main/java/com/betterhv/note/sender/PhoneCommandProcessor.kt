@@ -4,34 +4,47 @@ import android.content.Context
 import android.util.Log
 import com.betterhv.transfer.android.AndroidNetworkInfoProvider
 import com.betterhv.transfer.android.AndroidPairingController
-import com.betterhv.transfer.android.BleReplayCache
-import com.betterhv.transfer.android.BleSecureEnvelope
-import com.betterhv.transfer.android.EncryptedFileTransfer
 import com.betterhv.transfer.android.HighBandwidthSessionManager
 import com.betterhv.transfer.android.SenderLease
-import com.betterhv.transfer.core.BleCommand
-import com.betterhv.transfer.core.BleQueueProtocol
-import com.betterhv.transfer.core.BleResponse
-import com.betterhv.transfer.core.CapabilityNegotiation
+import com.betterhv.transfer.core.ContentCounts
 import com.betterhv.transfer.core.ContentKind
-import com.betterhv.transfer.core.DeviceCapabilities
-import com.betterhv.transfer.core.PreparedQueueItemSummary
-import com.betterhv.transfer.core.TransferChannelException
+import com.betterhv.transfer.core.ExportTransferOffer
+import com.betterhv.transfer.core.NOTELINK_LAN_PORT
 import com.betterhv.transfer.core.TransferErrorCode
 import com.betterhv.transfer.core.TransferEvent
 import com.betterhv.transfer.core.TransferFailure
+import com.betterhv.transfer.core.TransferLimits
 import com.betterhv.transfer.core.TransferMode
-import com.betterhv.transfer.core.TransferNetworkSecurity
 import com.betterhv.transfer.core.TransferObservable
 import com.betterhv.transfer.core.TransferPhase
 import com.betterhv.transfer.core.TransferProgressMeter
 import com.betterhv.transfer.core.TransferSnapshot
+import com.betterhv.transfer.core.v4.notelink.ByteSink
+import com.betterhv.transfer.core.v4.notelink.FileByteSink
+import com.betterhv.transfer.core.v4.notelink.HostLease
+import com.betterhv.transfer.core.v4.notelink.NoteLinkHost
+import com.betterhv.transfer.core.v4.notelink.NoteLinkProto
+import com.betterhv.transfer.core.v4.notelink.NoteLinkServer
+import com.betterhv.transfer.core.v4.notelink.NoteLinkTransferEvent
+import com.betterhv.transfer.core.v4.notelink.PayloadSource
+import com.betterhv.transfer.core.v4.notelink.PushDecision
+import com.betterhv.transfer.core.v4.pairing.PairingOutcome
+import com.betterhv.transfer.core.v4.pairing.PairingResponder
+import com.betterhv.transfer.core.v4.session.PairingKeyStore
+import com.betterhv.transfer.proto.v4.CapabilitySet
+import com.betterhv.transfer.proto.v4.Endpoint
+import com.betterhv.transfer.proto.v4.Feature
+import com.betterhv.transfer.proto.v4.P2pGroup
+import com.betterhv.transfer.proto.v4.P2pState
+import com.betterhv.transfer.proto.v4.PushOffer
+import com.betterhv.transfer.proto.v4.UpdateCheck
+import com.betterhv.transfer.proto.v4.UpdateResult
+import com.betterhv.transfer.proto.v4.UpdateState
 import com.betterhv.update.NoteAppUpdateCoordinator
 import com.betterhv.update.NoteAppUpdateTaskState
-import kotlinx.coroutines.CancellationException
+import com.google.protobuf.ByteString
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -40,14 +53,16 @@ import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.launch
 import java.io.File
-import java.net.ServerSocket
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
-import java.util.concurrent.CountDownLatch
-import java.util.concurrent.TimeUnit
+import com.betterhv.transfer.proto.v4.ContentKind as ProtoContentKind
 
+/**
+ * Phone side of NoteLink v4: the [NoteLinkHost] that maps protocol requests onto the outbox
+ * queue, the export inbox and the Note update cache. Transport (BLE peripheral, TCP listener)
+ * lives in [NoteLinkServer]; this class only answers its callbacks.
+ */
 class PhoneCommandProcessor(
   context: Context,
   private val queue: PhoneQueueRepository,
@@ -56,24 +71,19 @@ class PhoneCommandProcessor(
   private val highBandwidth: HighBandwidthSessionManager,
   private val onQueueChanged: () -> Unit,
 ) : AutoCloseable,
-  TransferObservable {
+  TransferObservable,
+  NoteLinkHost {
+  private val appContext = context.applicationContext
   private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-  private val network = AndroidNetworkInfoProvider(context)
-  private val leases = ConcurrentHashMap<UUID, SenderLease>()
-  private val leaseOwners = ConcurrentHashMap<UUID, String>()
-  private val startedLeases = ConcurrentHashMap.newKeySet<UUID>()
-  private val peerCapabilities = ConcurrentHashMap<String, DeviceCapabilities>()
-  private val pushedExports = ConcurrentHashMap<UUID, PushState>()
-  private val pushedExportOwners = ConcurrentHashMap<UUID, String>()
-  private val transferJobs = ConcurrentHashMap<UUID, Job>()
-  private val listeningSockets = ConcurrentHashMap<UUID, ServerSocket>()
-  private val receiveAttemptTokens = ConcurrentHashMap<UUID, Any>()
-  private val inboundReplay = BleReplayCache()
+  private val network = AndroidNetworkInfoProvider(appContext)
+  private val leases = ConcurrentHashMap<UUID, Pair<String, SenderLease>>()
+  private val meters = ConcurrentHashMap<UUID, TransferProgressMeter>()
+  private val updateOperations = ConcurrentHashMap<String, UUID>()
   private val mutableSnapshot = MutableStateFlow(TransferSnapshot())
   private val mutableEvents = MutableSharedFlow<TransferEvent>(extraBufferCapacity = 64)
   private val noteUpdate = NoteAppUpdateCoordinator(
     scope,
-    File(context.filesDir, "note-update-cache"),
+    File(appContext.filesDir, "note-update-cache"),
   ) { file, descriptor, peerId ->
     val item = queue.enqueueAppPackage(file, descriptor, peerId)
     onQueueChanged()
@@ -83,508 +93,264 @@ class PhoneCommandProcessor(
   override val snapshot: StateFlow<TransferSnapshot> = mutableSnapshot.asStateFlow()
   override val events: SharedFlow<TransferEvent> = mutableEvents.asSharedFlow()
 
-  fun handle(bytes: ByteArray): ByteArray {
-    val senderId = BleSecureEnvelope.senderDeviceId(bytes)
-    val authenticated = authenticate(bytes, senderId)
-    val device = if (senderId != null && authenticated.device.id != senderId) {
-      val oldId = authenticated.device.id
-      pairing.resolveIdentity(oldId, senderId).also {
-        queue.reassignDestination(oldId, senderId)
+  @Volatile var server: NoteLinkServer? = null
+
+  override val localDeviceId: String get() = pairing.localDeviceId
+  override val localDeviceName: String get() = NoteLinkSettings(appContext).displayName
+
+  override fun capabilities(): CapabilitySet {
+    val addresses = network.lanAddresses()
+    val port = server?.lanBoundPort?.takeIf { it > 0 } ?: NOTELINK_LAN_PORT
+    val builder = CapabilitySet.newBuilder()
+      .setTransports(TRANSPORT_LAN or TRANSPORT_P2P)
+      .setMaxRecordBytes(64 * 1024)
+      .addAllKinds(
+        listOf(
+          ProtoContentKind.CONTENT_IMAGE,
+          ProtoContentKind.CONTENT_TEXT,
+          ProtoContentKind.CONTENT_PDF,
+          ProtoContentKind.CONTENT_APP_PACKAGE,
+        ),
+      )
+      .setFeatures(Feature.FEATURE_LAN_TICKET_VALUE or Feature.FEATURE_P2P_CREDENTIAL_JOIN_VALUE)
+      .setDeviceName(localDeviceName)
+      .setAppVersion(BuildConfig.VERSION_NAME)
+    addresses.firstOrNull()?.let { builder.setLan(Endpoint.newBuilder().setHost(it).setPort(port)) }
+    addresses.forEach { builder.addLanCandidates(Endpoint.newBuilder().setHost(it).setPort(port)) }
+    return builder.build()
+  }
+
+  override fun pairings(): PairingKeyStore = pairing.pairingKeyStore()
+
+  override fun pairingResponder(): PairingResponder? = PhonePairingMode.active()
+
+  override fun onPaired(outcome: PairingOutcome) {
+    val firstPairing = pairing.pairedClients.isEmpty()
+    val stored = pairing.store(outcome)
+    // Items shared before the first pairing had no destination; they belong to this Note.
+    if (firstPairing) queue.reassignPending(stored.id)
+    // Items for a Note that was since unpaired would otherwise be invisible to every Note.
+    queue.adoptOrphans(pairing.pairedClients.map { it.id }.toSet(), stored.id)
+    PhonePairingMode.paired(stored.name)
+    ShareShortcutPublisher.update(appContext, stored)
+    onQueueChanged()
+  }
+
+  override fun onPairingFailed(attemptsLeft: Int) = PhonePairingMode.failedAttempt(attemptsLeft)
+
+  override fun advertisedCounts(): ContentCounts = queue.counts()
+
+  override fun counts(peerDeviceId: String): ContentCounts {
+    queue.releaseExpired()
+    return queue.counts(peerDeviceId)
+  }
+
+  override fun lease(peerDeviceId: String, kind: ContentKind): HostLease? {
+    val lease = queue.leaseNext(kind, peerDeviceId) ?: return null
+    val item = lease.offer.item
+    leases[item.id] = peerDeviceId to lease
+    runCatching { lease.markTransferring() }
+    return hostLease(lease)
+  }
+
+  private fun hostLease(lease: SenderLease): HostLease {
+    val item = lease.offer.item
+    val text = lease.text?.encodeToByteArray()
+    val inline = text?.takeIf { it.size <= NoteLinkProto.INLINE_TEXT_BYTES }
+    val payload = when {
+      text != null -> PayloadSource.of(text)
+      else -> lease.payloadFile?.takeIf(File::isFile)?.let { PayloadSource.of(it, item.sha256) }
+    }
+    val offer = NoteLinkProto.offer(
+      id = item.id,
+      kind = item.kind,
+      mimeType = item.mimeType,
+      byteLength = payload?.length ?: item.byteLength,
+      sha256 = payload?.sha256 ?: item.sha256,
+      displayName = item.displayName,
+      leaseTtlMillis = TransferLimits.LEASE_TIMEOUT_MILLIS,
+      inlineData = inline,
+    )
+    return HostLease(offer, payload)
+  }
+
+  override fun leased(peerDeviceId: String, itemId: UUID): HostLease? {
+    val (owner, lease) = leases[itemId] ?: return null
+    if (owner != peerDeviceId) return null
+    runCatching { lease.heartbeat() }
+    return hostLease(lease)
+  }
+
+  override fun heartbeat(peerDeviceId: String, itemId: UUID): Boolean {
+    val (owner, lease) = leases[itemId] ?: return false
+    if (owner != peerDeviceId) return false
+    return runCatching { lease.heartbeat() }.isSuccess
+  }
+
+  override fun commit(peerDeviceId: String, itemId: UUID): Boolean {
+    val entry = leases[itemId] ?: return false
+    if (entry.first != peerDeviceId) return false
+    leases.remove(itemId)
+    return runCatching { entry.second.commit() }
+      .onSuccess {
+        pairing.markLastUsed(peerDeviceId)
         onQueueChanged()
+        emit(TransferEvent.Completed(itemId, itemId))
       }
-    } else {
-      pairing.markLastUsed(authenticated.device.id)
-    }
-    val key = authenticated.key
-    val response = runCatching {
-      dispatch(BleQueueProtocol.decodeCommand(authenticated.plaintext), device.id, key)
-    }.getOrElse { error ->
-      val failure = when (error) {
-        is com.betterhv.transfer.core.UnsupportedBleProtocolException -> TransferFailure(
-          TransferErrorCode.UNSUPPORTED_PROTOCOL,
-          error.message.orEmpty(),
-          false,
-        )
-
-        is TransferChannelException -> error.failure
-
-        else -> TransferFailure(TransferErrorCode.INTERNAL, error.message ?: "Command failed", true)
-      }
-      mutableSnapshot.value = mutableSnapshot.value.copy(
-        phase = TransferPhase.FAILED,
-        lastFailure = failure,
-        canRetry = failure.recoverable,
-        canCancel = false,
-      )
-      emitEvent(TransferEvent.Failed(mutableSnapshot.value.operationId, failure))
-      BleResponse.Failure(failure)
-    }
-    val encoded = BleQueueProtocol.encode(response)
-    return if (senderId == null) {
-      BleSecureEnvelope.seal(key, encoded)
-    } else {
-      BleSecureEnvelope.seal(key, pairing.localDeviceId, encoded)
-    }
+      .isSuccess
   }
 
-  private fun authenticate(envelope: ByteArray, senderId: String?): AuthenticatedCommand {
-    val devices = pairing.pairedClients
-    require(devices.isNotEmpty()) { "No paired device" }
-    val identified = senderId?.let { id -> devices.firstOrNull { it.id == id } }
-    val candidates = if (senderId == null) {
-      devices
-    } else if (identified != null) {
-      listOf(identified) + devices.filter { it.id.startsWith("pending:") }
-    } else {
-      devices.filter { it.id.startsWith("pending:") }
-    }
-    candidates.forEach { device ->
-      val key = pairing.sharedKey(device.id) ?: return@forEach
-      runCatching { BleSecureEnvelope.open(key, envelope, inboundReplay) }
-        .getOrNull()?.let { return AuthenticatedCommand(device, key, it) }
-    }
-    error("Could not authenticate paired device")
+  override fun release(peerDeviceId: String, itemId: UUID): Boolean {
+    val entry = leases[itemId] ?: return false
+    if (entry.first != peerDeviceId) return false
+    leases.remove(itemId)
+    return runCatching { entry.second.release() }.onSuccess { onQueueChanged() }.isSuccess
   }
 
-  private fun dispatch(command: BleCommand, peerId: String, key: ByteArray): BleResponse = when (command) {
-    BleCommand.Counts -> queue.counts(peerId).let { BleResponse.Counts(it.images, it.texts, it.pdfs) }
-
-    is BleCommand.Lease -> queue.leaseNext(command.kind, peerId)?.let { lease ->
-      leases[lease.offer.item.id] = lease
-      leaseOwners[lease.offer.item.id] = peerId
-      BleResponse.Offer(lease.offer.item)
-    } ?: BleResponse.Empty
-
-    is BleCommand.TextChunk -> {
-      val lease = requireLease(command.itemId, peerId)
-      val content = requireNotNull(lease.text) { "Item is not text" }.encodeToByteArray()
-      require(command.offset in 0..content.size)
-      val end = (command.offset + BleQueueProtocol.TEXT_CHUNK_BYTES).coerceAtMost(content.size)
-      lease.heartbeat()
-      BleResponse.TextChunk(
-        command.itemId,
-        command.offset,
-        content.size,
-        content.copyOfRange(command.offset, end),
-      )
-    }
-
-    is BleCommand.Heartbeat -> {
-      requireLease(command.itemId, peerId).heartbeat()
-      BleResponse.Ok
-    }
-
-    is BleCommand.Commit -> {
-      val lease = requireLease(command.itemId, peerId)
-      startedLeases.remove(command.itemId)
-      leases.remove(command.itemId)
-      leaseOwners.remove(command.itemId)
-      lease.commit()
-      onQueueChanged()
-      phase(command.itemId, TransferPhase.COMPLETE)
-      BleResponse.Ok
-    }
-
-    is BleCommand.Release -> {
-      val lease = requireLease(command.itemId, peerId)
-      startedLeases.remove(command.itemId)
-      transferJobs.remove(command.itemId)?.cancel()
-      leases.remove(command.itemId)
-      leaseOwners.remove(command.itemId)
-      lease.release()
-      onQueueChanged()
-      BleResponse.Ok
-    }
-
-    is BleCommand.Capabilities -> {
-      peerCapabilities[peerId] = command.localCapabilities
-      val local = localCapabilities(key)
-      val match = TransferNetworkSecurity.compare(
-        local.ssidFingerprint,
-        command.localCapabilities.ssidFingerprint,
-      )
-      emitEvent(TransferEvent.CapabilityNegotiated(local.modes, command.localCapabilities.modes, match))
-      mutableSnapshot.value = mutableSnapshot.value.copy(
-        phase = TransferPhase.NEGOTIATING_CAPABILITIES,
-        localModes = local.modes,
-        remoteModes = command.localCapabilities.modes,
-        ssidMatch = match,
-        wifiDirectGroupReady = highBandwidth.endpoint() != null,
-      )
-      BleResponse.Capabilities(CapabilityNegotiation(local, match))
-    }
-
-    is BleCommand.PrepareFileTransfer -> prepare(command, peerId, key)
-
-    is BleCommand.PushOffer -> when (val begin = beginPush(peerId, command)) {
-      InboxBeginResult.AlreadyReceived -> BleResponse.AlreadyReceived(command.offer.artifactId)
-
+  override fun push(peerDeviceId: String, offer: PushOffer): PushDecision {
+    val id = NoteLinkProto.uuid(offer.itemId)
+    val export = runCatching {
+      ExportTransferOffer(id, offer.displayName, offer.mimeType, offer.byteLength, offer.sha256.toByteArray())
+    }.getOrElse { return PushDecision.Reject(it.message ?: "Invalid export") }
+    return when (val begin = inbox.begin(peerDeviceId, export)) {
+      InboxBeginResult.AlreadyReceived -> PushDecision.AlreadyReceived
       is InboxBeginResult.Receive -> {
-        pushedExports[command.offer.artifactId] = PushState.Waiting(command.offer, begin.partialFile)
-        BleResponse.Ok
-      }
-    }
-
-    is BleCommand.PushStatus -> when (val state = pushedExports[command.artifactId]) {
-      null -> inbox.find(command.artifactId)?.takeIf {
-        it.sourceDeviceId == peerId && it.state == InboxExportState.COMPLETE
-      }
-        ?.let { BleResponse.AlreadyReceived(command.artifactId) }
-        ?: BleResponse.Failure(TransferFailure(TransferErrorCode.INTERNAL, "Receive task does not exist", false))
-
-      is PushState.Waiting, is PushState.Receiving -> {
-        requirePushOwner(command.artifactId, peerId)
-        BleResponse.Pending
-      }
-
-      PushState.Complete -> {
-        requirePushOwner(command.artifactId, peerId)
-        BleResponse.PushComplete(command.artifactId)
-      }
-
-      is PushState.Failed -> {
-        requirePushOwner(command.artifactId, peerId)
-        BleResponse.Failure(state.failure)
-      }
-    }
-
-    is BleCommand.PushCancel -> {
-      requirePushOwner(command.artifactId, peerId)
-      transferJobs.remove(command.artifactId)?.cancel()
-      listeningSockets.remove(command.artifactId)?.close()
-      pushedExports.remove(command.artifactId)
-      pushedExportOwners.remove(command.artifactId)
-      inbox.cancel(command.artifactId)
-      onQueueChanged()
-      BleResponse.Ok
-    }
-
-    is BleCommand.RequestNoteAppUpdate -> updateResponse(
-      command.operationId,
-      noteUpdate.begin(command.operationId, peerId, command.currentVersion),
-    )
-
-    is BleCommand.NoteAppUpdateStatus -> updateResponse(
-      command.operationId,
-      noteUpdate.status(command.operationId, peerId),
-    )
-
-    is BleCommand.NoteAppUpdateCancel -> {
-      noteUpdate.cancel(command.operationId, peerId)
-      BleResponse.Ok
-    }
-  }
-
-  private fun updateResponse(id: UUID, state: NoteAppUpdateTaskState): BleResponse = when (state) {
-    NoteAppUpdateTaskState.Resolving -> BleResponse.UpdateResolving(id)
-    is NoteAppUpdateTaskState.Downloading -> BleResponse.UpdateDownloading(
-      id, state.version, state.bytesDownloaded, state.totalBytes,
-    )
-    is NoteAppUpdateTaskState.UpToDate -> BleResponse.UpdateUpToDate(id, state.latestVersion)
-    is NoteAppUpdateTaskState.Ready -> BleResponse.UpdateReady(
-      id,
-      state.version,
-      PreparedQueueItemSummary(
-        state.itemId,
-        ContentKind.APP_PACKAGE,
-        com.betterhv.update.NotePackageResolver.NOTE_PACKAGE_MIME,
-        state.byteLength,
-        state.sha256,
-        state.displayName,
-      ),
-    )
-    is NoteAppUpdateTaskState.Failed -> BleResponse.Failure(
-      TransferFailure(TransferErrorCode.INTERNAL, state.message, state.recoverable),
-    )
-  }
-
-  private fun prepare(command: BleCommand.PrepareFileTransfer, peerId: String, pairingKey: ByteArray): BleResponse {
-    val local = localCapabilities(pairingKey)
-    val remote = peerCapabilities[peerId]
-    val supported = local.modes and command.selectedMode.bit != 0 &&
-      (command.selectedMode == TransferMode.LAN || remote?.modes?.and(command.selectedMode.bit) != 0)
-    if (!supported) {
-      return BleResponse.Failure(
-        TransferFailure(
-          TransferErrorCode.UNSUPPORTED_MODE,
-          "Selected mode ${command.selectedMode} is not supported by both devices",
-          false,
-          command.selectedMode,
-        ),
-      )
-    }
-    val endpoint = runCatching { command.receiverEndpoint.validated() }.getOrElse {
-      return BleResponse.Failure(TransferFailure(TransferErrorCode.INVALID_ENDPOINT, it.message.orEmpty(), false))
-    }
-    val previousReceiving = pushedExports[command.itemId] as? PushState.Receiving
-    if (previousReceiving != null) receiveAttemptTokens[command.itemId] = Any()
-    transferJobs.remove(command.itemId)?.cancel()
-    listeningSockets.remove(command.itemId)?.close()
-    previousReceiving?.let {
-      pushedExports[command.itemId] = PushState.Waiting(it.offer, it.partial)
-    }
-    val fileKey = TransferNetworkSecurity.sessionKey(pairingKey, command.itemId, command.sessionNonce, "file")
-    val probeKey = TransferNetworkSecurity.sessionKey(pairingKey, command.itemId, command.sessionNonce, "probe")
-    return when {
-      leases.containsKey(command.itemId) -> {
-        requireLease(command.itemId, peerId)
-        prepareSend(command, peerId, endpoint, fileKey, probeKey)
-      }
-
-      pushedExports[command.itemId] is PushState.Waiting -> {
-        requirePushOwner(command.itemId, peerId)
-        prepareReceive(command, peerId, endpoint, fileKey, probeKey)
-      }
-
-      else -> BleResponse.Failure(TransferFailure(TransferErrorCode.INTERNAL, "Transfer item does not exist", false))
-    }
-  }
-
-  private fun prepareSend(
-    command: BleCommand.PrepareFileTransfer,
-    peerId: String,
-    endpoint: com.betterhv.transfer.core.NetworkEndpoint,
-    fileKey: ByteArray,
-    probeKey: ByteArray,
-  ): BleResponse {
-    val lease = requireLease(command.itemId, peerId)
-    val source = requireNotNull(lease.payloadFile) { "Item is not a file" }
-    if (command.selectedMode == TransferMode.LAN) {
-      phase(command.itemId, TransferPhase.PROBING_LAN)
-      runCatching { EncryptedFileTransfer.probe(endpoint.host, command.itemId, probeKey) }
-        .onFailure { fail(command.itemId, it) }
-        .getOrElse { error ->
-          return BleResponse.Failure(failure(error, TransferMode.LAN))
+        val file = FileByteSink(begin.partialFile)
+        val sink = object : ByteSink by file {
+          override fun abort() {
+            file.abort()
+            inbox.fail(id, "Transfer interrupted")
+          }
         }
-    }
-    if (startedLeases.add(command.itemId)) lease.markTransferring()
-    begin(command.itemId, peerId, lease.offer.item.byteLength, command.selectedMode, endpoint)
-    transferJobs[command.itemId] = scope.launch {
-      try {
-        val meter = TransferProgressMeter(System.currentTimeMillis())
-        EncryptedFileTransfer.send(endpoint.host, command.itemId, source, fileKey) { done, total ->
-          progress(command.itemId, done, total, meter)
-        }
-        lease.markAwaitingCommit()
-        phase(command.itemId, TransferPhase.AWAITING_COMMIT)
-      } catch (cancelled: CancellationException) {
-        throw cancelled
-      } catch (error: Throwable) {
-        fail(command.itemId, error)
-      } finally {
-        transferJobs.remove(command.itemId)
+        PushDecision.Receive(sink) { inbox.complete(id, begin.partialFile) }
       }
     }
-    return BleResponse.Prepared(command.itemId, command.selectedMode, endpoint)
   }
 
-  @Suppress("LongMethod")
-  private fun prepareReceive(
-    command: BleCommand.PrepareFileTransfer,
-    peerId: String,
-    endpoint: com.betterhv.transfer.core.NetworkEndpoint,
-    fileKey: ByteArray,
-    probeKey: ByteArray,
-  ): BleResponse {
-    val waiting = pushedExports[command.itemId] as PushState.Waiting
-    val attemptToken = Any().also { receiveAttemptTokens[command.itemId] = it }
-    val listening = CountDownLatch(1)
-    begin(command.itemId, peerId, waiting.offer.byteLength, command.selectedMode, endpoint)
-    val receiving = PushState.Receiving(waiting.offer, waiting.partial)
-    pushedExports[command.itemId] = receiving
-    transferJobs[command.itemId] = scope.launch {
-      try {
-        val meter = TransferProgressMeter(System.currentTimeMillis())
-        val received = EncryptedFileTransfer.receive(
-          waiting.partial,
-          command.itemId,
-          fileKey,
-          probeKey = if (command.selectedMode == TransferMode.LAN) probeKey else null,
-          progress = { done, total -> progress(command.itemId, done, total, meter) },
-          onListening = { server ->
-            listeningSockets[command.itemId] = server
-            listening.countDown()
-          },
+  override fun updateCheck(peerDeviceId: String, check: UpdateCheck): UpdateResult {
+    val operationKey = "$peerDeviceId:${check.operationId.toStringUtf8()}:${check.versionName}"
+    val operation = updateOperations.getOrPut(operationKey) { UUID.randomUUID() }
+    val state = noteUpdate.begin(operation, peerDeviceId, check.versionName.ifBlank { "0.0.0" })
+    val result = UpdateResult.newBuilder()
+    when (state) {
+      NoteAppUpdateTaskState.Resolving -> result.setState(UpdateState.UPDATE_PREPARING)
+      is NoteAppUpdateTaskState.Downloading -> result.setState(UpdateState.UPDATE_PREPARING)
+        .setLatestVersion(state.version)
+        .setBytesPrepared(state.bytesDownloaded)
+        .setTotalBytes(state.totalBytes)
+      is NoteAppUpdateTaskState.UpToDate -> {
+        updateOperations.remove(operationKey)
+        result.setState(UpdateState.UPDATE_UP_TO_DATE).setLatestVersion(state.latestVersion.orEmpty())
+      }
+      is NoteAppUpdateTaskState.Failed -> {
+        updateOperations.remove(operationKey)
+        result.setState(UpdateState.UPDATE_FAILED).setMessage(state.message)
+      }
+      is NoteAppUpdateTaskState.Ready -> {
+        updateOperations.remove(operationKey)
+        val lease = queue.leaseNext(ContentKind.APP_PACKAGE, peerDeviceId)
+          ?: return result.setState(UpdateState.UPDATE_FAILED).setMessage("Update package is not queued").build()
+        leases[lease.offer.item.id] = peerDeviceId to lease
+        result.setState(UpdateState.UPDATE_AVAILABLE)
+          .setLatestVersion(state.version)
+          .setOffer(hostLease(lease).offer)
+      }
+    }
+    return result.build()
+  }
+
+  override suspend fun prepareP2p(peerDeviceId: String): P2pGroup? {
+    val key = pairing.sharedKey(peerDeviceId) ?: return null
+    highBandwidth.start(key)
+    val endpoint = highBandwidth.awaitReady(P2P_READY_MILLIS) ?: return null
+    return P2pGroup.newBuilder()
+      .setSsid(endpoint.networkName)
+      .setPassphrase(endpoint.passphrase)
+      .setGroupOwnerIp(ByteString.copyFrom(java.net.InetAddress.getByName(endpoint.ownerIp).address))
+      .setPort(server?.lanBoundPort?.takeIf { it > 0 } ?: NOTELINK_LAN_PORT)
+      .setState(P2pState.P2P_STATE_READY)
+      .build()
+  }
+
+  override fun onSessionChanged(peerDeviceId: String, links: List<String>) {
+    Log.i(TAG, "session peer=$peerDeviceId links=$links")
+  }
+
+  override fun onTransfer(event: NoteLinkTransferEvent) {
+    when (event) {
+      is NoteLinkTransferEvent.Started -> {
+        meters[event.itemId] = TransferProgressMeter(System.currentTimeMillis())
+        val now = System.currentTimeMillis()
+        mutableSnapshot.value = TransferSnapshot(
+          operationId = event.itemId,
+          itemId = event.itemId,
+          deviceId = event.peerDeviceId,
+          phase = TransferPhase.TRANSFERRING,
+          mode = if (event.link == "ble") null else if (event.link == "p2p") TransferMode.WIFI_DIRECT else TransferMode.LAN,
+          totalBytes = event.totalBytes,
+          startedAtMillis = now,
+          phaseStartedAtMillis = now,
+          canCancel = false,
         )
-        if (receiveAttemptTokens[command.itemId] !== attemptToken) return@launch
-        phase(command.itemId, TransferPhase.VERIFYING)
-        require(
-          received.byteLength == waiting.offer.byteLength && received.sha256.contentEquals(waiting.offer.sha256),
-        ) {
-          "Export file length or checksum does not match"
-        }
-        inbox.complete(command.itemId, waiting.partial)
-        pushedExports[command.itemId] = PushState.Complete
-        onQueueChanged()
-        phase(command.itemId, TransferPhase.COMPLETE)
-        emitEvent(TransferEvent.Completed(command.itemId, command.itemId))
-      } catch (cancelled: CancellationException) {
-        if (receiveAttemptTokens[command.itemId] === attemptToken) {
-          pushedExports.remove(command.itemId, receiving)
-          pushedExportOwners.remove(command.itemId)
-        }
-        throw cancelled
-      } catch (error: Throwable) {
-        if (receiveAttemptTokens[command.itemId] === attemptToken) {
-          val failure = failure(error, command.selectedMode)
-          inbox.fail(command.itemId, failure.message)
-          pushedExports[command.itemId] = PushState.Failed(failure)
-          fail(command.itemId, error)
-        }
-      } finally {
-        if (receiveAttemptTokens.remove(command.itemId, attemptToken)) {
-          listeningSockets.remove(command.itemId)
-          transferJobs.remove(command.itemId)
-        }
-        listening.countDown()
+        Log.i(TAG, "transfer start item=${event.itemId} link=${event.link} bytes=${event.totalBytes}")
+      }
+      is NoteLinkTransferEvent.Progress -> {
+        val meter = meters[event.itemId] ?: return
+        val sample = meter.sample(event.bytes, event.totalBytes)
+        mutableSnapshot.value = mutableSnapshot.value.copy(
+          bytesTransferred = event.bytes,
+          totalBytes = event.totalBytes,
+          bytesPerSecond = sample.bytesPerSecond,
+          averageBytesPerSecond = sample.averageBytesPerSecond,
+          etaMillis = sample.etaMillis,
+        )
+        emit(TransferEvent.Progress(event.itemId, event.bytes, event.totalBytes, sample.bytesPerSecond, sample.etaMillis))
+      }
+      is NoteLinkTransferEvent.Finished -> {
+        meters.remove(event.itemId)
+        mutableSnapshot.value = mutableSnapshot.value.copy(
+          phase = TransferPhase.COMPLETE,
+          bytesTransferred = mutableSnapshot.value.totalBytes,
+          phaseStartedAtMillis = System.currentTimeMillis(),
+        )
+        Log.i(TAG, "transfer done item=${event.itemId} bytes=${event.bytes} in ${event.millis} ms")
+      }
+      is NoteLinkTransferEvent.Failed -> {
+        meters.remove(event.itemId)
+        val failure = TransferFailure(TransferErrorCode.INTERNAL, event.message, true)
+        mutableSnapshot.value = mutableSnapshot.value.copy(
+          phase = TransferPhase.FAILED,
+          lastFailure = failure,
+          canRetry = true,
+        )
+        emit(TransferEvent.Failed(event.itemId, failure))
       }
     }
-    if (!listening.await(2, TimeUnit.SECONDS)) {
-      transferJobs.remove(command.itemId)?.cancel()
-      return BleResponse.Failure(
-        TransferFailure(
-          TransferErrorCode.CONNECTION_TIMEOUT,
-          "Receive port did not start in time",
-          true,
-          command.selectedMode,
-        ),
-      )
-    }
-    return BleResponse.Prepared(command.itemId, command.selectedMode, endpoint)
   }
 
-  private fun localCapabilities(key: ByteArray) = network.capabilities(
-    key,
-    highBandwidth.endpoint(),
-    BleQueueProtocol.CAPABILITY_EXPORT_PUSH or BleQueueProtocol.CAPABILITY_NOTE_APP_UPDATE,
-  )
-
-  private fun begin(
-    id: UUID,
-    peerId: String,
-    total: Long,
-    mode: TransferMode,
-    endpoint: com.betterhv.transfer.core.NetworkEndpoint,
-  ) {
-    val now = System.currentTimeMillis()
-    mutableSnapshot.value = TransferSnapshot(
-      operationId = id, itemId = id, deviceId = peerId,
-      phase = TransferPhase.WAITING_FOR_PEER, mode = mode,
-      localModes = mutableSnapshot.value.localModes, remoteModes = mutableSnapshot.value.remoteModes,
-      ssidMatch = mutableSnapshot.value.ssidMatch, endpoint = endpoint,
-      totalBytes = total, attempt = 1, startedAtMillis = now, phaseStartedAtMillis = now,
-      canCancel = true, wifiDirectGroupReady = highBandwidth.endpoint() != null,
-    )
-    emitEvent(TransferEvent.TransportSelected(id, mode, endpoint))
+  override fun log(message: String) {
+    Log.i(TAG, message)
   }
 
-  private fun progress(id: UUID, done: Long, total: Long, meter: TransferProgressMeter) {
-    val sample = meter.sample(done, total)
-    mutableSnapshot.value = mutableSnapshot.value.copy(
-      phase = TransferPhase.TRANSFERRING,
-      bytesTransferred = done,
-      totalBytes = total,
-      bytesPerSecond = sample.bytesPerSecond,
-      averageBytesPerSecond = sample.averageBytesPerSecond,
-      etaMillis = sample.etaMillis,
-      canCancel = true,
-    )
-    emitEvent(TransferEvent.Progress(id, done, total, sample.bytesPerSecond, sample.etaMillis))
-  }
-
-  private fun phase(id: UUID, next: TransferPhase) {
-    val old = mutableSnapshot.value.phase
-    mutableSnapshot.value = mutableSnapshot.value.copy(
-      operationId = id,
-      phase = next,
-      phaseStartedAtMillis = System.currentTimeMillis(),
-      canCancel = next !in setOf(TransferPhase.IDLE, TransferPhase.COMPLETE, TransferPhase.FAILED),
-    )
-    emitEvent(TransferEvent.PhaseChanged(id, old, next))
-  }
-
-  private fun fail(id: UUID, error: Throwable) {
-    val failure = failure(error, mutableSnapshot.value.mode)
-    mutableSnapshot.value = mutableSnapshot.value.copy(
-      operationId = id,
-      phase = TransferPhase.FAILED,
-      lastFailure = failure,
-      canRetry = failure.recoverable,
-      canCancel = false,
-    )
-    emitEvent(TransferEvent.Failed(id, failure))
-    Log.e(TAG, "Transfer failed $id: ${failure.code}", error)
-  }
-
-  private fun failure(error: Throwable, mode: TransferMode?): TransferFailure =
-    (error as? TransferChannelException)?.failure ?: TransferFailure(
-      TransferErrorCode.INTERNAL,
-      error.message ?: "Transfer failed",
-      true,
-      mode,
-    )
-
-  private fun requireLease(id: UUID, peerId: String): SenderLease {
-    require(leaseOwners[id] == peerId) { "Lease does not belong to the current device" }
-    return requireNotNull(leases[id]) { "Lease does not exist" }
-  }
-
-  private fun beginPush(peerId: String, command: BleCommand.PushOffer): InboxBeginResult {
-    val id = command.offer.artifactId
-    val storedOwner = inbox.find(id)?.sourceDeviceId
-    require(storedOwner == null || storedOwner == peerId) { "Export task does not belong to the current device" }
-    val result = inbox.begin(peerId, command.offer)
-    if (result is InboxBeginResult.Receive) {
-      val activeOwner = pushedExportOwners.putIfAbsent(id, peerId)
-      require(activeOwner == null || activeOwner == peerId) { "Export task does not belong to the current device" }
-    }
-    return result
-  }
-
-  private fun requirePushOwner(id: UUID, peerId: String) {
-    require(pushedExportOwners[id] == peerId) { "Export task does not belong to the current device" }
-  }
-
-  override fun cancel() {
-    snapshot.value.operationId?.let { id ->
-      transferJobs.remove(id)?.cancel()
-      listeningSockets.remove(id)?.close()
-      phase(id, TransferPhase.FAILED)
-    }
-  }
-
-  private fun emitEvent(event: TransferEvent) {
+  private fun emit(event: TransferEvent) {
     if (!mutableEvents.tryEmit(event)) Log.w(TAG, "Transfer event buffer full: ${event.javaClass.simpleName}")
   }
 
+  override fun cancel() {
+    mutableSnapshot.value = TransferSnapshot()
+  }
+
   override fun close() {
-    cancel()
     noteUpdate.close()
-    leases.values.forEach { runCatching { it.release() } }
+    leases.values.forEach { (_, lease) -> runCatching { lease.release() } }
     leases.clear()
-    leaseOwners.clear()
-    startedLeases.clear()
-    transferJobs.values.forEach(Job::cancel)
-    transferJobs.clear()
-    listeningSockets.values.forEach { runCatching { it.close() } }
-    listeningSockets.clear()
     scope.cancel()
   }
 
-  private sealed interface PushState {
-    data class Waiting(val offer: com.betterhv.transfer.core.ExportTransferOffer, val partial: File) : PushState
-    data class Receiving(val offer: com.betterhv.transfer.core.ExportTransferOffer, val partial: File) : PushState
-    data object Complete : PushState
-    data class Failed(val failure: TransferFailure) : PushState
-  }
-
-  private data class AuthenticatedCommand(
-    val device: com.betterhv.transfer.core.PairedDevice,
-    val key: ByteArray,
-    val plaintext: ByteArray,
-  )
-
   private companion object {
-    const val TAG = "BetterHvTransferV2"
+    const val TAG = "NoteLinkHost"
+    const val TRANSPORT_LAN = 1
+    const val TRANSPORT_P2P = 2
+    const val P2P_READY_MILLIS = 40_000L
   }
 }

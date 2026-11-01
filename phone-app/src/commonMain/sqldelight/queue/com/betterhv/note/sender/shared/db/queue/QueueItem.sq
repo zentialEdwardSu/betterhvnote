@@ -12,7 +12,9 @@ CREATE TABLE queue_items (
   lease_expires_at INTEGER,
   failure_reason TEXT,
   payload_path TEXT,
-  text_content TEXT
+  text_content TEXT,
+  content_id TEXT,
+  delivery_group TEXT
 );
 
 CREATE INDEX queue_position ON queue_items(position);
@@ -32,13 +34,15 @@ SELECT text_content FROM queue_items WHERE id = ?;
 insertItem:
 INSERT INTO queue_items(
   id, destination_device_id, kind, mime_type, byte_length, sha256, created_at,
-  position, state, display_name, lease_expires_at, failure_reason, payload_path, text_content
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+  position, state, display_name, lease_expires_at, failure_reason, payload_path, text_content,
+  content_id, delivery_group
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
 
 updateItem:
 UPDATE queue_items SET
   destination_device_id = ?, kind = ?, mime_type = ?, byte_length = ?, sha256 = ?,
-  created_at = ?, position = ?, state = ?, display_name = ?, lease_expires_at = ?, failure_reason = ?
+  created_at = ?, position = ?, state = ?, display_name = ?, lease_expires_at = ?, failure_reason = ?,
+  content_id = ?, delivery_group = ?
 WHERE id = ?;
 
 deleteById:

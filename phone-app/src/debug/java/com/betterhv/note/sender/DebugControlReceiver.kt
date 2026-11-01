@@ -16,10 +16,11 @@ class DebugControlReceiver : BroadcastReceiver() {
         try {
             val pairing = AndroidPairingController(context)
             when (intent.action) {
-                ACTION_PAIR -> pairing.confirmManual(
-                    intent.getStringExtra(EXTRA_CLIENT_ID) ?: "betterhv-note",
-                    intent.getStringExtra(EXTRA_NAME) ?: "N10Pro",
-                    requireNotNull(intent.getStringExtra(EXTRA_CODE))
+                // Enters the code shown on the Note, exactly like the pairing dialog.
+                ACTION_PAIR -> PhonePairingMode.begin(
+                    requireNotNull(intent.getStringExtra(EXTRA_CODE)),
+                    pairing.localDeviceId,
+                    NoteLinkSettings(context).displayName
                 )
                 ACTION_UNPAIR -> pairing.unpair(requireNotNull(intent.getStringExtra(EXTRA_CLIENT_ID)))
                 ACTION_TEXT -> queue.enqueueText(

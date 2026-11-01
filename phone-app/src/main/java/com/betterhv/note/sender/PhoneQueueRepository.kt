@@ -387,10 +387,36 @@ class PhoneQueueRepository(
     publish()
   }
 
+  /** Re-targets unsent items addressed to a Note that is no longer paired to [deviceId]. */
+  @Synchronized
+  fun adoptOrphans(pairedIds: Set<String>, deviceId: String): Int {
+    val orphans = items().filter {
+      val destination = it.destinationDeviceId
+      destination != null && destination !in pairedIds &&
+        it.state in setOf(QueueState.PENDING, QueueState.FAILED)
+    }
+    orphans.forEach { update(it.copy(destinationDeviceId = deviceId)) }
+    return orphans.size
+  }
+
   fun reassignPending(deviceId: String) {
     writable().beginTransaction()
     try {
       items().forEach { update(it.copy(destinationDeviceId = deviceId)) }
+      writable().setTransactionSuccessful()
+    } finally {
+      writable().endTransaction()
+    }
+    publish()
+  }
+
+  /** Re-targets only provisional `pending:` rows after the peer's real device id is learned. */
+  fun resolvePendingDestination(deviceId: String) {
+    val pending = items().filter { it.destinationDeviceId?.startsWith("pending:") == true }
+    if (pending.isEmpty()) return
+    writable().beginTransaction()
+    try {
+      pending.forEach { update(it.copy(destinationDeviceId = deviceId)) }
       writable().setTransactionSuccessful()
     } finally {
       writable().endTransaction()
@@ -555,12 +581,14 @@ class PhoneQueueRepository(
       item.leaseExpiresAt,
     )
     put("failure_reason", item.failureReason)
+    put("content_id", item.contentId)
+    put("delivery_group", item.deliveryGroup)
   }
 
   private fun android.database.Cursor.item() = QueueItem(
     UUID.fromString(getString(0)), getString(1), ContentKind.valueOf(getString(2)), getString(3),
     getLong(4), getBlob(5), getLong(6), getLong(7), QueueState.valueOf(getString(8)), getString(9),
-    if (isNull(10)) null else getLong(10), getString(11),
+    if (isNull(10)) null else getLong(10), getString(11), getString(12), getString(13),
   )
 
   private fun payloadFile(id: UUID): File? = readable().query(
@@ -737,7 +765,7 @@ class PhoneQueueRepository(
   }
 
   private class QueueDatabase(context: Context) :
-    SQLiteOpenHelper(context, "sender_queue.db", null, 1) {
+    SQLiteOpenHelper(context, "sender_queue.db", null, 2) {
     override fun onConfigure(db: SQLiteDatabase) {
       db.setForeignKeyConstraintsEnabled(
         true,
@@ -752,14 +780,20 @@ class PhoneQueueRepository(
                 mime_type TEXT NOT NULL, byte_length INTEGER NOT NULL, sha256 BLOB NOT NULL,
                 created_at INTEGER NOT NULL, position INTEGER NOT NULL, state TEXT NOT NULL,
                 display_name TEXT, lease_expires_at INTEGER, failure_reason TEXT,
-                payload_path TEXT, text_content TEXT
+                payload_path TEXT, text_content TEXT,
+                content_id TEXT, delivery_group TEXT
             )
         """.trimIndent(),
       )
       db.execSQL("CREATE INDEX queue_position ON queue_items(position)")
     }
 
-    override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) = Unit
+    override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
+      if (oldVersion < 2) {
+        db.execSQL("ALTER TABLE queue_items ADD COLUMN content_id TEXT")
+        db.execSQL("ALTER TABLE queue_items ADD COLUMN delivery_group TEXT")
+      }
+    }
   }
 
   private companion object {
@@ -770,6 +804,7 @@ class PhoneQueueRepository(
     val ITEM_COLUMNS = arrayOf(
       "id", "destination_device_id", "kind", "mime_type", "byte_length", "sha256",
       "created_at", "position", "state", "display_name", "lease_expires_at", "failure_reason",
+      "content_id", "delivery_group",
     )
   }
 }

@@ -69,6 +69,7 @@ import com.betterhv.transfer.core.isActiveTransferPhase
 import com.betterhv.transfer.core.TransferLogEntry
 import com.betterhv.transfer.core.TransferLogLevel
 import com.betterhv.transfer.core.TransferModes
+import com.betterhv.transfer.core.v4.observability.LinkTimelineSummary
 import com.betterhv.transfer.core.TransferSnapshot
 import com.betterhv.update.UpdateCheckState
 import com.betterhv.update.UpdateInfo
@@ -136,6 +137,14 @@ data class DashboardHistoryItem(
 
 data class DashboardPairedDevice(val id: String, val name: String)
 
+/** Pairing dialog state: the user types the code shown on the Note. */
+data class DashboardPairing(
+  /** Code already submitted and waiting for the Note; null while the user is typing. */
+  val waitingCode: String? = null,
+  val message: String? = null,
+  val pairedName: String? = null,
+)
+
 data class DashboardState(
   val displayName: String = "NoteLink",
   val status: String = NoteLinkLanguage.SYSTEM.text("正在检查设备", "Checking device"),
@@ -143,7 +152,7 @@ data class DashboardState(
   val receiveEnabled: Boolean = true,
   val pairedDevices: List<DashboardPairedDevice> = emptyList(),
   val selectedDeviceId: String? = null,
-  val pairingCode: String? = null,
+  val pairing: DashboardPairing? = null,
   val queue: List<DashboardItem> = emptyList(),
   val history: List<DashboardHistoryItem> = emptyList(),
   val sendOrder: SendOrder = SendOrder.QUEUE,
@@ -151,6 +160,7 @@ data class DashboardState(
   val inbox: List<DashboardItem> = emptyList(),
   val transfer: TransferSnapshot = TransferSnapshot(),
   val transferLog: List<TransferLogEntry> = emptyList(),
+  val timelineSummary: LinkTimelineSummary? = null,
   val showRecentTransferEvents: Boolean = true,
   val language: NoteLinkLanguage = NoteLinkLanguage.SYSTEM,
   val notice: String? = null,
@@ -174,6 +184,8 @@ data class DashboardActions(
   val setReceiveEnabled: (Boolean) -> Unit,
   val saveDisplayName: (String) -> Unit,
   val beginPairing: () -> Unit,
+  val submitPairingCode: (String) -> Unit = {},
+  val cancelPairing: () -> Unit = {},
   val selectDevice: (String) -> Unit,
   val unpair: (String) -> Unit,
   val refreshStatus: () -> Unit,
@@ -319,22 +331,10 @@ private fun StatusBand(state: DashboardState, actions: DashboardActions) {
         selected?.name,
         state.showRecentTransferEvents,
         state.language,
-        actions.cancelTransfer
+        actions.cancelTransfer,
+        state.timelineSummary,
       )
-      if (state.pairingCode != null) {
-        Text(
-          t(
-            "在 N10Pro 的“设置 → 手机传输”中输入此六位配对码",
-            "Enter this six-digit code in Settings > NoteLink on the N10Pro",
-          ),
-          color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        Text(
-          state.pairingCode,
-          style = MaterialTheme.typography.displaySmall,
-          fontWeight = FontWeight.Bold
-        )
-      }
+      state.pairing?.let { pairing -> PairingDialog(pairing, state.language, actions) }
       if (state.pairedDevices.isNotEmpty()) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
           OutlinedButton(
@@ -361,9 +361,18 @@ private fun TransferStatus(
   endpointName: String?,
   showRecentEvents: Boolean,
   language: NoteLinkLanguage,
-  onCancel: () -> Unit
+  onCancel: () -> Unit,
+  timeline: LinkTimelineSummary?,
 ) {
   val t: (String, String) -> String = { zh, en -> language.text(zh, en) }
+  timeline?.let { summary ->
+    Text(
+      "${t("最近", "Recent")} ${summary.samples} ${t("次链路", "links")}: " +
+        "p50 ${summary.p50Millis} ms · p95 ${summary.p95Millis} ms · p99 ${summary.p99Millis} ms",
+      style = MaterialTheme.typography.bodySmall,
+      color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+  }
   if (!snapshot.phase.isActiveTransferPhase && (!showRecentEvents || log.isEmpty())) return
   Text(t("传输状态", "Transfer status"), style = MaterialTheme.typography.titleSmall)
   Text(
@@ -855,6 +864,58 @@ private fun DeviceSelectorDropdown(state: DashboardState, actions: DashboardActi
       )
     }
   }
+}
+
+@Composable
+private fun PairingDialog(pairing: DashboardPairing, language: NoteLinkLanguage, actions: DashboardActions) {
+  val t: (String, String) -> String = { zh, en -> language.text(zh, en) }
+  var code by remember { mutableStateOf("") }
+  AlertDialog(
+    onDismissRequest = { if (pairing.waitingCode == null) actions.cancelPairing() },
+    title = { Text(t("与 Note 配对", "Pair with Note")) },
+    text = {
+      Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        when {
+          pairing.pairedName != null -> Text(t("已与 ${pairing.pairedName} 配对", "Paired with ${pairing.pairedName}"))
+          pairing.waitingCode != null -> Text(
+            t(
+              "已输入 ${pairing.waitingCode}，请在 Note 上保持配对页面打开。",
+              "Code ${pairing.waitingCode} entered. Keep the pairing page open on the Note.",
+            ),
+          )
+          else -> {
+            Text(
+              t(
+                "在 Note 的“设置 → NoteLink → 配对新设备”中会显示 6 位配对码，请在此输入：",
+                "On the Note open Settings > NoteLink > Pair new device and enter the 6-digit code shown there:",
+              ),
+            )
+            OutlinedTextField(
+              value = code,
+              onValueChange = { code = it.filter(Char::isDigit).take(6) },
+              singleLine = true,
+              textStyle = MaterialTheme.typography.headlineMedium,
+            )
+          }
+        }
+        pairing.message?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+      }
+    },
+    confirmButton = {
+      when {
+        pairing.pairedName != null -> Button(onClick = actions.cancelPairing) { Text(t("完成", "Done")) }
+        pairing.waitingCode != null -> Unit
+        else -> Button(enabled = code.length == 6, onClick = { actions.submitPairingCode(code) }) {
+          Text(t("开始配对", "Start pairing"))
+        }
+      }
+    },
+    dismissButton = {
+      if (pairing.pairedName == null) {
+        TextButton(onClick = actions.cancelPairing) { Text(t("取消", "Cancel")) }
+      }
+    },
+  )
 }
 
 @Composable

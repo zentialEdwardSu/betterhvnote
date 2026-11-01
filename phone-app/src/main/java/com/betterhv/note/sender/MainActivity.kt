@@ -123,7 +123,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
-import java.security.SecureRandom
 import java.text.DateFormat
 import java.util.Date
 import java.util.UUID
@@ -287,7 +286,9 @@ private fun BetterHvSendApp(
   val remoteNoteUpdate by NoteLinkTransferRuntime.noteUpdateState.collectAsState()
   val scope = rememberCoroutineScope()
   var textDialog by remember { mutableStateOf<String?>(null) }
-  var pairingCode by remember { mutableStateOf<String?>(null) }
+  var pairingDialog by remember { mutableStateOf(false) }
+  var pairingInput by remember { mutableStateOf("") }
+  val pairingState by PhonePairingMode.ui.collectAsState()
   var cameraUri by remember { mutableStateOf<Uri?>(null) }
   var cameraFile by remember { mutableStateOf<File?>(null) }
   var statusRevision by remember { mutableIntStateOf(0) }
@@ -589,15 +590,9 @@ private fun BetterHvSendApp(
               connectionStatus = connectionStatus,
               showPermissionButton = missingPermissions.isNotEmpty(),
               onPair = {
-                val code = SecureRandom().nextInt(1_000_000).toString().padStart(6, '0')
-                val firstPairing = pairedDevices.isEmpty()
-                val added = pairing.confirmManual("pending:${UUID.randomUUID()}", "N10Pro", code)
-                if (firstPairing) queue.reassignPending(added.id)
-                ShareShortcutPublisher.update(queueContext(queue), added)
-                TransferForegroundService.setReceiveEnabled(context, true)
-                TransferForegroundService.sync(queueContext(queue), queue.items().isNotEmpty())
-                statusRevision++
-                pairingCode = code
+                pairingInput = ""
+                PhonePairingMode.cancel()
+                pairingDialog = true
               },
               onSelect = { id ->
                 pairing.markLastUsed(id)
@@ -859,23 +854,81 @@ private fun BetterHvSendApp(
       }
     }
     if (!showSettings) {
-      pairingCode?.let { code ->
+      if (pairingDialog) {
+        LaunchedEffect(pairingState) {
+          if (pairingState is PairingUiState.Paired) {
+            TransferForegroundService.setReceiveEnabled(context, true)
+            TransferForegroundService.sync(queueContext(queue), queue.items().isNotEmpty())
+            statusRevision++
+          }
+        }
         AlertDialog(
-          onDismissRequest = { pairingCode = null },
-          title = { Text(noteLinkText("在 Note 上完成配对", "Complete pairing on Note")) },
-          text = {
-            Column {
-              Text(
-                noteLinkText("在 N10Pro 的“设置 → 手机传输”中输入：", "Enter in Settings > NoteLink on the N10Pro:"),
-              )
-              Text(
-                code,
-                style = MaterialTheme.typography.displayMedium,
-                fontWeight = FontWeight.Bold,
-              )
+          onDismissRequest = {
+            if (pairingState !is PairingUiState.Waiting) {
+              PhonePairingMode.cancel()
+              pairingDialog = false
             }
           },
-          confirmButton = { Button(onClick = { pairingCode = null }) { Text(noteLinkText("完成", "Done")) } },
+          title = { Text(noteLinkText("与 Note 配对", "Pair with Note")) },
+          text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+              when (val state = pairingState) {
+                is PairingUiState.Paired -> Text(
+                  noteLinkText("已与 ${state.deviceName} 配对", "Paired with ${state.deviceName}"),
+                )
+                is PairingUiState.Waiting -> {
+                  Text(
+                    noteLinkText(
+                      "已输入 ${state.code}。保持此页面打开，在 Note 上点“配对”。",
+                      "Code ${state.code} entered. Keep this open and tap Pair on the Note.",
+                    ),
+                  )
+                }
+                else -> {
+                  Text(
+                    noteLinkText(
+                      "在 Note 的“设置 → NoteLink → 配对新设备”中会显示 6 位配对码，请在此输入：",
+                      "On the Note open Settings > NoteLink > Pair new device and enter the 6-digit code shown there:",
+                    ),
+                  )
+                  OutlinedTextField(
+                    value = pairingInput,
+                    onValueChange = { pairingInput = it.filter(Char::isDigit).take(6) },
+                    singleLine = true,
+                    keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                      keyboardType = androidx.compose.ui.text.input.KeyboardType.NumberPassword,
+                    ),
+                    textStyle = MaterialTheme.typography.headlineMedium,
+                  )
+                  (state as? PairingUiState.Failed)?.let { Text(it.message, color = MaterialTheme.colorScheme.error) }
+                }
+              }
+            }
+          },
+          confirmButton = {
+            when (pairingState) {
+              is PairingUiState.Paired -> Button(onClick = {
+                PhonePairingMode.cancel()
+                pairingDialog = false
+              }) { Text(noteLinkText("完成", "Done")) }
+              is PairingUiState.Waiting -> Unit
+              else -> Button(
+                enabled = pairingInput.length == 6,
+                onClick = {
+                  PhonePairingMode.begin(pairingInput, pairing.localDeviceId, appDisplayName)
+                  TransferForegroundService.sync(queueContext(queue), queue.items().isNotEmpty())
+                },
+              ) { Text(noteLinkText("开始配对", "Start pairing")) }
+            }
+          },
+          dismissButton = {
+            if (pairingState !is PairingUiState.Paired) {
+              OutlinedButton(onClick = {
+                PhonePairingMode.cancel()
+                pairingDialog = false
+              }) { Text(noteLinkText("取消", "Cancel")) }
+            }
+          },
         )
       }
     }

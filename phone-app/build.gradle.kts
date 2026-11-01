@@ -44,6 +44,9 @@ extensions.configure<ApplicationExtension> {
     }
 
     buildTypes {
+        getByName("debug") {
+            applicationIdSuffix = ".debug"
+        }
         release {
             isMinifyEnabled = false
             signingConfig = if (releaseSigningReady) signingConfigs.getByName("release") else null
