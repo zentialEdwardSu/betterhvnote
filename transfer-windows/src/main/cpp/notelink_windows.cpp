@@ -19,6 +19,7 @@
 #include <cstdio>
 #include <cstring>
 #include <deque>
+#include <map>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -33,22 +34,47 @@ using namespace Windows::Storage::Streams;
 namespace {
 constexpr uint16_t kManufacturerId = 0x0B17;
 guid const kServiceUuid{L"b6e4f100-77b7-4d35-9f52-3b4be45c3010"};
-guid const kIdentityUuid{L"b6e4f101-77b7-4d35-9f52-3b4be45c3010"};
-guid const kCommandUuid{L"b6e4f102-77b7-4d35-9f52-3b4be45c3010"};
-guid const kResponseUuid{L"b6e4f103-77b7-4d35-9f52-3b4be45c3010"};
+guid const kControlUuid{L"b6e4f110-77b7-4d35-9f52-3b4be45c3010"};
 
+struct ControlEvent {
+    int32_t type;
+    std::string client;
+    std::vector<uint8_t> payload;
+};
+
+struct Subscriber {
+    GattSubscribedClient client{nullptr};
+    GattSession session{nullptr};
+    event_token mtu_token{};
+};
+
+// g_mutex guards every global below; WinRT objects are copied out under the lock and used
+// outside it, so a blocking WinRT call never holds the lock.
 std::mutex g_mutex;
-std::condition_variable g_commands_changed;
-std::deque<std::vector<uint8_t>> g_commands;
+std::condition_variable g_events_changed;
+std::deque<ControlEvent> g_events;
+std::map<std::string, Subscriber> g_subscribers;
 std::string g_last_error;
-std::vector<uint8_t> g_identity_payload;
 std::vector<uint8_t> g_advertisement_payload;
 
 GattServiceProvider g_service_provider{nullptr};
-GattLocalCharacteristic g_identity{nullptr};
-GattLocalCharacteristic g_command{nullptr};
-GattLocalCharacteristic g_response{nullptr};
+GattLocalCharacteristic g_control{nullptr};
 BluetoothLEAdvertisementPublisher g_advertisement{nullptr};
+
+constexpr size_t kMaxQueuedEvents = 4096;
+
+void push_event(int32_t type, std::string client, std::vector<uint8_t> payload = {}) {
+    {
+        std::lock_guard lock(g_mutex);
+        if (g_events.size() >= kMaxQueuedEvents) g_events.pop_front();
+        g_events.push_back(ControlEvent{type, std::move(client), std::move(payload)});
+    }
+    g_events_changed.notify_one();
+}
+
+std::vector<uint8_t> mtu_payload(uint16_t mtu) {
+    return {static_cast<uint8_t>(mtu & 0xff), static_cast<uint8_t>(mtu >> 8)};
+}
 
 void trace(std::string const& message) noexcept {
     auto line = std::string("[NoteLink native] ") + message + "\n";
@@ -120,11 +146,6 @@ std::vector<uint8_t> bytes_from(IBuffer const& buffer) {
     return result;
 }
 
-std::vector<uint8_t> identity_bytes() {
-    std::lock_guard lock(g_mutex);
-    return g_identity_payload;
-}
-
 std::vector<uint8_t> advertisement_bytes() {
     std::lock_guard lock(g_mutex);
     return g_advertisement_payload;
@@ -188,6 +209,13 @@ void start_gatt_advertising() {
     GattServiceProviderAdvertisingParameters advertising;
     advertising.IsConnectable(true);
     advertising.IsDiscoverable(true);
+    // Windows 10 2004+ can carry service data in the connectable advertisement, so the Note
+    // finds the identity hash on the same radio address it must connect to.
+    try {
+        advertising.ServiceData(buffer_from(advertisement_bytes()));
+    } catch (...) {
+        trace("GATT service data unsupported; identity only in the summary advertisement");
+    }
     g_service_provider.StartAdvertising(advertising);
     wait_for_gatt_advertisement_start();
     // Windows 10 IoT does not support GattServiceProvider service data on all
@@ -272,75 +300,88 @@ int32_t nl_capabilities() {
     return result;
 }
 
-int32_t nl_ble_start(const uint8_t* identity, int32_t identity_length, const uint8_t* advertisement, int32_t advertisement_length) {
+int32_t nl_ble_start(const uint8_t* advertisement, int32_t advertisement_length) {
     return guarded([&] {
         ensure_apartment();
         trace("BLE start requested");
         nl_ble_stop();
         {
             std::lock_guard lock(g_mutex);
-            if (identity == nullptr || identity_length <= 0 || advertisement == nullptr || advertisement_length <= 0) {
-                throw std::runtime_error("Invalid encoded BLE payload");
+            if (advertisement == nullptr || advertisement_length <= 0) {
+                throw std::runtime_error("Invalid encoded BLE advertisement");
             }
-            g_identity_payload.assign(identity, identity + identity_length);
             g_advertisement_payload.assign(advertisement, advertisement + advertisement_length);
-            g_commands.clear();
         }
         auto created = GattServiceProvider::CreateAsync(kServiceUuid).get();
         if (created.Error() != BluetoothError::Success) throw std::runtime_error("Unable to create NoteLink GATT service");
         g_service_provider = created.ServiceProvider();
-        g_identity = create_characteristic(
-            kIdentityUuid, GattCharacteristicProperties::Read,
+        g_control = create_characteristic(
+            kControlUuid,
+            GattCharacteristicProperties::WriteWithoutResponse | GattCharacteristicProperties::Notify,
             GattProtectionLevel::Plain, GattProtectionLevel::Plain
         );
-        g_command = create_characteristic(
-            kCommandUuid, GattCharacteristicProperties::Write,
-            GattProtectionLevel::Plain, GattProtectionLevel::Plain
-        );
-        g_response = create_characteristic(
-            kResponseUuid, GattCharacteristicProperties::Notify | GattCharacteristicProperties::Indicate,
-            GattProtectionLevel::Plain, GattProtectionLevel::Plain
-        );
-
-        g_identity.ReadRequested([](GattLocalCharacteristic const&, GattReadRequestedEventArgs const& args) {
+        g_control.WriteRequested([](GattLocalCharacteristic const&, GattWriteRequestedEventArgs const& args) {
             auto deferral = args.GetDeferral();
             try {
+                auto client = narrow(args.Session().DeviceId().Id());
                 auto request = args.GetRequestAsync().get();
                 if (request) {
-                    auto value = identity_bytes();
-                    request.RespondWithValue(buffer_from(value));
-                    trace("BLE identity read bytes=" + std::to_string(value.size()));
-                }
-            } catch (std::exception const& error) {
-                trace(std::string("BLE identity read failed: ") + error.what());
-            } catch (...) {
-                trace("BLE identity read failed: unknown error");
-            }
-            deferral.Complete();
-        });
-        g_command.WriteRequested([](GattLocalCharacteristic const&, GattWriteRequestedEventArgs const& args) {
-            auto deferral = args.GetDeferral();
-            try {
-                auto request = args.GetRequestAsync().get();
-                if (request) {
-                    auto value = bytes_from(request.Value());
-                    {
-                        std::lock_guard lock(g_mutex);
-                        g_commands.push_back(std::move(value));
-                    }
-                    trace("BLE command queued");
-                    g_commands_changed.notify_one();
+                    push_event(NL_BLE_EVENT_RECORD, client, bytes_from(request.Value()));
                     if (request.Option() == GattWriteOption::WriteWithResponse) request.Respond();
                 }
             } catch (std::exception const& error) {
-                trace(std::string("BLE command write failed: ") + error.what());
+                trace(std::string("BLE control write failed: ") + error.what());
             } catch (...) {
-                trace("BLE command write failed: unknown error");
+                trace("BLE control write failed: unknown error");
             }
             deferral.Complete();
         });
-        g_response.SubscribedClientsChanged([](GattLocalCharacteristic const& characteristic, auto const&) {
-            trace("BLE response subscribers=" + std::to_string(characteristic.SubscribedClients().Size()));
+
+        g_control.SubscribedClientsChanged([](GattLocalCharacteristic const& sender, auto const&) {
+            try {
+                std::map<std::string, GattSubscribedClient> current;
+                for (auto const& client : sender.SubscribedClients()) {
+                    current.emplace(narrow(client.Session().DeviceId().Id()), client);
+                }
+                std::vector<std::pair<std::string, uint16_t>> added;
+                std::vector<std::string> removed;
+                {
+                    std::lock_guard lock(g_mutex);
+                    for (auto it = g_subscribers.begin(); it != g_subscribers.end();) {
+                        if (current.count(it->first) == 0) {
+                            try { it->second.session.MaxPduSizeChanged(it->second.mtu_token); } catch (...) {}
+                            removed.push_back(it->first);
+                            it = g_subscribers.erase(it);
+                        } else {
+                            ++it;
+                        }
+                    }
+                    for (auto& [id, client] : current) {
+                        if (g_subscribers.count(id) != 0) continue;
+                        Subscriber subscriber;
+                        subscriber.client = client;
+                        subscriber.session = client.Session();
+                        auto key = id;
+                        subscriber.mtu_token = subscriber.session.MaxPduSizeChanged(
+                            [key](GattSession const& session, auto const&) {
+                                push_event(NL_BLE_EVENT_MTU, key, mtu_payload(session.MaxPduSize()));
+                            });
+                        added.emplace_back(id, subscriber.session.MaxPduSize());
+                        g_subscribers.emplace(id, std::move(subscriber));
+                    }
+                }
+                for (auto& id : removed) {
+                    trace("BLE client unsubscribed " + id);
+                    push_event(NL_BLE_EVENT_DISCONNECTED, id);
+                }
+                for (auto& [id, mtu] : added) {
+                    trace("BLE client subscribed " + id + " mtu=" + std::to_string(mtu));
+                    push_event(NL_BLE_EVENT_CONNECTED, id);
+                    push_event(NL_BLE_EVENT_MTU, id, mtu_payload(mtu));
+                }
+            } catch (...) {
+                trace("BLE subscriber tracking failed");
+            }
         });
 
         start_gatt_advertising();
@@ -348,144 +389,202 @@ int32_t nl_ble_start(const uint8_t* identity, int32_t identity_length, const uin
     });
 }
 
-int32_t nl_ble_update(
-    const uint8_t* identity,
-    int32_t identity_length,
-    const uint8_t* advertisement,
-    int32_t advertisement_length
-) {
+int32_t nl_ble_update(const uint8_t* advertisement, int32_t advertisement_length) {
     return guarded([&] {
         {
             std::lock_guard lock(g_mutex);
-            if (identity == nullptr || identity_length <= 0 || advertisement == nullptr || advertisement_length <= 0) {
-                throw std::runtime_error("Invalid encoded BLE payload");
+            if (advertisement == nullptr || advertisement_length <= 0) {
+                throw std::runtime_error("Invalid encoded BLE advertisement");
             }
-            g_identity_payload.assign(identity, identity + identity_length);
             g_advertisement_payload.assign(advertisement, advertisement + advertisement_length);
         }
-        // Identity reads use the shared payload above, so the connectable GATT
-        // service does not need to be rebuilt when queue counts change.
         if (g_advertisement) {
             g_advertisement.Stop();
             g_advertisement = nullptr;
         }
-        start_optional_summary_advertisement();
+        // Service data is fixed while the provider advertises, so it is restarted with the new
+        // payload. Existing GATT connections are not affected.
+        if (g_service_provider) {
+            try { g_service_provider.StopAdvertising(); } catch (...) {}
+            start_gatt_advertising();
+        } else {
+            start_optional_summary_advertisement();
+        }
     });
 }
 
-int32_t nl_ble_poll(uint8_t* output, int32_t capacity, int32_t timeout_ms) {
+int32_t nl_ble_poll_event(int32_t* type, char* client, int32_t client_capacity,
+    uint8_t* payload, int32_t payload_capacity, int32_t* payload_length, int32_t timeout_ms) {
+    if (type == nullptr || client == nullptr || client_capacity <= 0 || payload_length == nullptr) {
+        set_error("Invalid BLE event output");
+        return -1;
+    }
     std::unique_lock lock(g_mutex);
-    g_commands_changed.wait_for(lock, std::chrono::milliseconds(std::max(0, timeout_ms)), [] { return !g_commands.empty(); });
-    if (g_commands.empty()) return 0;
-    auto value = std::move(g_commands.front());
-    g_commands.pop_front();
-    if (capacity < static_cast<int32_t>(value.size()) || output == nullptr) return -static_cast<int32_t>(value.size());
-    std::memcpy(output, value.data(), value.size());
-    return static_cast<int32_t>(value.size());
+    g_events_changed.wait_for(
+        lock,
+        std::chrono::milliseconds(std::max(0, timeout_ms)),
+        [] { return !g_events.empty(); }
+    );
+    if (g_events.empty()) return 0;
+    auto& event = g_events.front();
+    auto needed = static_cast<int32_t>(event.payload.size());
+    if (needed > payload_capacity || (needed > 0 && payload == nullptr) ||
+        static_cast<int32_t>(event.client.size()) >= client_capacity) {
+        return -std::max<int32_t>(1, needed);
+    }
+    *type = event.type;
+    std::memcpy(client, event.client.c_str(), event.client.size() + 1);
+    if (needed > 0) std::memcpy(payload, event.payload.data(), event.payload.size());
+    *payload_length = needed;
+    g_events.pop_front();
+    return 1;
 }
 
-int32_t nl_ble_respond(const uint8_t* value, int32_t length) {
+int32_t nl_ble_notify(const char* client, const uint8_t* value, int32_t length) {
     return guarded([&] {
         ensure_apartment();
-        if (!g_response) throw std::runtime_error("BLE service is not running");
-        if (length < 0 || (length > 0 && value == nullptr)) throw std::runtime_error("Invalid BLE response");
+        if (client == nullptr) throw std::runtime_error("Missing BLE client id");
+        if (length < 0 || (length > 0 && value == nullptr)) throw std::runtime_error("Invalid control record");
+        GattLocalCharacteristic control{nullptr};
+        GattSubscribedClient target{nullptr};
+        {
+            std::lock_guard lock(g_mutex);
+            control = g_control;
+            auto found = g_subscribers.find(client);
+            if (found != g_subscribers.end()) target = found->second.client;
+        }
+        if (!control) throw std::runtime_error("BLE control characteristic is not running");
+        if (!target) throw std::runtime_error("BLE client is not subscribed");
         std::vector<uint8_t> bytes(value, value + length);
-        auto clients = g_response.NotifyValueAsync(buffer_from(bytes)).get();
-        if (clients.Size() == 0) throw std::runtime_error("No BLE client is subscribed to responses");
-        trace("BLE response notified bytes=" + std::to_string(bytes.size()) +
-              " clients=" + std::to_string(clients.Size()));
+        auto result = control.NotifyValueAsync(buffer_from(bytes), target).get();
+        if (result.Status() != GattCommunicationStatus::Success) {
+            throw std::runtime_error("BLE notification failed status=" +
+                std::to_string(static_cast<int32_t>(result.Status())));
+        }
     });
 }
 
 void nl_ble_stop() {
-    try {
-        if (g_service_provider) g_service_provider.StopAdvertising();
-        if (g_advertisement) g_advertisement.Stop();
-    } catch (...) {
-    }
-    g_response = nullptr;
-    g_command = nullptr;
-    g_identity = nullptr;
-    g_service_provider = nullptr;
+    GattServiceProvider provider{nullptr};
+    BluetoothLEAdvertisementPublisher publisher{nullptr};
     {
         std::lock_guard lock(g_mutex);
-        g_commands.clear();
-        g_identity_payload.clear();
+        provider = g_service_provider;
+        publisher = g_advertisement;
+        g_service_provider = nullptr;
+        g_advertisement = nullptr;
+        g_control = nullptr;
+        for (auto& [id, subscriber] : g_subscribers) {
+            try { subscriber.session.MaxPduSizeChanged(subscriber.mtu_token); } catch (...) {}
+        }
+        g_subscribers.clear();
+        g_events.clear();
         g_advertisement_payload.clear();
     }
-    g_commands_changed.notify_all();
+    try {
+        if (provider) provider.StopAdvertising();
+        if (publisher) publisher.Stop();
+    } catch (...) {
+    }
+    g_events_changed.notify_all();
     trace("BLE stopped");
 }
 
+namespace {
+std::string connected_ssid() {
+    HANDLE client = nullptr;
+    DWORD negotiated = 0;
+    PWLAN_INTERFACE_INFO_LIST interfaces = nullptr;
+    std::string result;
+    if (WlanOpenHandle(2, nullptr, &negotiated, &client) != ERROR_SUCCESS) return result;
+    if (WlanEnumInterfaces(client, nullptr, &interfaces) == ERROR_SUCCESS) {
+        for (DWORD index = 0; index < interfaces->dwNumberOfItems && result.empty(); ++index) {
+            auto& item = interfaces->InterfaceInfo[index];
+            if (item.isState != wlan_interface_state_connected) continue;
+            PVOID data = nullptr;
+            DWORD size = 0;
+            WLAN_OPCODE_VALUE_TYPE opcode = wlan_opcode_value_type_invalid;
+            if (WlanQueryInterface(client, &item.InterfaceGuid, wlan_intf_opcode_current_connection, nullptr,
+                    &size, &data, &opcode) == ERROR_SUCCESS) {
+                auto connection = static_cast<WLAN_CONNECTION_ATTRIBUTES*>(data);
+                auto& ssid = connection->wlanAssociationAttributes.dot11Ssid;
+                result.assign(reinterpret_cast<char*>(ssid.ucSSID), ssid.uSSIDLength);
+                WlanFreeMemory(data);
+            }
+        }
+        WlanFreeMemory(interfaces);
+    }
+    WlanCloseHandle(client, nullptr);
+    return result;
+}
+}
+
 int32_t nl_lan_info(char* ipv4, int32_t ipv4_capacity, uint8_t* ssid, int32_t ssid_capacity) {
+    // ipv4 receives a comma-separated list: Wi-Fi addresses first, then Ethernet.
     if (ipv4 == nullptr || ipv4_capacity < INET_ADDRSTRLEN || ssid == nullptr || ssid_capacity < DOT11_SSID_MAX_LENGTH) {
         set_error("LAN info output buffer is too small");
         return -1;
     }
-    HANDLE client = nullptr;
-    DWORD negotiated = 0;
-    PWLAN_INTERFACE_INFO_LIST interfaces = nullptr;
-    PVOID connection_data = nullptr;
-    DWORD connection_size = 0;
-    WLAN_OPCODE_VALUE_TYPE opcode = wlan_opcode_value_type_invalid;
     ULONG adapter_size = 16 * 1024;
     std::vector<uint8_t> adapter_buffer(adapter_size);
-    try {
-        if (WlanOpenHandle(2, nullptr, &negotiated, &client) != ERROR_SUCCESS) {
-            throw std::runtime_error("Unable to open Windows WLAN service");
-        }
-        if (WlanEnumInterfaces(client, nullptr, &interfaces) != ERROR_SUCCESS || interfaces->dwNumberOfItems == 0) {
-            throw std::runtime_error("No WLAN interface is available");
-        }
-        WLAN_CONNECTION_ATTRIBUTES* connection = nullptr;
-        for (DWORD index = 0; index < interfaces->dwNumberOfItems; ++index) {
-            auto& item = interfaces->InterfaceInfo[index];
-            if (item.isState != wlan_interface_state_connected) continue;
-            if (WlanQueryInterface(client, &item.InterfaceGuid, wlan_intf_opcode_current_connection, nullptr,
-                    &connection_size, &connection_data, &opcode) == ERROR_SUCCESS) {
-                connection = static_cast<WLAN_CONNECTION_ATTRIBUTES*>(connection_data);
-                break;
-            }
-        }
-        if (connection == nullptr || connection->wlanAssociationAttributes.dot11Ssid.uSSIDLength == 0) {
-            throw std::runtime_error("The active WLAN SSID is unavailable");
-        }
-        auto ssid_length = static_cast<int32_t>(connection->wlanAssociationAttributes.dot11Ssid.uSSIDLength);
-        if (ssid_length > ssid_capacity) throw std::runtime_error("SSID output buffer is too small");
-        std::memcpy(ssid, connection->wlanAssociationAttributes.dot11Ssid.ucSSID, ssid_length);
-
-        auto adapters = reinterpret_cast<IP_ADAPTER_ADDRESSES*>(adapter_buffer.data());
-        DWORD adapter_result = GetAdaptersAddresses(AF_INET, GAA_FLAG_SKIP_ANYCAST | GAA_FLAG_SKIP_MULTICAST |
-            GAA_FLAG_SKIP_DNS_SERVER, nullptr, adapters, &adapter_size);
-        if (adapter_result == ERROR_BUFFER_OVERFLOW) {
-            adapter_buffer.resize(adapter_size);
-            adapters = reinterpret_cast<IP_ADAPTER_ADDRESSES*>(adapter_buffer.data());
-            adapter_result = GetAdaptersAddresses(AF_INET, GAA_FLAG_SKIP_ANYCAST | GAA_FLAG_SKIP_MULTICAST |
-                GAA_FLAG_SKIP_DNS_SERVER, nullptr, adapters, &adapter_size);
-        }
-        if (adapter_result != NO_ERROR) throw std::runtime_error("Unable to enumerate LAN addresses");
-        bool found = false;
-        for (auto adapter = adapters; adapter != nullptr && !found; adapter = adapter->Next) {
-            if (adapter->OperStatus != IfOperStatusUp || adapter->IfType != IF_TYPE_IEEE80211) continue;
-            for (auto address = adapter->FirstUnicastAddress; address != nullptr; address = address->Next) {
-                if (address->Address.lpSockaddr->sa_family != AF_INET) continue;
-                auto value = reinterpret_cast<sockaddr_in*>(address->Address.lpSockaddr);
-                found = InetNtopA(AF_INET, &value->sin_addr, ipv4, ipv4_capacity) != nullptr;
-                if (found) break;
-            }
-        }
-        if (!found) throw std::runtime_error("The active WLAN IPv4 address is unavailable");
-        if (connection_data) WlanFreeMemory(connection_data);
-        if (interfaces) WlanFreeMemory(interfaces);
-        if (client) WlanCloseHandle(client, nullptr);
-        return ssid_length;
-    } catch (std::exception const& error) {
-        if (connection_data) WlanFreeMemory(connection_data);
-        if (interfaces) WlanFreeMemory(interfaces);
-        if (client) WlanCloseHandle(client, nullptr);
-        set_error(error.what());
+    auto adapters = reinterpret_cast<IP_ADAPTER_ADDRESSES*>(adapter_buffer.data());
+    ULONG flags = GAA_FLAG_SKIP_ANYCAST | GAA_FLAG_SKIP_MULTICAST | GAA_FLAG_SKIP_DNS_SERVER;
+    DWORD adapter_result = GetAdaptersAddresses(AF_INET, flags, nullptr, adapters, &adapter_size);
+    if (adapter_result == ERROR_BUFFER_OVERFLOW) {
+        adapter_buffer.resize(adapter_size);
+        adapters = reinterpret_cast<IP_ADAPTER_ADDRESSES*>(adapter_buffer.data());
+        adapter_result = GetAdaptersAddresses(AF_INET, flags, nullptr, adapters, &adapter_size);
+    }
+    if (adapter_result != NO_ERROR) {
+        set_error("Unable to enumerate LAN addresses");
         return -1;
     }
+    std::vector<std::string> wifi;
+    std::vector<std::string> ethernet;
+    for (auto adapter = adapters; adapter != nullptr; adapter = adapter->Next) {
+        if (adapter->OperStatus != IfOperStatusUp) continue;
+        bool is_wifi = adapter->IfType == IF_TYPE_IEEE80211;
+        bool is_ethernet = adapter->IfType == IF_TYPE_ETHERNET_CSMACD;
+        if (!is_wifi && !is_ethernet) continue;
+        // Skip Hyper-V/WSL/VPN virtual switches; they are not reachable from the Note.
+        std::wstring description = adapter->Description ? adapter->Description : L"";
+        if (description.find(L"Hyper-V") != std::wstring::npos ||
+            description.find(L"Virtual") != std::wstring::npos ||
+            description.find(L"VPN") != std::wstring::npos) {
+            continue;
+        }
+        if (adapter->FirstGatewayAddress == nullptr) continue;
+        for (auto address = adapter->FirstUnicastAddress; address != nullptr; address = address->Next) {
+            if (address->Address.lpSockaddr->sa_family != AF_INET) continue;
+            auto value = reinterpret_cast<sockaddr_in*>(address->Address.lpSockaddr);
+            char text[INET_ADDRSTRLEN]{};
+            if (InetNtopA(AF_INET, &value->sin_addr, text, sizeof(text)) == nullptr) continue;
+            std::string host(text);
+            if (host.rfind("169.254.", 0) == 0) continue;
+            (is_wifi ? wifi : ethernet).push_back(host);
+        }
+    }
+    std::string joined;
+    for (auto const* list : {&wifi, &ethernet}) {
+        for (auto const& host : *list) {
+            if (!joined.empty()) joined += ',';
+            joined += host;
+        }
+    }
+    if (joined.empty()) {
+        set_error("No LAN IPv4 address is available");
+        return -1;
+    }
+    if (static_cast<int32_t>(joined.size()) >= ipv4_capacity) {
+        joined.resize(static_cast<size_t>(ipv4_capacity - 1));
+        auto comma = joined.rfind(',');
+        if (comma != std::string::npos) joined.resize(comma);
+    }
+    std::memcpy(ipv4, joined.c_str(), joined.size() + 1);
+    auto name = connected_ssid();
+    auto ssid_length = static_cast<int32_t>(std::min<size_t>(name.size(), static_cast<size_t>(ssid_capacity)));
+    if (ssid_length > 0) std::memcpy(ssid, name.data(), static_cast<size_t>(ssid_length));
+    return ssid_length;
 }
 
 int32_t nl_protect(const uint8_t* input, int32_t input_length, uint8_t* output, int32_t output_capacity) {

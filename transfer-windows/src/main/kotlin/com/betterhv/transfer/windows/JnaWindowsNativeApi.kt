@@ -1,27 +1,31 @@
 package com.betterhv.transfer.windows
 
-import com.betterhv.transfer.core.BleTransportFrameCodec
-import com.betterhv.transfer.core.BleTransportReassembler
-import com.betterhv.transfer.core.DeviceId
 import com.betterhv.transfer.core.NoteLinkAdvertisementCodec
-import com.betterhv.transfer.core.NoteLinkIdentityCodec
 import com.betterhv.transfer.core.TransferCrypto
 import com.sun.jna.Library
 import com.sun.jna.Memory
 import com.sun.jna.Native
 import com.sun.jna.Pointer
+import com.sun.jna.ptr.IntByReference
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption
 import java.util.concurrent.atomic.AtomicBoolean
-import java.util.concurrent.atomic.AtomicInteger
 
 internal interface NoteLinkNativeLibrary : Library {
   fun nl_initialize(): Int
   fun nl_capabilities(): Int
-  fun nl_ble_start(identity: Pointer?, identityLength: Int, advertisement: Pointer?, advertisementLength: Int): Int
-  fun nl_ble_update(identity: Pointer?, identityLength: Int, advertisement: Pointer?, advertisementLength: Int): Int
-  fun nl_ble_poll(output: Pointer?, capacity: Int, timeoutMillis: Int): Int
-  fun nl_ble_respond(value: Pointer?, length: Int): Int
+  fun nl_ble_start(advertisement: Pointer?, advertisementLength: Int): Int
+  fun nl_ble_update(advertisement: Pointer?, advertisementLength: Int): Int
+  fun nl_ble_poll_event(
+    type: IntByReference,
+    client: Pointer?,
+    clientCapacity: Int,
+    payload: Pointer?,
+    payloadCapacity: Int,
+    payloadLength: IntByReference,
+    timeoutMillis: Int,
+  ): Int
+  fun nl_ble_notify(client: String, value: Pointer?, length: Int): Int
   fun nl_ble_stop()
   fun nl_lan_info(ipv4: Pointer?, ipv4Capacity: Int, ssid: Pointer?, ssidCapacity: Int): Int
   fun nl_protect(input: Pointer?, inputLength: Int, output: Pointer?, outputCapacity: Int): Int
@@ -34,9 +38,6 @@ class JnaWindowsNativeApi private constructor(private val library: NoteLinkNativ
   private val initialized = AtomicBoolean(false)
   private val bleRunning = AtomicBoolean(false)
   private var bleDeviceId = ""
-  private var bleDeviceName = "NoteLink"
-  private val commandReassembler = BleTransportReassembler()
-  private var lastCommandWasFramed = true
 
   override fun initialize() {
     if (initialized.compareAndSet(false, true)) {
@@ -58,94 +59,65 @@ class JnaWindowsNativeApi private constructor(private val library: NoteLinkNativ
   }
 
   @Synchronized
-  override fun startBle(deviceId: String, deviceName: String, imageCount: Int, textCount: Int, pdfCount: Int) {
+  override fun startBle(deviceId: String, deviceName: String, imageCount: Int, textCount: Int, pdfCount: Int, flags: Int) {
     require(deviceId.isNotBlank())
     initialize()
     if (bleRunning.get()) stopBle()
     bleDeviceId = deviceId
-    bleDeviceName = deviceName
-    val identity = NoteLinkIdentityCodec.encode(DeviceId(deviceId), deviceName, imageCount, textCount, pdfCount)
-    val advertisement = advertisement(imageCount, textCount, pdfCount)
+    val advertisement = advertisement(imageCount, textCount, pdfCount, flags)
     checkCall(
-      library.nl_ble_start(identity.memory(), identity.size, advertisement.memory(), advertisement.size),
+      library.nl_ble_start(advertisement.memory(), advertisement.size),
       "Unable to start BLE",
     )
     bleRunning.set(true)
   }
 
-  override fun updateBleCounts(imageCount: Int, textCount: Int, pdfCount: Int) {
+  override fun updateBleCounts(imageCount: Int, textCount: Int, pdfCount: Int, flags: Int) {
     check(bleRunning.get()) { "BLE is not running" }
-    val identity = NoteLinkIdentityCodec.encode(
-      DeviceId(bleDeviceId),
-      bleDeviceName,
-      imageCount,
-      textCount,
-      pdfCount,
-    )
-    val advertisement = advertisement(imageCount, textCount, pdfCount)
+    val advertisement = advertisement(imageCount, textCount, pdfCount, flags)
     checkCall(
-      library.nl_ble_update(
-        identity.memory(),
-        identity.size,
-        advertisement.memory(),
-        advertisement.size,
-      ),
+      library.nl_ble_update(advertisement.memory(), advertisement.size),
       "Unable to update BLE queue counts",
     )
   }
 
-  override fun pollBleCommand(timeoutMillis: Int): ByteArray? {
+  private val eventPayload = Memory(MAX_CONTROL_BYTES.toLong())
+  private val eventClient = Memory(CLIENT_ID_BYTES.toLong())
+
+  /** Called from one reader thread only; the event buffers are reused. */
+  override fun pollBleEvent(timeoutMillis: Int): BleControlEvent? {
     check(bleRunning.get()) { "BLE is not running" }
     require(timeoutMillis >= 0)
-    val deadlineNanos = System.nanoTime() + timeoutMillis.toLong() * 1_000_000L
-    while (true) {
-      val remainingMillis = if (timeoutMillis == 0) {
-        0
-      } else {
-        ((deadlineNanos - System.nanoTime()).coerceAtLeast(0L) / 1_000_000L).coerceAtMost(
-          Int.MAX_VALUE.toLong(),
-        ).toInt()
-      }
-      val packet = pollNativePacket(remainingMillis) ?: return null
-      if (!BleTransportFrameCodec.isFrame(packet)) {
-        commandReassembler.reset()
-        lastCommandWasFramed = false
-        return packet
-      }
-      val complete = try {
-        commandReassembler.add(packet)
-      } catch (_: IllegalArgumentException) {
-        // A stopped GATT service can still deliver tail writes from its old connection.
-        // Discard that abandoned message and wait for the next complete first frame.
-        commandReassembler.reset()
-        if (System.nanoTime() >= deadlineNanos) return null
-        continue
-      }
-      if (complete != null) {
-        lastCommandWasFramed = true
-        return complete
-      }
-      if (System.nanoTime() >= deadlineNanos) return null
+    val type = IntByReference()
+    val length = IntByReference()
+    val result = library.nl_ble_poll_event(
+      type, eventClient, CLIENT_ID_BYTES, eventPayload, MAX_CONTROL_BYTES, length, timeoutMillis,
+    )
+    if (result == 0) return null
+    if (result < -1) throw WindowsNativeException("BLE event exceeded the native event buffer")
+    if (result < 0) throw failure("Unable to read a BLE event")
+    val client = eventClient.getString(0, Charsets.UTF_8.name())
+    val payload = eventPayload.getByteArray(0, length.value)
+    return when (type.value) {
+      EVENT_RECORD -> BleControlEvent.Record(client, payload)
+      EVENT_CONNECTED -> BleControlEvent.Connected(client)
+      EVENT_DISCONNECTED -> BleControlEvent.Disconnected(client)
+      EVENT_MTU -> BleControlEvent.Mtu(
+        client,
+        if (payload.size >= 2) (payload[0].toInt() and 0xff) or ((payload[1].toInt() and 0xff) shl 8) else DEFAULT_MTU,
+      )
+      else -> null
     }
   }
 
-  override fun respondBle(value: ByteArray) {
+  override fun notifyBle(client: String, value: ByteArray) {
     check(bleRunning.get()) { "BLE is not running" }
-    if (!lastCommandWasFramed) {
-      checkCall(library.nl_ble_respond(value.memory(), value.size), "Unable to send BLE response")
-    } else {
-      BleTransportFrameCodec.fragment(value, NEXT_MESSAGE_ID.getAndIncrement())
-        .forEach { frame ->
-          checkCall(library.nl_ble_respond(frame.memory(), frame.size), "Unable to send BLE response frame")
-        }
-    }
+    checkCall(library.nl_ble_notify(client, value.memory(), value.size), "Unable to notify the BLE client")
   }
 
   @Synchronized
   override fun stopBle() {
     if (bleRunning.getAndSet(false)) library.nl_ble_stop()
-    commandReassembler.reset()
-    lastCommandWasFramed = true
   }
 
   override fun lanInfo(): WindowsLanInfo {
@@ -185,16 +157,16 @@ class JnaWindowsNativeApi private constructor(private val library: NoteLinkNativ
     return output.getByteArray(0, result)
   }
 
-  private fun advertisement(imageCount: Int, textCount: Int, pdfCount: Int): ByteArray =
+  private fun advertisement(imageCount: Int, textCount: Int, pdfCount: Int, flags: Int): ByteArray =
     NoteLinkAdvertisementCodec.encode(
-      // A 128-bit service UUID plus this eight-byte payload fits in one
-      // legacy connectable advertisement. The full name remains available
-      // from the GATT identity characteristic after connection.
+      // A 128-bit service UUID plus this ten-byte payload fits in one legacy connectable
+      // advertisement. The display name travels in the ServerHello capabilities.
       TransferCrypto.sha256(bleDeviceId.encodeToByteArray()),
       "",
       imageCount,
       textCount,
       pdfCount,
+      flags,
     )
 
   private fun checkCall(result: Int, operation: String) {
@@ -217,13 +189,18 @@ class JnaWindowsNativeApi private constructor(private val library: NoteLinkNativ
   }
 
   companion object {
-    private val NEXT_MESSAGE_ID = AtomicInteger(1)
     private const val CAP_BLE_PERIPHERAL = 1
     private const val CAP_LAN = 2
     private const val CAP_DPAPI = 4
     private const val MAX_CONTROL_BYTES = 64 * 1024
+    private const val CLIENT_ID_BYTES = 512
+    private const val EVENT_RECORD = 1
+    private const val EVENT_CONNECTED = 2
+    private const val EVENT_DISCONNECTED = 3
+    private const val EVENT_MTU = 4
+    private const val DEFAULT_MTU = 23
     private const val MAX_PROTECTED_BYTES = 1024 * 1024
-    private const val LAN_ADDRESS_BYTES = 64
+    private const val LAN_ADDRESS_BYTES = 256
     private const val SSID_BYTES = 32
     private const val BUNDLED_LIBRARY_RESOURCE = "/win32-x86-64/notelink_windows.dll"
 
@@ -258,17 +235,5 @@ class JnaWindowsNativeApi private constructor(private val library: NoteLinkNativ
     }
 
     internal fun forTesting(library: NoteLinkNativeLibrary) = JnaWindowsNativeApi(library)
-  }
-
-  private fun pollNativePacket(timeoutMillis: Int): ByteArray? {
-    val output = Memory(MAX_CONTROL_BYTES.toLong())
-    val result = library.nl_ble_poll(output, MAX_CONTROL_BYTES, timeoutMillis)
-    if (result == 0) return null
-    if (result > 0) return output.getByteArray(0, result)
-    val required = -result
-    require(required in 1..MAX_CONTROL_BYTES) { "Invalid BLE command size $required" }
-    // The C ABI removes an oversized command from its event queue. Keeping the maximum
-    // buffer in this adapter makes this branch an ABI-corruption guard, not a retry path.
-    throw WindowsNativeException("BLE command exceeded the native event buffer")
   }
 }
