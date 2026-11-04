@@ -207,7 +207,9 @@ class NoteLinkServer(
     ).also { it.start() }
     // Discovery is best effort: without it a Note still connects over BLE or a cached address.
     announcer = LanAnnouncer(scope, ::discoveryAnnouncement, port = discoveryPort, log = host::log)
-      .also { runCatching { it.start() }.onFailure { error -> host.log("lan discovery unavailable: ${error.message}") } }
+      .also {
+        runCatching { it.start() }.onFailure { error -> host.log("lan discovery unavailable: ${error.message}") }
+      }
   }
 
   private fun discoveryAnnouncement(): Discovery {
@@ -319,7 +321,9 @@ class NoteLinkServer(
 
   private suspend fun notifyQueue(connection: PeerConnection) {
     val counts = runCatching { host.counts(connection.peerDeviceId) }.getOrNull() ?: return
-    connection.notify(Frame.newBuilder().setQueueChanged(NoteLinkProto.queueChanged(counts, revision = clock())).build())
+    connection.notify(
+      Frame.newBuilder().setQueueChanged(NoteLinkProto.queueChanged(counts, revision = clock())).build()
+    )
   }
 
   private fun isHello(record: ByteArray): Boolean =

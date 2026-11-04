@@ -286,7 +286,8 @@ class PhoneCommandProcessor(
           itemId = event.itemId,
           deviceId = event.peerDeviceId,
           phase = TransferPhase.TRANSFERRING,
-          mode = if (event.link == "ble") null else if (event.link == "p2p") TransferMode.WIFI_DIRECT else TransferMode.LAN,
+          mode =
+          if (event.link == "ble") null else if (event.link == "p2p") TransferMode.WIFI_DIRECT else TransferMode.LAN,
           totalBytes = event.totalBytes,
           startedAtMillis = now,
           phaseStartedAtMillis = now,
@@ -304,7 +305,9 @@ class PhoneCommandProcessor(
           averageBytesPerSecond = sample.averageBytesPerSecond,
           etaMillis = sample.etaMillis,
         )
-        emit(TransferEvent.Progress(event.itemId, event.bytes, event.totalBytes, sample.bytesPerSecond, sample.etaMillis))
+        emit(
+          TransferEvent.Progress(event.itemId, event.bytes, event.totalBytes, sample.bytesPerSecond, sample.etaMillis)
+        )
       }
       is NoteLinkTransferEvent.Finished -> {
         meters.remove(event.itemId)

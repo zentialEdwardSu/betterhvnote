@@ -50,7 +50,9 @@ class NoteLinkLanOnlyTest {
   @Before
   fun setUp() {
     host = Host(tcpPort)
-    server = NoteLinkServer(host, sendBle = { _, _ -> error("no Bluetooth on this host") }, lanPort = tcpPort, discoveryPort = udpPort)
+    server = NoteLinkServer(
+      host, sendBle = { _, _ -> error("no Bluetooth on this host") }, lanPort = tcpPort, discoveryPort = udpPort
+    )
     server.start()
   }
 
@@ -153,7 +155,9 @@ class NoteLinkLanOnlyTest {
     }
 
     private fun hostLease(id: UUID, bytes: ByteArray) = HostLease(
-      NoteLinkProto.offer(id, ContentKind.IMAGE, "image/jpeg", bytes.size.toLong(), TransferCrypto.sha256(bytes), "a.jpg"),
+      NoteLinkProto.offer(
+        id, ContentKind.IMAGE, "image/jpeg", bytes.size.toLong(), TransferCrypto.sha256(bytes), "a.jpg"
+      ),
       PayloadSource.of(bytes),
     )
 

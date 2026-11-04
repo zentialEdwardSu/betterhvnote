@@ -5,7 +5,8 @@ sealed interface BleControlEvent {
   val client: String
 
   data class Record(override val client: String, val bytes: ByteArray) : BleControlEvent {
-    override fun equals(other: Any?): Boolean = other is Record && client == other.client && bytes.contentEquals(other.bytes)
+    override fun equals(other: Any?): Boolean =
+      other is Record && client == other.client && bytes.contentEquals(other.bytes)
     override fun hashCode(): Int = 31 * client.hashCode() + bytes.contentHashCode()
   }
 

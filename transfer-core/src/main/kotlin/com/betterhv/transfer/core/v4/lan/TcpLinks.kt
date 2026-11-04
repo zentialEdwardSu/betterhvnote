@@ -239,7 +239,8 @@ class TcpAttachListener(
       if (input.readUnsignedByte() == (TcpAttach.CONTROL_MAGIC[0].toInt() and 0xff)) {
         val rest = ByteArray(TcpAttach.CONTROL_MAGIC.size - 1).also(input::readFully)
         val handler = onControl
-        if (handler == null || !rest.contentEquals(TcpAttach.CONTROL_MAGIC.copyOfRange(1, TcpAttach.CONTROL_MAGIC.size))) {
+        if (handler == null ||
+          !rest.contentEquals(TcpAttach.CONTROL_MAGIC.copyOfRange(1, TcpAttach.CONTROL_MAGIC.size))) {
           return socket.close()
         }
         socket.soTimeout = 0

@@ -69,8 +69,12 @@ class ProtocolSessionTest {
     val lanS = server.linkCipher("tcp", salt, 64 * 1024)
     // Both links start at message 1 and interleave freely without tripping either replay window.
     repeat(3) { index ->
-      assertEquals("b$index", bleS.open(bleC.seal(1, dataFrame("b$index")).single())!!.frame.streamData.data.toStringUtf8())
-      assertEquals("l$index", lanS.open(lanC.seal(1, dataFrame("l$index")).single())!!.frame.streamData.data.toStringUtf8())
+      assertEquals(
+        "b$index", bleS.open(bleC.seal(1, dataFrame("b$index")).single())!!.frame.streamData.data.toStringUtf8()
+      )
+      assertEquals(
+        "l$index", lanS.open(lanC.seal(1, dataFrame("l$index")).single())!!.frame.streamData.data.toStringUtf8()
+      )
     }
     try {
       lanS.open(bleC.seal(1, dataFrame("wrong link")).single())

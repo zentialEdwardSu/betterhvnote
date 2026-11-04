@@ -2,6 +2,7 @@ package com.betterhv.note
 
 import android.content.Context
 import android.util.Log
+import androidx.core.content.edit
 import com.betterhv.transfer.android.AndroidPairingController
 import com.betterhv.transfer.android.BleProtocolClient
 import com.betterhv.transfer.android.BleReceiverScanner
@@ -28,6 +29,7 @@ import com.betterhv.transfer.proto.v4.Feature
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
@@ -167,7 +169,7 @@ class NoteLinkConnections private constructor(
 
   @Synchronized
   fun forget(peerId: String) {
-    lanAddresses.edit().remove(peerId).apply()
+    lanAddresses.edit { remove(peerId) }
     peers.remove(peerId)?.cancel()
     sessions.remove(peerId)?.connection?.close()
     mutableStates.update { it - peerId }
@@ -240,7 +242,10 @@ class NoteLinkConnections private constructor(
     }
     synchronized(this) { sessions[client.id] = session }
     publish(client.id) { it.copy(control = control.label) }
-    Log.i(TAG, "session up ${client.name} via=${control.label} ${describe(control)} in ${(System.nanoTime() - started) / 1_000_000} ms")
+    Log.i(
+      TAG,
+      "session up ${client.name} via=${control.label} ${describe(control)} in ${(System.nanoTime() - started) / 1_000_000} ms",
+    )
     runCatching { pairing.markLastUsed(client.id) }
     try {
       kotlinx.coroutines.coroutineScope {
@@ -276,14 +281,21 @@ class NoteLinkConnections private constructor(
    * whose Bluetooth is off — still connects, and a NoteLink on the same Wi-Fi is reached in a
    * few milliseconds instead of a BLE scan + GATT setup.
    */
+  @OptIn(ExperimentalCoroutinesApi::class)
   private suspend fun connectControl(client: PairedDevice): RecordLink = kotlinx.coroutines.coroutineScope {
-    val lan = async { runCatching { connectLanControl(client) }.onFailure { Log.i(TAG, "lan control ${client.name}: ${it.message}") }.getOrNull() }
+    val lan = async {
+      runCatching { connectLanControl(client) }
+        .onFailure { Log.i(TAG, "lan control ${client.name}: ${it.message}") }
+        .getOrNull()
+    }
     val ble = async {
       // Give LAN a head start: when it answers, the radio is never touched.
       delay(BLE_HEAD_START_MILLIS)
       if (lan.isCompleted && lan.getCompleted() != null) return@async null
       if (!bluetoothOn()) return@async null
-      runCatching { connectBle(client) }.onFailure { Log.i(TAG, "ble control ${client.name}: ${it.message}") }.getOrNull()
+      runCatching { connectBle(client) }
+        .onFailure { Log.i(TAG, "ble control ${client.name}: ${it.message}") }
+        .getOrNull()
     }
     val winner: RecordLink? = kotlinx.coroutines.selects.select {
       lan.onAwait { it ?: ble.await() }
@@ -307,12 +319,14 @@ class NoteLinkConnections private constructor(
         .onFailure { Log.i(TAG, "remembered lan $host:$port for ${client.name} failed: ${it.message}") }
     }
     val hash = client.identityHash ?: return null
-    val peer = LanDiscovery.find(LAN_DISCOVERY_MILLIS) { it.identityHashHex.equals(hash, ignoreCase = true) } ?: return null
+    val peer = LanDiscovery.find(LAN_DISCOVERY_MILLIS) {
+      it.identityHashHex.equals(hash, ignoreCase = true)
+    } ?: return null
     return TcpAttach.dialControl(peer.host, peer.tcpPort)
   }
 
   private fun rememberLan(peerId: String, host: String, port: Int) {
-    lanAddresses.edit().putString(peerId, "$host:$port").apply()
+    lanAddresses.edit { putString(peerId, "$host:$port") }
   }
 
   private fun rememberedLan(peerId: String): Pair<String, Int>? {
@@ -331,7 +345,9 @@ class NoteLinkConnections private constructor(
   private suspend fun keepLanAttached(session: NoteLinkSession) {
     var failures = 0
     while (session.connection.isOpen) {
-      if (!session.connection.hasLink(PeerConnection.LABEL_LAN) && !session.connection.hasLink(PeerConnection.LABEL_P2P)) {
+      if (!session.connection.hasLink(PeerConnection.LABEL_LAN) &&
+        !session.connection.hasLink(PeerConnection.LABEL_P2P)
+      ) {
         val candidates = NoteLinkClient.lanCandidates(session.capabilities)
         val started = System.nanoTime()
         val attached = NoteLinkClient.attachTcp(session, candidates) { endpoint, error ->
@@ -409,7 +425,10 @@ class NoteLinkConnections private constructor(
         label = PeerConnection.LABEL_P2P,
         timeoutMillis = P2P_ATTACH_MILLIS,
       )
-      Log.i(TAG, "p2p attach ${session.peerDeviceId} owner=$owner -> $attached in ${(System.nanoTime() - started) / 1_000_000} ms")
+      Log.i(
+        TAG,
+        "p2p attach ${session.peerDeviceId} owner=$owner -> $attached in ${(System.nanoTime() - started) / 1_000_000} ms",
+      )
       attached != null
     }.onFailure { Log.w(TAG, "Wi-Fi Direct fallback failed: ${it.message}") }.getOrDefault(false)
   }

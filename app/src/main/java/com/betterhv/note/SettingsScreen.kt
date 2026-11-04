@@ -516,7 +516,12 @@ private fun SettingsScreenContent(state: SettingsState, actions: SettingsActions
               }
             }
             pairingMessage?.let {
-              Text(it, style = EinkType.Caption, color = EinkColors.Ink, modifier = Modifier.padding(top = EinkDimens.SpaceSm))
+              Text(
+                it,
+                style = EinkType.Caption,
+                color = EinkColors.Ink,
+                modifier = Modifier.padding(top = EinkDimens.SpaceSm),
+              )
             }
           }
         }

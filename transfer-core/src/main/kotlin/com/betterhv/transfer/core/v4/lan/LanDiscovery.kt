@@ -170,7 +170,8 @@ object LanDiscovery {
           probesSent++
           nextProbe = now + PROBE_SPACING_MILLIS
         }
-        socket.soTimeout = minOf(deadline - now, maxOf(1L, nextProbe - now), PROBE_SPACING_MILLIS).toInt().coerceAtLeast(1)
+        socket.soTimeout = minOf(deadline - now, maxOf(1L, nextProbe - now), PROBE_SPACING_MILLIS)
+          .toInt().coerceAtLeast(1)
         val packet = DatagramPacket(buffer, buffer.size)
         try {
           socket.receive(packet)
@@ -178,9 +179,12 @@ object LanDiscovery {
           continue
         }
         val (type, discovery) = LanDiscoveryCodec.decode(packet.data, packet.length) ?: continue
-        if (type != LanDiscoveryCodec.TYPE_ANNOUNCE || !discovery.probeNonce.toByteArray().contentEquals(nonce)) continue
+        if (type != LanDiscoveryCodec.TYPE_ANNOUNCE ||
+          !discovery.probeNonce.toByteArray().contentEquals(nonce)) continue
         val host = packet.address.hostAddress ?: continue
-        val peer = LanPeer(host, discovery.tcpPort.takeIf { it in 1..65_535 } ?: TcpAttachListener.DEFAULT_PORT, discovery)
+        val peer = LanPeer(
+          host, discovery.tcpPort.takeIf { it in 1..65_535 } ?: TcpAttachListener.DEFAULT_PORT, discovery
+        )
         found["${peer.identityHashHex}@$host"] = peer
         if (until(peer)) break
       }

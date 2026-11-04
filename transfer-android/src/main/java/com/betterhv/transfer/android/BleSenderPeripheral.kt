@@ -237,6 +237,7 @@ class BleSenderPeripheral(
   }
 
   private val advertiseCallback = object : AdvertisingSetCallback() {
+    @SuppressLint("MissingPermission")
     override fun onAdvertisingSetStarted(set: AdvertisingSet?, txPower: Int, status: Int) {
       if (status == ADVERTISE_SUCCESS && set != null) {
         advertisingSet = set

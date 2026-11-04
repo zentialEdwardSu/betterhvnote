@@ -148,7 +148,9 @@ class NoteLinkEndToEndTest {
     pair()
     val started = System.nanoTime()
     try {
-      NoteLinkClient.handshake(scope, bleLink(), ByteArray(32) { 5 }, NOTE_ID, PHONE_ID, CapabilitySet.getDefaultInstance())
+      NoteLinkClient.handshake(
+        scope, bleLink(), ByteArray(32) { 5 }, NOTE_ID, PHONE_ID, CapabilitySet.getDefaultInstance()
+      )
       fail("Unknown PSK opened a session")
     } catch (expected: com.betterhv.transfer.core.v4.session.HandshakeException) {
       assertEquals(com.betterhv.transfer.proto.v4.ErrorCode.ERROR_UNKNOWN_PAIRING, expected.code)
@@ -220,7 +222,9 @@ class NoteLinkEndToEndTest {
       NoteLinkClient.attachTcp(session, NoteLinkClient.lanCandidates(session.capabilities)),
     )
     host.enqueue(ContentKind.TEXT, "text/plain", "over lan".encodeToByteArray())
-    assertEquals(PeerConnection.LABEL_LAN, NoteLinkClient.fetch(session, ContentKind.TEXT, { error("inline") })!!.timing.link)
+    assertEquals(
+      PeerConnection.LABEL_LAN, NoteLinkClient.fetch(session, ContentKind.TEXT, { error("inline") })!!.timing.link
+    )
     session.connection.close()
   }
 
@@ -238,7 +242,9 @@ class NoteLinkEndToEndTest {
       .build()
     assertTrue(NoteLinkClient.push(session, offer, { export.inputStream() }))
     assertArrayEquals(export, host.received[NoteLinkProto.uuid(offer.itemId)])
-    assertFalse("A second push of the same artifact is a no-op", NoteLinkClient.push(session, offer, { export.inputStream() }))
+    assertFalse(
+      "A second push of the same artifact is a no-op", NoteLinkClient.push(session, offer, { export.inputStream() })
+    )
     session.connection.close()
   }
 
@@ -356,7 +362,10 @@ class NoteLinkEndToEndTest {
     private fun hostLease(item: Item): HostLease {
       val inline = item.bytes.takeIf { item.kind == ContentKind.TEXT && it.size <= NoteLinkProto.INLINE_TEXT_BYTES }
       return HostLease(
-        NoteLinkProto.offer(item.id, item.kind, item.mime, item.bytes.size.toLong(), TransferCrypto.sha256(item.bytes), "x", 60_000, inline),
+        NoteLinkProto.offer(
+          item.id, item.kind, item.mime, item.bytes.size.toLong(),
+          TransferCrypto.sha256(item.bytes), "x", 60_000, inline
+        ),
         PayloadSource.of(item.bytes),
       )
     }

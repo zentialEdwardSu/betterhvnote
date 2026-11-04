@@ -189,7 +189,9 @@ class DesktopTransferService(
     } else {
       val counts = queue.counts()
       runCatching {
-        native.startBle(settings.localDeviceId, settings.displayName, counts.images, counts.texts, counts.pdfs, advertisementFlags())
+        native.startBle(
+          settings.localDeviceId, settings.displayName, counts.images, counts.texts, counts.pdfs, advertisementFlags()
+        )
       }.exceptionOrNull()?.let {
         DesktopLog.error("transfer.ble.start", it)
         noteLinkText("蓝牙启动失败，仅通过局域网连接：", "Bluetooth failed to start; network only: ") + it.message.orEmpty()
@@ -580,7 +582,9 @@ class DesktopTransferService(
       is NoteLinkTransferEvent.Failed -> {
         meters.remove(event.itemId)
         val failure = TransferFailure(TransferErrorCode.INTERNAL, event.message, true)
-        mutableSnapshot.value = mutableSnapshot.value.copy(phase = TransferPhase.FAILED, lastFailure = failure, canRetry = true)
+        mutableSnapshot.value = mutableSnapshot.value.copy(
+          phase = TransferPhase.FAILED, lastFailure = failure, canRetry = true
+        )
         emitEvent(TransferEvent.Failed(event.itemId, failure))
       }
     }

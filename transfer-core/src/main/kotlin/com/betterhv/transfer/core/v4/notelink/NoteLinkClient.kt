@@ -124,7 +124,8 @@ object NoteLinkClient {
           val record = link.receive() ?: throw PairingException(ErrorCode.ERROR_CONNECTION_REFUSED, "Link closed")
           if (!PairingRecords.isPairingRecord(record)) continue
           val reply = reassembler.add(record) ?: continue
-          if (reply.bodyCase == PairingFrame.BodyCase.RESULT && reply.result.error != ErrorCode.ERROR_CODE_UNSPECIFIED) {
+          if (reply.bodyCase == PairingFrame.BodyCase.RESULT &&
+            reply.result.error != ErrorCode.ERROR_CODE_UNSPECIFIED) {
             throw PairingException(reply.result.error, describe(reply.result.error), reply.result.attemptsLeft)
           }
           return@withTimeout reply
@@ -299,10 +300,14 @@ object NoteLinkClient {
       val leased = clock() - started
       if (!offer.inlineData.isEmpty) {
         val bytes = offer.inlineData.toByteArray()
-        if (!java.security.MessageDigest.isEqual(com.betterhv.transfer.core.TransferCrypto.sha256(bytes), offer.sha256.toByteArray())) {
+        if (!java.security.MessageDigest.isEqual(
+            com.betterhv.transfer.core.TransferCrypto.sha256(bytes), offer.sha256.toByteArray()
+          )) {
           throw ExchangeException(ErrorCode.ERROR_INTEGRITY_FAILED, "Inline payload failed verification")
         }
-        return FetchedItem(offer, bytes, TransferTiming(exchange.linkLabel, leased, leased, leased, bytes.size.toLong()))
+        return FetchedItem(
+          offer, bytes, TransferTiming(exchange.linkLabel, leased, leased, leased, bytes.size.toLong())
+        )
       }
       val target = sink(offer)
       val (firstByte, bytes) = try {
@@ -454,13 +459,20 @@ object NoteLinkClient {
   }
 
   /** Asks the peer to host a Wi-Fi Direct group; returns it once the group is ready. */
-  suspend fun requestP2p(session: NoteLinkSession, timeoutMillis: Long = P2P_PREPARE_MILLIS): com.betterhv.transfer.proto.v4.P2pGroup {
+  suspend fun requestP2p(
+    session: NoteLinkSession, timeoutMillis: Long = P2P_PREPARE_MILLIS
+  ): com.betterhv.transfer.proto.v4.P2pGroup {
     session.connection.open().use { exchange ->
       val request = CapabilitySet.newBuilder()
-        .setP2P(com.betterhv.transfer.proto.v4.P2pGroup.newBuilder().setState(com.betterhv.transfer.proto.v4.P2pState.P2P_STATE_STARTING))
+        .setP2P(
+          com.betterhv.transfer.proto.v4.P2pGroup.newBuilder()
+            .setState(com.betterhv.transfer.proto.v4.P2pState.P2P_STATE_STARTING)
+        )
         .build()
       val reply = exchange.request(
-        Frame.newBuilder().setCapabilityUpdate(com.betterhv.transfer.proto.v4.CapabilityUpdate.newBuilder().setCapabilities(request)).build(),
+        Frame.newBuilder()
+          .setCapabilityUpdate(com.betterhv.transfer.proto.v4.CapabilityUpdate.newBuilder().setCapabilities(request))
+          .build(),
         timeoutMillis,
       )
       if (reply.bodyCase != Frame.BodyCase.CAPABILITY_UPDATE || !reply.capabilityUpdate.capabilities.hasP2P()) {
@@ -475,7 +487,9 @@ object NoteLinkClient {
   suspend fun refreshCapabilities(session: NoteLinkSession): CapabilitySet {
     session.connection.open().use { exchange ->
       val reply = exchange.request(
-        Frame.newBuilder().setCapabilityUpdate(com.betterhv.transfer.proto.v4.CapabilityUpdate.getDefaultInstance()).build(),
+        Frame.newBuilder()
+          .setCapabilityUpdate(com.betterhv.transfer.proto.v4.CapabilityUpdate.getDefaultInstance())
+          .build(),
       )
       if (reply.bodyCase == Frame.BodyCase.CAPABILITY_UPDATE) session.capabilities = reply.capabilityUpdate.capabilities
       return session.capabilities

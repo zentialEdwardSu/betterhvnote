@@ -59,7 +59,9 @@ class JnaWindowsNativeApi private constructor(private val library: NoteLinkNativ
   }
 
   @Synchronized
-  override fun startBle(deviceId: String, deviceName: String, imageCount: Int, textCount: Int, pdfCount: Int, flags: Int) {
+  override fun startBle(
+    deviceId: String, deviceName: String, imageCount: Int, textCount: Int, pdfCount: Int, flags: Int
+  ) {
     require(deviceId.isNotBlank())
     initialize()
     if (bleRunning.get()) stopBle()

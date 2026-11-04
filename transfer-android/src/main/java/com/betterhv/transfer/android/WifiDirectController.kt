@@ -365,11 +365,7 @@ class WifiDirectController(
       .setNetworkName(credentials?.ssid ?: "DIRECT-BH-BetterHv-${random.take(6)}")
       .setPassphrase(credentials?.passphrase ?: "BetterHv-$random")
       .enablePersistentMode(credentials != null)
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-      builder.setGroupOperatingBand(WifiP2pConfig.GROUP_OWNER_BAND_5GHZ)
-    } else {
-      builder.setGroupOperatingBand(WifiP2pConfig.GROUP_OWNER_BAND_AUTO)
-    }
+    builder.setGroupOperatingBand(WifiP2pConfig.GROUP_OWNER_BAND_5GHZ)
     return builder.build()
   }
 

@@ -1,6 +1,7 @@
 package com.betterhv.transfer.android
 
 import android.content.Context
+import androidx.core.content.edit
 import com.betterhv.transfer.core.v4.discovery.PeerAddressStore
 import com.betterhv.transfer.core.v4.discovery.PeerProtocol
 import com.betterhv.transfer.core.v4.discovery.PeerRecord
@@ -19,12 +20,12 @@ class AndroidPeerAddressStore(context: Context) : PeerAddressStore {
   }
 
   override fun save(records: List<PeerRecord>) {
-    val editor = preferences.edit()
-    editor.clear()
-    records.forEach { record ->
-      editor.putString(PREFIX + record.peerDeviceId, encode(record))
+    preferences.edit {
+      clear()
+      records.forEach { record ->
+        putString(PREFIX + record.peerDeviceId, encode(record))
+      }
     }
-    editor.apply()
   }
 
   private fun encode(record: PeerRecord): String = listOf(

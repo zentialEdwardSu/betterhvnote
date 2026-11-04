@@ -366,7 +366,8 @@ private class DesktopAppController(private val native: JnaWindowsNativeApi) : Au
     }
     scope.launch {
       val revisionAndUpdate =
-        combine(pairingRevision, updateUiState, notePackageStatus, transfer.pairingState) { _, update, packageStatus, _ ->
+        combine(pairingRevision, updateUiState, notePackageStatus, transfer.pairingState) {
+            _, update, packageStatus, _ ->
           update to packageStatus
         }
       val queueAndHistory = combine(queue.itemFlow, queue.historyFlow) { items, history ->
@@ -399,7 +400,9 @@ private class DesktopAppController(private val native: JnaWindowsNativeApi) : Au
           pairing = when (val pairingState = transfer.pairingState.value) {
             DesktopPairingState.Idle -> null
             DesktopPairingState.Entering -> DashboardPairing()
-            is DesktopPairingState.Waiting -> DashboardPairing(waitingCode = pairingState.code, message = pairingState.message)
+            is DesktopPairingState.Waiting -> DashboardPairing(
+              waitingCode = pairingState.code, message = pairingState.message
+            )
             is DesktopPairingState.Paired -> DashboardPairing(pairedName = pairingState.deviceName)
             is DesktopPairingState.Failed -> DashboardPairing(message = pairingState.message)
           },

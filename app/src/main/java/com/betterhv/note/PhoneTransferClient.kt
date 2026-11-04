@@ -179,7 +179,10 @@ class PhoneTransferClient(context: Context) :
    * Pairs with the first NoteLink that advertises pairing mode and accepts [code]. The SRP run
    * yields the peer's full identity and the PSK, so no placeholder identity is ever stored.
    */
-  suspend fun pair(code: String, timeoutMillis: Long = PAIRING_SCAN_MILLIS): PairedDevice = withContext(Dispatchers.IO) {
+  suspend fun pair(
+    code: String,
+    timeoutMillis: Long = PAIRING_SCAN_MILLIS,
+  ): PairedDevice = withContext(Dispatchers.IO) {
     val deadline = System.currentTimeMillis() + timeoutMillis
     var lastError: Throwable? = null
     val tried = HashSet<String>()
@@ -236,7 +239,10 @@ class PhoneTransferClient(context: Context) :
       NoteLinkClient.pair(link, PairingInitiator(code, pairing.localDeviceId, android.os.Build.MODEL ?: "Note"))
     }
     val stored = pairing.store(outcome)
-    EventLog.log(TAG, "paired ${stored.name} over LAN $host id=${stored.id} in ${(System.nanoTime() - started) / 1_000_000} ms")
+    EventLog.log(
+      TAG,
+      "paired ${stored.name} over LAN $host id=${stored.id} in ${(System.nanoTime() - started) / 1_000_000} ms",
+    )
     connections.start()
     return stored
   }
@@ -305,7 +311,10 @@ class PhoneTransferClient(context: Context) :
     val itemId = NoteLinkProto.uuid(fetched.offer.itemId)
     val item = queueItem(fetched.offer, itemId, clientId, kind)
     val payload = when (kind) {
-      ContentKind.TEXT -> RemotePayload.Text(item, (fetched.inline ?: part.readBytes().also { part.delete() }).decodeToString())
+      ContentKind.TEXT -> RemotePayload.Text(
+        item,
+        (fetched.inline ?: part.readBytes().also { part.delete() }).decodeToString(),
+      )
       ContentKind.IMAGE -> RemotePayload.Image(item, part)
       ContentKind.PDF -> RemotePayload.Pdf(item, part)
       ContentKind.APP_PACKAGE -> RemotePayload.AppPackage(item, part)
@@ -381,7 +390,10 @@ class PhoneTransferClient(context: Context) :
         progress(artifact.id, done, total, meter)
         progress(done, total)
       }
-      Log.i(TIMING_TAG, "export bytes=${artifact.byteLength} sent=$sent in ${(System.nanoTime() - started) / 1_000_000}ms")
+      Log.i(
+        TIMING_TAG,
+        "export bytes=${artifact.byteLength} sent=$sent in ${(System.nanoTime() - started) / 1_000_000}ms",
+      )
       complete(artifact.id, artifact.id)
     } catch (error: Throwable) {
       fail(error)
@@ -455,7 +467,10 @@ class PhoneTransferClient(context: Context) :
           SessionLease(session, RemotePayload.AppPackage(item, part), TransferOffer(item), scope),
         )
       }
-      else -> throw failure(TransferErrorCode.INTERNAL, result.message.ifBlank { "NoteLink could not prepare the update" })
+      else -> throw failure(
+        TransferErrorCode.INTERNAL,
+        result.message.ifBlank { "NoteLink could not prepare the update" },
+      )
     }
   }
 
@@ -524,7 +539,11 @@ class PhoneTransferClient(context: Context) :
 
   private fun phase(next: TransferPhase) {
     val current = mutableSnapshot.value
-    mutableSnapshot.value = current.copy(phase = next, phaseStartedAtMillis = System.currentTimeMillis(), canCancel = false)
+    mutableSnapshot.value = current.copy(
+      phase = next,
+      phaseStartedAtMillis = System.currentTimeMillis(),
+      canCancel = false,
+    )
     emit(TransferEvent.PhaseChanged(current.operationId, current.phase, next))
   }
 
@@ -603,9 +622,13 @@ class PhoneTransferClient(context: Context) :
 
     override fun release() = finish(LeaseKind.LEASE_RELEASE)
 
-    override suspend fun commitAndAwait() = withContext(Dispatchers.IO + NonCancellable) { send(LeaseKind.LEASE_COMMIT) }
+    override suspend fun commitAndAwait() = withContext(Dispatchers.IO + NonCancellable) {
+      send(LeaseKind.LEASE_COMMIT)
+    }
 
-    override suspend fun releaseAndAwait() = withContext(Dispatchers.IO + NonCancellable) { send(LeaseKind.LEASE_RELEASE) }
+    override suspend fun releaseAndAwait() = withContext(Dispatchers.IO + NonCancellable) {
+      send(LeaseKind.LEASE_RELEASE)
+    }
 
     private fun finish(action: LeaseKind) {
       scope.launch { send(action) }
