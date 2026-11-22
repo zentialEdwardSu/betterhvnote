@@ -7,8 +7,12 @@ import com.sun.jna.Memory
 import com.sun.jna.Native
 import com.sun.jna.Pointer
 import com.sun.jna.ptr.IntByReference
+import java.io.File
+import java.io.IOException
+import java.nio.file.AtomicMoveNotSupportedException
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption
+import java.security.MessageDigest
 import java.util.concurrent.atomic.AtomicBoolean
 
 internal interface NoteLinkNativeLibrary : Library {
@@ -74,6 +78,7 @@ class JnaWindowsNativeApi private constructor(private val library: NoteLinkNativ
     bleRunning.set(true)
   }
 
+  @Synchronized
   override fun updateBleCounts(imageCount: Int, textCount: Int, pdfCount: Int, flags: Int) {
     check(bleRunning.get()) { "BLE is not running" }
     val advertisement = advertisement(imageCount, textCount, pdfCount, flags)
@@ -218,22 +223,74 @@ class JnaWindowsNativeApi private constructor(private val library: NoteLinkNativ
 
     /**
      * Resolves a filesystem path because JNA cannot load a native library directly from a
-     * JAR resource. The packaged DLL is extracted once per application process into a
-     * private temporary directory, which also avoids relying on the user's PATH.
+     * JAR resource. The packaged DLL is cached by content SHA-256 so repeated launches reuse
+     * the same binary instead of leaking locked temporary directories.
      */
-    internal fun resolveLibraryPath(explicitPath: String?): String {
+    internal fun resolveLibraryPath(explicitPath: String?): String =
+      resolveLibraryPath(explicitPath, defaultCacheRoot())
+
+    internal fun resolveLibraryPath(explicitPath: String?, cacheRoot: File): String {
       if (!explicitPath.isNullOrBlank()) return explicitPath
 
-      val resource = JnaWindowsNativeApi::class.java.getResourceAsStream(BUNDLED_LIBRARY_RESOURCE)
-        ?: error("Bundled Windows bridge resource $BUNDLED_LIBRARY_RESOURCE is missing")
-      val directory = Files.createTempDirectory("notelink-native-")
-      directory.toFile().deleteOnExit()
-      val library = directory.resolve("notelink_windows.dll")
-      resource.use { input ->
-        Files.copy(input, library, StandardCopyOption.REPLACE_EXISTING)
+      val bytes = JnaWindowsNativeApi::class.java.getResourceAsStream(BUNDLED_LIBRARY_RESOURCE)?.use {
+        it.readBytes()
+      } ?: error("Bundled Windows bridge resource $BUNDLED_LIBRARY_RESOURCE is missing")
+
+      val sha256 = sha256Hex(bytes)
+      val targetDir = File(cacheRoot, sha256).apply { mkdirs() }
+      val target = File(targetDir, "notelink_windows.dll")
+      if (isValidCachedLibrary(target, bytes.size.toLong(), sha256)) {
+        return target.absolutePath
       }
-      library.toFile().deleteOnExit()
-      return library.toAbsolutePath().toString()
+
+      val temp = Files.createTempFile(targetDir.toPath(), "notelink_windows-", ".tmp")
+      try {
+        Files.write(temp, bytes)
+        try {
+          try {
+            Files.move(
+              temp,
+              target.toPath(),
+              StandardCopyOption.ATOMIC_MOVE,
+              StandardCopyOption.REPLACE_EXISTING,
+            )
+          } catch (_: AtomicMoveNotSupportedException) {
+            Files.move(temp, target.toPath(), StandardCopyOption.REPLACE_EXISTING)
+          }
+        } catch (error: IOException) {
+          if (!isValidCachedLibrary(target, bytes.size.toLong(), sha256)) {
+            throw error
+          }
+        }
+      } finally {
+        Files.deleteIfExists(temp)
+      }
+      return target.absolutePath
+    }
+
+    private fun defaultCacheRoot(): File {
+      val local = System.getenv("LOCALAPPDATA")?.takeIf(String::isNotBlank)
+        ?: File(System.getProperty("user.home"), "AppData/Local").path
+      return File(local, "BetterHv/NoteLink/native")
+    }
+
+    private fun isValidCachedLibrary(file: File, expectedLength: Long, expectedSha256: String): Boolean =
+      file.isFile && file.length() == expectedLength && sha256Hex(file) == expectedSha256
+
+    private fun sha256Hex(bytes: ByteArray): String =
+      MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
+
+    private fun sha256Hex(file: File): String {
+      val digest = MessageDigest.getInstance("SHA-256")
+      Files.newInputStream(file.toPath()).use { input ->
+        val buffer = ByteArray(64 * 1024)
+        while (true) {
+          val read = input.read(buffer)
+          if (read < 0) break
+          digest.update(buffer, 0, read)
+        }
+      }
+      return digest.digest().joinToString("") { "%02x".format(it) }
     }
 
     internal fun forTesting(library: NoteLinkNativeLibrary) = JnaWindowsNativeApi(library)

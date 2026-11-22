@@ -1,29 +1,33 @@
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+
 plugins {
-    id("org.jetbrains.kotlin.jvm")
-    id("com.android.lint")
-    id("dev.detekt")
+    alias(libs.plugins.kotlin.jvm)
+    alias(libs.plugins.android.lint)
 }
 
+val javaVersion = JavaVersion.toVersion(libs.versions.java.get())
+
 java {
-    sourceCompatibility = JavaVersion.VERSION_17
-    targetCompatibility = JavaVersion.VERSION_17
+    sourceCompatibility = javaVersion
+    targetCompatibility = javaVersion
 }
 
 kotlin {
     compilerOptions {
-        jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
+        jvmTarget.set(JvmTarget.fromTarget(libs.versions.java.get()))
     }
 }
 
 dependencies {
     api(project(":transfer-core"))
-    implementation("net.java.dev.jna:jna:5.19.1")
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.11.0")
+    implementation(libs.jna)
+    implementation(libs.kotlinx.coroutines.core)
     testImplementation(kotlin("test"))
-    testImplementation("junit:junit:4.13.2")
+    testImplementation(libs.junit)
 }
 
 val generatedNativeResources = layout.buildDirectory.dir("generated/native-resources")
+val nativeBuildDir = layout.buildDirectory.dir("native-x64")
 sourceSets.main { resources.srcDir(generatedNativeResources) }
 
 val buildWindowsNative = tasks.register<Exec>("buildWindowsNative") {
@@ -34,7 +38,8 @@ val buildWindowsNative = tasks.register<Exec>("buildWindowsNative") {
         "powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
         file("src/main/cpp/build-native.ps1").absolutePath,
         "-ProjectDirectory", projectDir.absolutePath,
-        "-OutputDirectory", generatedNativeResources.get().asFile.absolutePath
+        "-OutputDirectory", generatedNativeResources.get().asFile.absolutePath,
+        "-BuildDirectory", nativeBuildDir.get().asFile.absolutePath
     )
 }
 

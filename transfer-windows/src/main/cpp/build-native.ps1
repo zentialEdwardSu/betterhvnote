@@ -1,6 +1,7 @@
 param(
     [Parameter(Mandatory = $true)][string]$ProjectDirectory,
-    [Parameter(Mandatory = $true)][string]$OutputDirectory
+    [Parameter(Mandatory = $true)][string]$OutputDirectory,
+    [string]$BuildDirectory = ''
 )
 
 $ErrorActionPreference = 'Stop'
@@ -19,7 +20,11 @@ if (-not (Test-Path -LiteralPath $ninja)) {
 }
 
 $source = Join-Path $ProjectDirectory 'src\main\cpp'
-$build = Join-Path $ProjectDirectory 'build\native-x64'
+$build = if ([string]::IsNullOrWhiteSpace($BuildDirectory)) {
+    Join-Path $ProjectDirectory 'build\native-x64'
+} else {
+    $BuildDirectory
+}
 $command = '"{0}" -arch=x64 -host_arch=x64 && cmake -S "{1}" -B "{2}" -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_MAKE_PROGRAM="{3}" && cmake --build "{2}" --config Release' -f $developerShell, $source, $build, $ninja
 & cmd.exe /d /s /c $command
 if ($LASTEXITCODE -ne 0) { throw "Native build failed with exit code $LASTEXITCODE." }

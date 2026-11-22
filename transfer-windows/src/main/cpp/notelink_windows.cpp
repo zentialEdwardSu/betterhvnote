@@ -60,6 +60,8 @@ std::vector<uint8_t> g_advertisement_payload;
 GattServiceProvider g_service_provider{nullptr};
 GattLocalCharacteristic g_control{nullptr};
 BluetoothLEAdvertisementPublisher g_advertisement{nullptr};
+event_token g_write_token{};
+event_token g_subscribed_token{};
 
 constexpr size_t kMaxQueuedEvents = 4096;
 
@@ -151,9 +153,9 @@ std::vector<uint8_t> advertisement_bytes() {
     return g_advertisement_payload;
 }
 
-void wait_for_gatt_advertisement_start() {
+void wait_for_gatt_advertisement_start(GattServiceProvider const& provider) {
     for (int attempt = 0; attempt < 40; ++attempt) {
-        auto status = g_service_provider.AdvertisementStatus();
+        auto status = provider.AdvertisementStatus();
         if (status == GattServiceProviderAdvertisementStatus::Started ||
             status == GattServiceProviderAdvertisementStatus::StartedWithoutAllAdvertisementData) {
             trace("GATT advertising status=" + std::to_string(static_cast<int32_t>(status)));
@@ -171,9 +173,9 @@ void wait_for_gatt_advertisement_start() {
     trace("GATT advertising status did not settle; continuing in degraded mode");
 }
 
-void wait_for_advertisement_start() {
+void wait_for_advertisement_start(BluetoothLEAdvertisementPublisher const& publisher) {
     for (int attempt = 0; attempt < 40; ++attempt) {
-        auto status = g_advertisement.Status();
+        auto status = publisher.Status();
         if (status == BluetoothLEAdvertisementPublisherStatus::Started) return;
         if (status == BluetoothLEAdvertisementPublisherStatus::Aborted) {
             throw std::runtime_error("Windows BLE advertisement was aborted");
@@ -184,28 +186,34 @@ void wait_for_advertisement_start() {
 }
 
 void start_optional_summary_advertisement() noexcept {
+    BluetoothLEAdvertisementPublisher publisher{nullptr};
     try {
-        g_advertisement = BluetoothLEAdvertisementPublisher();
+        publisher = BluetoothLEAdvertisementPublisher();
         BluetoothLEManufacturerData manufacturer;
         manufacturer.CompanyId(kManufacturerId);
         manufacturer.Data(buffer_from(advertisement_bytes()));
-        g_advertisement.Advertisement().ManufacturerData().Append(manufacturer);
-        g_advertisement.Start();
-        wait_for_advertisement_start();
+        publisher.Advertisement().ManufacturerData().Append(manufacturer);
+        publisher.Start();
+        wait_for_advertisement_start(publisher);
+        BluetoothLEAdvertisementPublisher previous{nullptr};
+        {
+            std::lock_guard lock(g_mutex);
+            previous = g_advertisement;
+            g_advertisement = publisher;
+        }
+        try { if (previous) previous.Stop(); } catch (...) {}
     } catch (std::exception const& error) {
         // The connectable GATT provider remains usable on adapters that reject
         // a second publisher. Android can read identity and queue counts from it.
         trace(std::string("BLE summary advertisement unavailable: ") + error.what());
-        try { if (g_advertisement) g_advertisement.Stop(); } catch (...) {}
-        g_advertisement = nullptr;
+        try { if (publisher) publisher.Stop(); } catch (...) {}
     } catch (...) {
         trace("BLE summary advertisement unavailable: unknown error");
-        try { if (g_advertisement) g_advertisement.Stop(); } catch (...) {}
-        g_advertisement = nullptr;
+        try { if (publisher) publisher.Stop(); } catch (...) {}
     }
 }
 
-void start_gatt_advertising() {
+void start_gatt_advertising(GattServiceProvider const& provider) {
     GattServiceProviderAdvertisingParameters advertising;
     advertising.IsConnectable(true);
     advertising.IsDiscoverable(true);
@@ -216,8 +224,8 @@ void start_gatt_advertising() {
     } catch (...) {
         trace("GATT service data unsupported; identity only in the summary advertisement");
     }
-    g_service_provider.StartAdvertising(advertising);
-    wait_for_gatt_advertisement_start();
+    provider.StartAdvertising(advertising);
+    wait_for_gatt_advertisement_start(provider);
     // Windows 10 IoT does not support GattServiceProvider service data on all
     // adapters. Keep the queue summary in a scan response while the provider
     // owns the connectable service advertisement.
@@ -246,6 +254,7 @@ int guarded(Function&& function) noexcept {
 }
 
 GattLocalCharacteristic create_characteristic(
+    GattServiceProvider const& provider,
     guid const& uuid,
     GattCharacteristicProperties properties,
     GattProtectionLevel read_level,
@@ -263,7 +272,7 @@ GattLocalCharacteristic create_characteristic(
     );
     if ((raw_properties & read_bit) != 0) parameters.ReadProtectionLevel(read_level);
     if ((raw_properties & write_bits) != 0) parameters.WriteProtectionLevel(write_level);
-    auto result = g_service_provider.Service().CreateCharacteristicAsync(uuid, parameters).get();
+    auto result = provider.Service().CreateCharacteristicAsync(uuid, parameters).get();
     if (result.Error() != BluetoothError::Success) throw std::runtime_error("Unable to create BLE characteristic");
     return result.Characteristic();
 }
@@ -314,13 +323,14 @@ int32_t nl_ble_start(const uint8_t* advertisement, int32_t advertisement_length)
         }
         auto created = GattServiceProvider::CreateAsync(kServiceUuid).get();
         if (created.Error() != BluetoothError::Success) throw std::runtime_error("Unable to create NoteLink GATT service");
-        g_service_provider = created.ServiceProvider();
-        g_control = create_characteristic(
+        auto provider = created.ServiceProvider();
+        auto control = create_characteristic(
+            provider,
             kControlUuid,
             GattCharacteristicProperties::WriteWithoutResponse | GattCharacteristicProperties::Notify,
             GattProtectionLevel::Plain, GattProtectionLevel::Plain
         );
-        g_control.WriteRequested([](GattLocalCharacteristic const&, GattWriteRequestedEventArgs const& args) {
+        auto write_token = control.WriteRequested([](GattLocalCharacteristic const&, GattWriteRequestedEventArgs const& args) {
             auto deferral = args.GetDeferral();
             try {
                 auto client = narrow(args.Session().DeviceId().Id());
@@ -337,7 +347,7 @@ int32_t nl_ble_start(const uint8_t* advertisement, int32_t advertisement_length)
             deferral.Complete();
         });
 
-        g_control.SubscribedClientsChanged([](GattLocalCharacteristic const& sender, auto const&) {
+        auto subscribed_token = control.SubscribedClientsChanged([](GattLocalCharacteristic const& sender, auto const&) {
             try {
                 std::map<std::string, GattSubscribedClient> current;
                 for (auto const& client : sender.SubscribedClients()) {
@@ -384,29 +394,46 @@ int32_t nl_ble_start(const uint8_t* advertisement, int32_t advertisement_length)
             }
         });
 
-        start_gatt_advertising();
+        {
+            std::lock_guard lock(g_mutex);
+            g_service_provider = provider;
+            g_control = control;
+            g_write_token = write_token;
+            g_subscribed_token = subscribed_token;
+        }
+        try {
+            start_gatt_advertising(provider);
+        } catch (...) {
+            nl_ble_stop();
+            throw;
+        }
         trace("BLE advertising started");
     });
 }
 
 int32_t nl_ble_update(const uint8_t* advertisement, int32_t advertisement_length) {
     return guarded([&] {
+        ensure_apartment();
+        GattServiceProvider provider{nullptr};
+        BluetoothLEAdvertisementPublisher publisher{nullptr};
         {
             std::lock_guard lock(g_mutex);
             if (advertisement == nullptr || advertisement_length <= 0) {
                 throw std::runtime_error("Invalid encoded BLE advertisement");
             }
             g_advertisement_payload.assign(advertisement, advertisement + advertisement_length);
-        }
-        if (g_advertisement) {
-            g_advertisement.Stop();
+            provider = g_service_provider;
+            publisher = g_advertisement;
             g_advertisement = nullptr;
+        }
+        if (publisher) {
+            publisher.Stop();
         }
         // Service data is fixed while the provider advertises, so it is restarted with the new
         // payload. Existing GATT connections are not affected.
-        if (g_service_provider) {
-            try { g_service_provider.StopAdvertising(); } catch (...) {}
-            start_gatt_advertising();
+        if (provider) {
+            try { provider.StopAdvertising(); } catch (...) {}
+            start_gatt_advertising(provider);
         } else {
             start_optional_summary_advertisement();
         }
@@ -466,23 +493,43 @@ int32_t nl_ble_notify(const char* client, const uint8_t* value, int32_t length) 
 
 void nl_ble_stop() {
     GattServiceProvider provider{nullptr};
+    GattLocalCharacteristic control{nullptr};
     BluetoothLEAdvertisementPublisher publisher{nullptr};
+    event_token write_token{};
+    event_token subscribed_token{};
+    std::map<std::string, Subscriber> subscribers;
     {
         std::lock_guard lock(g_mutex);
         provider = g_service_provider;
+        control = g_control;
         publisher = g_advertisement;
+        write_token = g_write_token;
+        subscribed_token = g_subscribed_token;
         g_service_provider = nullptr;
-        g_advertisement = nullptr;
         g_control = nullptr;
-        for (auto& [id, subscriber] : g_subscribers) {
-            try { subscriber.session.MaxPduSizeChanged(subscriber.mtu_token); } catch (...) {}
-        }
-        g_subscribers.clear();
+        g_advertisement = nullptr;
+        g_write_token = {};
+        g_subscribed_token = {};
+        subscribers.swap(g_subscribers);
         g_events.clear();
         g_advertisement_payload.clear();
     }
+    for (auto& [id, subscriber] : subscribers) {
+        try { subscriber.session.MaxPduSizeChanged(subscriber.mtu_token); } catch (...) {}
+    }
+    try {
+        if (control && write_token.value != 0) control.WriteRequested(write_token);
+    } catch (...) {
+    }
+    try {
+        if (control && subscribed_token.value != 0) control.SubscribedClientsChanged(subscribed_token);
+    } catch (...) {
+    }
     try {
         if (provider) provider.StopAdvertising();
+    } catch (...) {
+    }
+    try {
         if (publisher) publisher.Stop();
     } catch (...) {
     }
@@ -528,7 +575,7 @@ int32_t nl_lan_info(char* ipv4, int32_t ipv4_capacity, uint8_t* ssid, int32_t ss
     ULONG adapter_size = 16 * 1024;
     std::vector<uint8_t> adapter_buffer(adapter_size);
     auto adapters = reinterpret_cast<IP_ADAPTER_ADDRESSES*>(adapter_buffer.data());
-    ULONG flags = GAA_FLAG_SKIP_ANYCAST | GAA_FLAG_SKIP_MULTICAST | GAA_FLAG_SKIP_DNS_SERVER;
+    ULONG flags = GAA_FLAG_INCLUDE_GATEWAYS | GAA_FLAG_SKIP_ANYCAST | GAA_FLAG_SKIP_MULTICAST | GAA_FLAG_SKIP_DNS_SERVER;
     DWORD adapter_result = GetAdaptersAddresses(AF_INET, flags, nullptr, adapters, &adapter_size);
     if (adapter_result == ERROR_BUFFER_OVERFLOW) {
         adapter_buffer.resize(adapter_size);
@@ -555,7 +602,7 @@ int32_t nl_lan_info(char* ipv4, int32_t ipv4_capacity, uint8_t* ssid, int32_t ss
         }
         if (adapter->FirstGatewayAddress == nullptr) continue;
         for (auto address = adapter->FirstUnicastAddress; address != nullptr; address = address->Next) {
-            if (address->Address.lpSockaddr->sa_family != AF_INET) continue;
+            if (address->Address.lpSockaddr == nullptr || address->Address.lpSockaddr->sa_family != AF_INET) continue;
             auto value = reinterpret_cast<sockaddr_in*>(address->Address.lpSockaddr);
             char text[INET_ADDRSTRLEN]{};
             if (InetNtopA(AF_INET, &value->sin_addr, text, sizeof(text)) == nullptr) continue;
@@ -615,6 +662,9 @@ int32_t nl_unprotect(const uint8_t* input, int32_t input_length, uint8_t* output
         return -1;
     }
     int result = copy_blob(decrypted, output, output_capacity);
+    if (decrypted.pbData != nullptr) {
+        SecureZeroMemory(decrypted.pbData, decrypted.cbData);
+    }
     LocalFree(decrypted.pbData);
     return result;
 }
