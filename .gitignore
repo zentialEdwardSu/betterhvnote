@@ -17,6 +17,8 @@ build/
 # make github happy
 **/build/**/*.zip
 dist/
+__pycache__/
+*.py[cod]
 
 # Keep repository-facing docs only; implementation notes and plans stay local.
 *.md

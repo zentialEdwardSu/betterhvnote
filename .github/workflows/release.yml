@@ -38,22 +38,27 @@ jobs:
 
       - name: Validate tag and resolve commit
         id: release
-        shell: pwsh
+        shell: bash
         env:
           RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
         run: |
-          $ErrorActionPreference = 'Stop'
-          $release = ./.github/scripts/resolve-release-tag.ps1 -Tag $env:RELEASE_TAG | ConvertFrom-Json
-          git ls-remote --exit-code --tags origin "refs/tags/$($release.tag)" | Out-Null
-          if ($LASTEXITCODE -ne 0) { throw "Remote tag '$($release.tag)' does not exist." }
-          git fetch --force origin "refs/tags/$($release.tag):refs/tags/$($release.tag)"
-          $commit = (git rev-list -n 1 $release.tag).Trim()
-          if (-not $commit) { throw "Could not resolve '$($release.tag)' to a commit." }
-          "tag=$($release.tag)" >> $env:GITHUB_OUTPUT
-          "product=$($release.product)" >> $env:GITHUB_OUTPUT
-          "version=$($release.version)" >> $env:GITHUB_OUTPUT
-          "version_code=$($release.versionCode)" >> $env:GITHUB_OUTPUT
-          "commit=$commit" >> $env:GITHUB_OUTPUT
+          set -euo pipefail
+          release_json=$(python3 -B .github/scripts/resolve_release_tag.py --tag "$RELEASE_TAG")
+          tag=$(python3 -c 'import json, sys; print(json.loads(sys.argv[1])["tag"])' "$release_json")
+          product=$(python3 -c 'import json, sys; print(json.loads(sys.argv[1])["product"])' "$release_json")
+          version=$(python3 -c 'import json, sys; print(json.loads(sys.argv[1])["version"])' "$release_json")
+          version_code=$(python3 -c 'import json, sys; print(json.loads(sys.argv[1])["versionCode"])' "$release_json")
+          git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null
+          git fetch --force origin "refs/tags/$tag:refs/tags/$tag"
+          commit=$(git rev-list -n 1 "$tag")
+          test -n "$commit"
+          {
+            echo "tag=$tag"
+            echo "product=$product"
+            echo "version=$version"
+            echo "version_code=$version_code"
+            echo "commit=$commit"
+          } >> "$GITHUB_OUTPUT"
 
   quality:
     name: Release quality gate
@@ -269,6 +274,16 @@ jobs:
     permissions:
       contents: write
     steps:
+      - name: Check out latest main with complete history
+        uses: actions/checkout@v6.0.2
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Fetch all release tags
+        shell: bash
+        run: git fetch --force --tags origin
+
       - name: Download release assets
         uses: actions/download-artifact@v8.0.1
         with:
@@ -277,15 +292,43 @@ jobs:
           merge-multiple: true
 
       - name: Generate SHA-256 checksums
-        shell: pwsh
+        shell: bash
         run: |
-          $lines = Get-ChildItem -LiteralPath release-assets -File |
-            Sort-Object Name |
-            ForEach-Object { '{0}  {1}' -f (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant(), $_.Name }
-          $lines | Set-Content -LiteralPath release-assets/SHA256SUMS.txt -Encoding utf8NoBOM
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib
+          from pathlib import Path
+
+          assets_dir = Path("release-assets")
+          files = sorted((p for p in assets_dir.iterdir() if p.is_file() and p.name != "SHA256SUMS.txt"), key=lambda p: p.name)
+          lines = []
+          for file_path in files:
+              digest = hashlib.sha256()
+              with file_path.open("rb") as handle:
+                  for chunk in iter(lambda: handle.read(65536), b""):
+                      digest.update(chunk)
+              lines.append(f"{digest.hexdigest()}  {file_path.name}")
+          (assets_dir / "SHA256SUMS.txt").write_text("\n".join(lines) + "\n", encoding="utf-8", newline="\n")
+          PY
+
+      - name: Generate release notes
+        shell: bash
+        env:
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
+        run: |
+          set -euo pipefail
+          notes_path="$RUNNER_TEMP/release-notes.md"
+          python3 -B .github/scripts/generate_release_notes.py \
+            --tag "$RELEASE_TAG" \
+            --repo-path "$PWD" \
+            --repo-slug "$GH_REPO" \
+            --assets-dir release-assets \
+            --output "$notes_path" >/dev/null
+          cat "$notes_path" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Create or refresh pre-release
-        shell: pwsh
+        shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
@@ -293,25 +336,39 @@ jobs:
           PRODUCT: ${{ needs.prepare.outputs.product }}
           VERSION: ${{ needs.prepare.outputs.version }}
         run: |
-          $ErrorActionPreference = 'Stop'
-          $assets = @(Get-ChildItem -LiteralPath release-assets -File | ForEach-Object FullName)
-          $existingJson = gh api "repos/$env:GH_REPO/releases/tags/$env:RELEASE_TAG" 2>$null
-          if ($LASTEXITCODE -eq 0) {
-            $existing = $existingJson | ConvertFrom-Json
-            if ($existing.draft -or -not $existing.prerelease) {
-              throw "Release $env:RELEASE_TAG is draft or already stable; refusing to replace its assets."
-            }
-            gh release upload $env:RELEASE_TAG @assets --clobber --repo $env:GH_REPO
-          } else {
-            $title = if ($env:PRODUCT -eq 'note') { "BetterHvNote $env:VERSION" } else { "NoteLink $env:VERSION" }
-            gh release create $env:RELEASE_TAG @assets `
-              --repo $env:GH_REPO `
-              --verify-tag `
-              --prerelease `
-              --latest=false `
-              --generate-notes `
-              --title $title
-          }
+          set -euo pipefail
+          mapfile -t assets < <(find release-assets -maxdepth 1 -type f | LC_ALL=C sort)
+          notes_path="$RUNNER_TEMP/release-notes.md"
+          if [[ "$PRODUCT" == 'note' ]]; then
+            title="BetterHvNote $VERSION"
+          else
+            title="NoteLink $VERSION"
+          fi
+
+          if existing_json=$(gh api "repos/$GH_REPO/releases/tags/$RELEASE_TAG" 2>/dev/null); then
+            python3 - "$existing_json" "$RELEASE_TAG" <<'PY'
+          import json
+          import sys
+
+          existing = json.loads(sys.argv[1])
+          tag = sys.argv[2]
+          if existing.get("draft") or not existing.get("prerelease"):
+              raise SystemExit(f"Release {tag} is draft or already stable; refusing to replace its assets.")
+          PY
+            gh release upload "$RELEASE_TAG" "${assets[@]}" --clobber --repo "$GH_REPO"
+            gh release edit "$RELEASE_TAG" \
+              --repo "$GH_REPO" \
+              --title "$title" \
+              --notes-file "$notes_path"
+          else
+            gh release create "$RELEASE_TAG" "${assets[@]}" \
+              --repo "$GH_REPO" \
+              --verify-tag \
+              --prerelease \
+              --latest=false \
+              --title "$title" \
+              --notes-file "$notes_path"
+          fi
 
   update-changelog:
     name: Update full changelog
@@ -334,55 +391,86 @@ jobs:
         shell: bash
         run: git fetch --force --tags origin
 
-      - name: Generate full changelog from published releases
-        shell: pwsh
+      - name: Generate full changelog from release tags
+        shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
         run: |
-          $ErrorActionPreference = 'Stop'
-          $releaseTags = @(
-            gh api `
-              --paginate `
-              "repos/$env:GH_REPO/releases?per_page=100" `
+          set -euo pipefail
+          raw_release_tags=$(
+            gh api \
+              --paginate \
+              "repos/$GH_REPO/releases?per_page=100" \
               --jq '.[] | select(.draft == false) | .tag_name'
           )
-          if ($LASTEXITCODE -ne 0) { throw 'Could not list GitHub releases.' }
-
-          $publishedTags = @(
-            $releaseTags |
-              Where-Object { $_ -match '^(note|notelink)-v[0-9]+\.[0-9]+\.[0-9]+$' } |
-              Select-Object -Unique
+          mapfile -t published_tags < <(
+            printf '%s\n' "$raw_release_tags" \
+              | grep -E '^(note|notelink)-v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$' || true
           )
-          if ($publishedTags -notcontains $env:RELEASE_TAG) {
-            throw "Published release '$env:RELEASE_TAG' was not returned by the GitHub Releases API."
-          }
 
-          ./.github/scripts/generate-full-changelog.ps1 `
-            -RepositoryPath $PWD `
-            -OutputPath 'FULL_CHANGELOG.md' `
-            -Tags $publishedTags
+          found=0
+          for tag in "${published_tags[@]}"; do
+            if [[ "$tag" == "$RELEASE_TAG" ]]; then
+              found=1
+              break
+            fi
+          done
+          if [[ "$found" -ne 1 ]]; then
+            echo "Published release '$RELEASE_TAG' was not returned by the GitHub Releases API." >&2
+            exit 1
+          fi
+
+          raw_git_tags=$(git tag -l 'note-v*' 'notelink-v*')
+          mapfile -t all_tags < <(
+            printf '%s\n' "$raw_git_tags" "${published_tags[@]}" \
+              | grep -E '^(note|notelink)-v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$' \
+              | LC_ALL=C sort -u
+          )
+
+          python3 -B .github/scripts/generate_full_changelog.py \
+            --repo-path "$PWD" \
+            --repo-slug "$GH_REPO" \
+            --output FULL_CHANGELOG.md \
+            --tags "${all_tags[@]}"
 
       - name: Commit and push changelog when changed
-        shell: pwsh
+        shell: bash
         env:
+          GH_REPO: ${{ github.repository }}
           RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
         run: |
-          $ErrorActionPreference = 'Stop'
-          git add -- FULL_CHANGELOG.md
-          git diff --cached --quiet
-          if ($LASTEXITCODE -eq 0) {
-            Write-Output 'FULL_CHANGELOG.md is already up to date.'
-            exit 0
-          }
-          if ($LASTEXITCODE -ne 1) { throw 'Could not inspect the staged changelog.' }
-
+          set -euo pipefail
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git commit `
-            -m "chore(changelog): update for $env:RELEASE_TAG" `
-            -m 'Changelog-Generated: true'
-          if ($LASTEXITCODE -ne 0) { throw 'Could not commit FULL_CHANGELOG.md.' }
-          git push origin HEAD:main
-          if ($LASTEXITCODE -ne 0) { throw 'Could not push FULL_CHANGELOG.md to main.' }
+
+          for attempt in 1 2; do
+            git add -- FULL_CHANGELOG.md
+            if git diff --cached --quiet; then
+              echo 'FULL_CHANGELOG.md is already up to date.'
+              exit 0
+            fi
+
+            git commit \
+              -m "chore(changelog): update for $RELEASE_TAG" \
+              -m 'Changelog-Generated: true'
+
+            if git push origin HEAD:main; then
+              exit 0
+            fi
+
+            if [[ "$attempt" -eq 2 ]]; then
+              echo 'Could not push FULL_CHANGELOG.md to main after retrying on latest origin/main.' >&2
+              exit 1
+            fi
+
+            echo 'Push rejected due to concurrent update on main; refreshing from origin/main and regenerating.' >&2
+            git fetch --force origin main --tags
+            git reset --hard origin/main
+
+            python3 -B .github/scripts/generate_full_changelog.py \
+              --repo-path "$PWD" \
+              --repo-slug "$GH_REPO" \
+              --output FULL_CHANGELOG.md >/dev/null
+          done
