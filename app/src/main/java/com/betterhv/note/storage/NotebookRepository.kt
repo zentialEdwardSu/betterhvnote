@@ -2,6 +2,7 @@ package com.betterhv.note.storage
 
 import android.content.ContentValues
 import android.content.Context
+import android.database.Cursor
 import android.database.sqlite.SQLiteDatabase
 import androidx.core.database.sqlite.transaction
 import com.betterhv.note.doc.DEFAULT_TEMPLATE_ID
@@ -35,7 +36,7 @@ data class TransferReceipt(
 )
 
 /** SQLite/WAL document repository (spec §49-56). All writes are transactional. */
-class NotebookRepository(context: Context) : AutoCloseable {
+class NotebookRepository(context: Context) : AutoCloseable, AutosaveTarget {
   private val documentsDir = File(context.filesDir, "documents").also { it.mkdirs() }
   val notebookFile: File = File(documentsDir, "default.inknote")
   private val store = SQLiteStore(context.applicationContext, notebookFile)
@@ -70,6 +71,34 @@ class NotebookRepository(context: Context) : AutoCloseable {
   fun listNotebooks(currentId: UUID): List<NotebookSummary> {
     val db = store.readableDatabase
     val workingId = ensureWorkingCopy(db)
+    val pageCounts = HashMap<UUID, Int>()
+    db.rawQuery(
+      "SELECT notebook_id, COUNT(*) FROM page_order GROUP BY notebook_id",
+      null,
+    ).use { cursor ->
+      while (cursor.moveToNext()) {
+        pageCounts[UUID.fromString(cursor.getString(0))] = cursor.getInt(1)
+      }
+    }
+    val covers = HashMap<UUID, Notebook.PageMetadata>()
+    db.rawQuery(
+      """SELECT po.notebook_id, p.id, p.width, p.height, p.bookmarked, p.content_revision,
+                p.created_at, p.updated_at, p.kind, p.parent_pdf_page_id, p.pdf_page_index,
+                p.pdf_bound_left, p.pdf_bound_top, p.pdf_bound_right, p.pdf_bound_bottom,
+                p.pdf_a, p.pdf_b, p.pdf_c, p.pdf_d, p.pdf_tx, p.pdf_ty, p.template_id
+           FROM page_order po
+           JOIN pages p ON p.id = po.page_id
+          WHERE po.position = (
+            SELECT MIN(po2.position) FROM page_order po2 WHERE po2.notebook_id = po.notebook_id
+          )
+      """.trimIndent(),
+      null,
+    ).use { cursor ->
+      while (cursor.moveToNext()) {
+        val notebookId = UUID.fromString(cursor.getString(0))
+        covers[notebookId] = readPageMetadata(cursor, offset = 1)
+      }
+    }
     val summaries = ArrayList<NotebookSummary>()
     db.query(
       "notebooks",
@@ -82,13 +111,12 @@ class NotebookRepository(context: Context) : AutoCloseable {
     ).use { cursor ->
       while (cursor.moveToNext()) {
         val id = UUID.fromString(cursor.getString(0))
-        val notebook = loadNotebookMetadata(db, id) ?: continue
         summaries += NotebookSummary(
           id = id,
           title = cursor.getString(1),
           kind = enumValueOrDefault(cursor.getString(2), NotebookKind.STANDARD),
-          pageCount = notebook.pageOrder.size,
-          cover = notebook.pageOrder.firstOrNull()?.let(notebook::metadata),
+          pageCount = pageCounts[id] ?: 0,
+          cover = covers[id],
           updatedAt = cursor.getLong(3),
           isWorkingCopy = id == workingId,
           isCurrent = id == currentId,
@@ -125,7 +153,7 @@ class NotebookRepository(context: Context) : AutoCloseable {
   }
 
   @Synchronized
-  fun setLastOpenedPage(notebookId: UUID, pageId: UUID) {
+  override fun setLastOpenedPage(notebookId: UUID, pageId: UUID) {
     val owner = pageOwnerAndKind(store.readableDatabase, pageId)
     require(owner?.first == notebookId) { "Page $pageId does not belong to notebook $notebookId" }
     writeMetadata(store.writableDatabase, lastPageKey(notebookId), pageId.toString())
@@ -525,9 +553,18 @@ class NotebookRepository(context: Context) : AutoCloseable {
       )
     }
     db.rawQuery(
-      """SELECT id,type,a,b,c,d,tx,ty,left_bound,top_bound,right_bound,bottom_bound,
-                       z_index,created_at,updated_at
-                 FROM objects WHERE page_id=? ORDER BY z_index,created_at
+      """SELECT o.id, o.type, o.a, o.b, o.c, o.d, o.tx, o.ty,
+                o.left_bound, o.top_bound, o.right_bound, o.bottom_bound,
+                o.z_index, o.created_at, o.updated_at,
+                s.base_width, s.color, s.pressure_a, s.pressure_gamma, s.pen_type, s.points_blob,
+                i.asset_path, i.mime_type, i.pixel_width, i.pixel_height, i.exif_orientation,
+                t.content, t.font_family, t.font_size
+           FROM objects o
+           LEFT JOIN strokes s ON s.object_id = o.id
+           LEFT JOIN images i ON i.object_id = o.id
+           LEFT JOIN texts t ON t.object_id = o.id
+          WHERE o.page_id = ?
+          ORDER BY o.z_index, o.created_at
       """.trimIndent(),
       arrayOf(id.toString()),
     ).use { cursor ->
@@ -551,35 +588,73 @@ class NotebookRepository(context: Context) : AutoCloseable {
         val createdAt = cursor.getLong(13)
         val updatedAt = cursor.getLong(14)
         val obj = when (cursor.getString(1)) {
-          "STROKE" -> loadStroke(db, objectId, transform, zIndex, createdAt, updatedAt)
+          "STROKE" -> if (cursor.isNull(15)) {
+            null
+          } else {
+            val style = PenStyle(
+              cursor.getFloat(15),
+              cursor.getInt(16),
+              PressureCurve(cursor.getFloat(17), cursor.getFloat(18)),
+              PenType.valueOf(cursor.getString(19)),
+            )
+            StrokeObject(
+              objectId,
+              transform,
+              zIndex,
+              createdAt,
+              updatedAt,
+              Stroke(PointBlobCodec.decode(cursor.getBlob(20)), style),
+            )
+          }
 
-          "IMAGE" -> loadImage(db, objectId, transform, zIndex, createdAt, updatedAt)
+          "IMAGE" -> if (cursor.isNull(21)) {
+            null
+          } else {
+            ImageObject(
+              objectId,
+              transform,
+              zIndex,
+              createdAt,
+              updatedAt,
+              cursor.getString(21),
+              cursor.getString(22),
+              cursor.getInt(23),
+              cursor.getInt(24),
+              cursor.getInt(25),
+            )
+          }
 
-          "TEXT" -> loadText(
-            db,
-            objectId,
-            transform,
-            zIndex,
-            createdAt,
-            updatedAt,
-            localBounds,
-          )
+          "TEXT" -> if (cursor.isNull(26)) {
+            null
+          } else {
+            TextObject(
+              objectId,
+              transform,
+              zIndex,
+              createdAt,
+              updatedAt,
+              cursor.getString(26),
+              TextFontFamily.valueOf(cursor.getString(27)),
+              cursor.getFloat(28),
+              localBounds,
+            )
+          }
 
           else -> null
         }
-        obj?.let(page::restoreObject)
+        obj?.let { page.restoreObject(it, transform.mapRect(localBounds)) }
       }
     }
     return page
   }
 
   @Synchronized
-  fun persist(change: DocumentChange) {
+  override fun persist(change: DocumentChange) {
     persistInternal(change, null, null)
   }
 
   @Synchronized
-  fun persistWithReceipt(change: DocumentChange, receipt: TransferReceipt?) {
+  override fun persistWithReceipt(change: DocumentChange, receipt: TransferReceipt?) {
     persistInternal(change, receipt, null)
   }
 
@@ -679,7 +754,9 @@ class NotebookRepository(context: Context) : AutoCloseable {
 
   @Synchronized fun recover(): RecoveryManager.Result = RecoveryManager(store).recover()
 
-  @Synchronized fun checkpoint() = store.checkpoint()
+  @Synchronized override fun checkpoint() = store.checkpoint()
+
+  @Synchronized override fun checkpointPassive() = store.checkpointPassive()
 
   @Synchronized
   fun referencedImageAssets(): Set<String> {
@@ -745,39 +822,52 @@ class NotebookRepository(context: Context) : AutoCloseable {
     ).use { cursor ->
       var index = 0
       while (cursor.moveToNext()) {
-        val kind = enumValueOrDefault(cursor.getString(7), PageKind.BLANK)
-        val source = if (kind == PageKind.PDF_SOURCE) {
-          PdfPageSource(
-            cursor.getInt(9),
-            Bounds(cursor.getFloat(10), cursor.getFloat(11), cursor.getFloat(12), cursor.getFloat(13)),
-            Transform2D(
-              cursor.getFloat(14),
-              cursor.getFloat(15),
-              cursor.getFloat(16),
-              cursor.getFloat(17),
-              cursor.getFloat(18),
-              cursor.getFloat(19),
-            ),
-          )
-        } else {
-          null
-        }
-        notebook.addPageMetadata(
-          Notebook.PageMetadata(
-            UUID.fromString(cursor.getString(0)), cursor.getFloat(1), cursor.getFloat(2),
-            cursor.getInt(3) != 0, cursor.getLong(4), cursor.getLong(5), cursor.getLong(6),
-            kind, if (cursor.isNull(8)) null else UUID.fromString(cursor.getString(8)), source,
-            if (kind == PageKind.PDF_SOURCE) {
-              null
-            } else {
-              (if (cursor.isNull(20)) DEFAULT_TEMPLATE_ID else cursor.getString(20))
-            },
-          ),
-          index++,
-        )
+        notebook.addPageMetadata(readPageMetadata(cursor, offset = 0), index++)
       }
     }
     return notebook
+  }
+
+  private fun readPageMetadata(cursor: Cursor, offset: Int): Notebook.PageMetadata {
+    val kind = enumValueOrDefault(cursor.getString(offset + 7), PageKind.BLANK)
+    val source = if (kind == PageKind.PDF_SOURCE) {
+      PdfPageSource(
+        cursor.getInt(offset + 9),
+        Bounds(
+          cursor.getFloat(offset + 10),
+          cursor.getFloat(offset + 11),
+          cursor.getFloat(offset + 12),
+          cursor.getFloat(offset + 13),
+        ),
+        Transform2D(
+          cursor.getFloat(offset + 14),
+          cursor.getFloat(offset + 15),
+          cursor.getFloat(offset + 16),
+          cursor.getFloat(offset + 17),
+          cursor.getFloat(offset + 18),
+          cursor.getFloat(offset + 19),
+        ),
+      )
+    } else {
+      null
+    }
+    return Notebook.PageMetadata(
+      UUID.fromString(cursor.getString(offset)),
+      cursor.getFloat(offset + 1),
+      cursor.getFloat(offset + 2),
+      cursor.getInt(offset + 3) != 0,
+      cursor.getLong(offset + 4),
+      cursor.getLong(offset + 5),
+      cursor.getLong(offset + 6),
+      kind,
+      if (cursor.isNull(offset + 8)) null else UUID.fromString(cursor.getString(offset + 8)),
+      source,
+      if (kind == PageKind.PDF_SOURCE) {
+        null
+      } else {
+        if (cursor.isNull(offset + 20)) DEFAULT_TEMPLATE_ID else cursor.getString(offset + 20)
+      },
+    )
   }
 
   private fun ensureWorkingCopy(db: SQLiteDatabase): UUID {
@@ -1161,6 +1251,7 @@ class NotebookRepository(context: Context) : AutoCloseable {
       db.insertWithOnConflict("pages", null, values, SQLiteDatabase.CONFLICT_IGNORE)
       db.update("pages", values, "id=?", arrayOf(page.id.toString()))
     }
+    if (!change.pageStructureChanged) return
     val retained = change.pageOrder.map { it.toString() }.toSet()
     val removedPageIds = ArrayList<String>()
     db.query("pages", arrayOf("id"), "notebook_id=?", arrayOf(notebookId), null, null, null).use { cursor ->
@@ -1254,85 +1345,6 @@ class NotebookRepository(context: Context) : AutoCloseable {
     if (db.update(table, values, "$keyColumn=?", arrayOf(keyValue)) == 0) {
       db.insertOrThrow(table, null, values)
     }
-  }
-
-  private fun loadStroke(
-    db: SQLiteDatabase,
-    id: UUID,
-    transform: Transform2D,
-    z: Int,
-    created: Long,
-    updated: Long,
-  ): StrokeObject? = db.query(
-    "strokes",
-    arrayOf("base_width", "color", "pressure_a", "pressure_gamma", "pen_type", "points_blob"),
-    "object_id=?",
-    arrayOf(id.toString()),
-    null,
-    null,
-    null,
-  ).use { c ->
-    if (!c.moveToFirst()) return@use null
-    val style = PenStyle(
-      c.getFloat(0),
-      c.getInt(1),
-      PressureCurve(c.getFloat(2), c.getFloat(3)),
-      PenType.valueOf(c.getString(4)),
-    )
-    StrokeObject(id, transform, z, created, updated, Stroke(PointBlobCodec.decode(c.getBlob(5)), style))
-  }
-
-  private fun loadImage(
-    db: SQLiteDatabase,
-    id: UUID,
-    transform: Transform2D,
-    z: Int,
-    created: Long,
-    updated: Long,
-  ): ImageObject? = db.query(
-    "images",
-    arrayOf("asset_path", "mime_type", "pixel_width", "pixel_height", "exif_orientation"),
-    "object_id=?",
-    arrayOf(id.toString()),
-    null,
-    null,
-    null,
-  ).use { c ->
-    if (!c.moveToFirst()) return@use null
-    ImageObject(
-      id, transform, z, created, updated,
-      c.getString(
-        0,
-      ),
-      c.getString(1), c.getInt(2), c.getInt(3), c.getInt(4)
-    )
-  }
-
-  private fun loadText(
-    db: SQLiteDatabase,
-    id: UUID,
-    transform: Transform2D,
-    z: Int,
-    created: Long,
-    updated: Long,
-    bounds: Bounds,
-  ): TextObject? = db.query(
-    "texts",
-    arrayOf("content", "font_family", "font_size"),
-    "object_id=?",
-    arrayOf(id.toString()),
-    null,
-    null,
-    null,
-  ).use { c ->
-    if (!c.moveToFirst()) return@use null
-    TextObject(
-      id, transform, z, created, updated,
-      c.getString(
-        0,
-      ),
-      TextFontFamily.valueOf(c.getString(1)), c.getFloat(2), bounds
-    )
   }
 
   companion object {

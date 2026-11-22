@@ -3,7 +3,7 @@ package com.betterhv.note.toolbar
 import com.betterhv.note.CommandBinding
 import com.betterhv.note.CommandContext
 import com.betterhv.note.EraserMode
-import com.betterhv.note.PenToolbarSettings
+import com.betterhv.note.settings.PenToolbarSettings
 import com.betterhv.note.ToolKind
 import com.betterhv.note.ToolbarItem
 import com.betterhv.note.ink.PenType

@@ -3,6 +3,8 @@ package com.betterhv.note
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import com.betterhv.note.hardware.PenFunctionKey
+import com.betterhv.note.hardware.PenSideButton
 
 class PenFunctionKeyTest {
   @Test

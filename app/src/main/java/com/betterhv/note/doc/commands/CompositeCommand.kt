@@ -1,6 +1,7 @@
 package com.betterhv.note.doc.commands
 
 import com.betterhv.note.doc.Command
+import com.betterhv.note.doc.Page
 import com.betterhv.note.doc.PageObject
 import java.util.UUID
 
@@ -27,6 +28,9 @@ class CompositeCommand(private val operations: List<Command>) : Command {
     return null
   }
   override fun currentPage(pageId: UUID) = operations.firstNotNullOfOrNull { it.currentPage(pageId) }
+  override fun rebindPage(livePage: Page) {
+    operations.forEach { it.rebindPage(livePage) }
+  }
 
   override fun execute() {
     for (op in operations) op.execute()

@@ -3,7 +3,7 @@ package com.betterhv.note.toolbar
 import com.betterhv.note.AppCommand
 import com.betterhv.note.CommandOption
 import com.betterhv.note.CommandParameter
-import com.betterhv.note.PenToolbarSettings
+import com.betterhv.note.settings.PenToolbarSettings
 import com.betterhv.note.ShortcutScene
 import com.betterhv.note.ToolKind
 

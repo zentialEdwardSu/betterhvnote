@@ -15,6 +15,9 @@ import com.betterhv.note.doc.PdfAnchor
 import com.betterhv.note.doc.PdfAnchorKind
 import com.betterhv.note.doc.PdfPageSource
 import com.betterhv.note.doc.Transform2D
+import com.betterhv.note.export.ExportFormat
+import com.betterhv.note.export.ExportScope
+import com.betterhv.note.export.ExportTaskRepository
 import com.betterhv.note.ink.Bounds
 import com.betterhv.note.ink.InkPoint
 import com.betterhv.note.ink.PenStyle
@@ -282,6 +285,100 @@ class NotebookRepositoryInstrumentedTest {
             assertTrue(repository.pdfAnchors(anchorSourceId).isEmpty())
             assertTrue(repository.pdfAnchorsForNotePage(notePageId).isEmpty())
             assertEquals(null, repository.pdfAnchorForNoteObject(objectId))
+        }
+    }
+
+    @Test
+    fun notebookAndExportRepositoriesShareDatabaseAndPassiveCheckpointSucceedsWithActiveReader() {
+        NotebookRepository(context).use { notebookRepo ->
+            ExportTaskRepository(context).use { exportRepo ->
+                val notebook = notebookRepo.openOrCreate()
+                val page = notebook.pageAt(0)!!
+                val stroke = StrokeObject(
+                    UUID.randomUUID(),
+                    stroke = Stroke(listOf(InkPoint(5f, 5f, 0.5f, 1L)), PenStyle())
+                )
+                page.addObject(stroke)
+                notebook.refreshPageMetadata(page)
+                notebookRepo.persist(DocumentChange.fullPage(notebook, page, "test:shared-store"))
+
+                val task = exportRepo.createTask(
+                    notebook.id,
+                    ExportScope.ALL_PAGES,
+                    ExportFormat.PDF,
+                    emptyList()
+                )
+                assertEquals(1, exportRepo.resolveSources(task).size)
+
+                // Hold an active reader cursor open while running checkpointPassive().
+                SQLiteStore(context, notebookRepo.notebookFile).use { readerStore ->
+                    readerStore.readableDatabase.rawQuery("SELECT id FROM notebooks", null).use { cursor ->
+                        assertTrue(cursor.moveToFirst())
+                        notebookRepo.checkpointPassive()
+                    }
+                }
+            }
+        }
+    }
+
+    @Test
+    fun loadPageRestoresTransformedObjectsAndListNotebooksReturnsAccurateCountsAndCovers() {
+        NotebookRepository(context).use { repository ->
+            val working = repository.openOrCreate()
+            val secondId = repository.createBlankNotebook("Second", 300f, 400f)
+            val second = repository.loadNotebook(secondId)!!
+            val coverPage = second.pageAt(0)!!
+            val strokeId = UUID.randomUUID()
+            val imageId = UUID.randomUUID()
+            val textId = UUID.randomUUID()
+            val shift = Transform2D.translate(700f, 700f)
+            coverPage.addObject(
+                StrokeObject(
+                    strokeId,
+                    transform = shift,
+                    zIndex = 1,
+                    stroke = Stroke(listOf(InkPoint(10f, 10f, 0.6f, 1L)), PenStyle())
+                )
+            )
+            coverPage.addObject(
+                ImageObject(
+                    imageId,
+                    transform = shift,
+                    zIndex = 2,
+                    assetPath = "assets/cover.png",
+                    mimeType = "image/png",
+                    pixelWidth = 40,
+                    pixelHeight = 20
+                )
+            )
+            coverPage.addObject(
+                TextObject(
+                    textId,
+                    transform = shift,
+                    zIndex = 3,
+                    text = "Title",
+                    localBounds = Bounds(0f, 0f, 60f, 24f)
+                )
+            )
+            second.refreshPageMetadata(coverPage)
+            repository.persist(DocumentChange.fullPage(second, coverPage, "test:left-join"))
+
+            val reloadedPage = repository.loadPage(coverPage.id)!!
+            assertEquals(3, reloadedPage.scene.size)
+            assertEquals(listOf(strokeId, imageId, textId), reloadedPage.scene.all().map { it.id })
+            assertTrue(reloadedPage.queryObjects(Bounds(700f, 700f, 760f, 730f)).any { it.id == textId })
+            assertTrue(reloadedPage.queryObjects(Bounds(0f, 0f, 60f, 30f)).isEmpty())
+
+            val summaries = repository.listNotebooks(working.id)
+            assertEquals(2, summaries.size)
+            val workingSummary = summaries.first { it.id == working.id }
+            val secondSummary = summaries.first { it.id == secondId }
+            assertTrue(workingSummary.isCurrent)
+            assertTrue(workingSummary.isWorkingCopy)
+            assertEquals(1, workingSummary.pageCount)
+            assertEquals(1, secondSummary.pageCount)
+            assertEquals(coverPage.id, secondSummary.cover?.id)
+            assertEquals(coverPage.contentRevision, secondSummary.cover?.contentRevision)
         }
     }
 }

@@ -16,6 +16,9 @@ interface Command {
   /** Resolves the Page held by undo history even after Notebook detached it from the Scene cache. */
   fun currentPage(pageId: UUID): Page? = null
 
+  /** Rebinds a command's cached Page reference when an evicted page is reloaded. */
+  fun rebindPage(livePage: Page) {}
+
   /** Page ids whose creation/deletion/order metadata changed. */
   val affectedPages: Set<UUID> get() = emptySet()
 
@@ -33,16 +36,28 @@ enum class CommandAction { EXECUTE, UNDO, REDO }
  * one command incrementally while the gesture is in progress and only call
  * [execute] once, at gesture end -- see SelectionTool.
  */
-class CommandStack(private var onCommitted: ((Command, CommandAction) -> Unit)? = null) {
+class CommandStack(
+  private var onCommitted: ((Command, CommandAction) -> Unit)? = null,
+  private val maxDepth: Int = DEFAULT_MAX_DEPTH,
+) {
+  init {
+    require(maxDepth > 0) { "maxDepth must be positive" }
+  }
+
   private val undoStack = ArrayDeque<Command>()
   private val redoStack = ArrayDeque<Command>()
 
   val canUndo: Boolean get() = undoStack.isNotEmpty()
   val canRedo: Boolean get() = redoStack.isNotEmpty()
 
+  fun peekUndo(): Command? = undoStack.lastOrNull()
+
+  fun peekRedo(): Command? = redoStack.lastOrNull()
+
   fun execute(command: Command) {
     command.execute()
     undoStack.addLast(command)
+    trimUndoDepth()
     redoStack.clear()
     onCommitted?.invoke(command, CommandAction.EXECUTE)
   }
@@ -58,6 +73,7 @@ class CommandStack(private var onCommitted: ((Command, CommandAction) -> Unit)? 
     val command = redoStack.removeLastOrNull() ?: return
     command.execute()
     undoStack.addLast(command)
+    trimUndoDepth()
     onCommitted?.invoke(command, CommandAction.REDO)
   }
 
@@ -69,6 +85,7 @@ class CommandStack(private var onCommitted: ((Command, CommandAction) -> Unit)? 
    */
   fun push(command: Command) {
     undoStack.addLast(command)
+    trimUndoDepth()
     redoStack.clear()
     onCommitted?.invoke(command, CommandAction.EXECUTE)
   }
@@ -80,5 +97,15 @@ class CommandStack(private var onCommitted: ((Command, CommandAction) -> Unit)? 
 
   fun setOnCommitted(listener: ((Command, CommandAction) -> Unit)?) {
     onCommitted = listener
+  }
+
+  private fun trimUndoDepth() {
+    while (undoStack.size > maxDepth) {
+      undoStack.removeFirst()
+    }
+  }
+
+  companion object {
+    const val DEFAULT_MAX_DEPTH = 100
   }
 }

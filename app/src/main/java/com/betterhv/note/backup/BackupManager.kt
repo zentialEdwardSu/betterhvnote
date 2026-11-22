@@ -4,7 +4,7 @@ import android.content.Context
 import android.database.sqlite.SQLiteDatabase
 import android.net.Uri
 import android.util.AtomicFile
-import com.betterhv.note.PenSettingsStore
+import com.betterhv.note.settings.PenSettingsStore
 import com.betterhv.note.storage.MigrationManager
 import com.betterhv.note.storage.SQLiteStore
 import com.betterhv.note.template.TemplateManifestCodec
@@ -37,7 +37,9 @@ class BackupManager(private val context: Context) {
       val count = validateDatabase(snapshot, clearArtifacts = true)
       val manifest = BackupArchive.manifest(snapshot, MigrationManager.VERSION, count)
       val output = context.contentResolver.openOutputStream(uri, "wt") ?: error("无法打开备份文件")
-      BackupArchive.write(snapshot, manifest, output, progress)
+      output.use { stream ->
+        BackupArchive.write(snapshot, manifest, stream, progress)
+      }
     } finally {
       snapshot.deleteRecursively()
     }
@@ -47,7 +49,9 @@ class BackupManager(private val context: Context) {
     val staging = freshStaging()
     try {
       val input = context.contentResolver.openInputStream(uri) ?: error("无法读取备份文件")
-      val manifest = BackupArchive.read(input, staging, progress)
+      val manifest = input.use { stream ->
+        BackupArchive.read(stream, staging, progress)
+      }
       require(manifest.schemaVersion <= MigrationManager.VERSION) { "备份来自更新版本，请先升级应用" }
       val version = SQLiteDatabase.openDatabase(File(staging, "documents/default.inknote").path, null,
         SQLiteDatabase.OPEN_READONLY).use { it.version }

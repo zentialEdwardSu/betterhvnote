@@ -5,10 +5,13 @@ import com.betterhv.note.doc.Page
 import java.util.UUID
 
 /** Replaces only the page background reference; Scene objects are untouched. */
-class SetPageTemplateCommand(private val page: Page, private val templateId: String) : Command {
+class SetPageTemplateCommand(private var page: Page, private val templateId: String) : Command {
   private val previous = requireNotNull(page.templateId)
   override val affectedPages: Set<UUID> = setOf(page.id)
   override fun currentPage(pageId: UUID): Page? = page.takeIf { it.id == pageId }
+  override fun rebindPage(livePage: Page) {
+    if (livePage.id == page.id) page = livePage
+  }
 
   override fun execute() = page.setTemplate(templateId)
   override fun undo() = page.setTemplate(previous)

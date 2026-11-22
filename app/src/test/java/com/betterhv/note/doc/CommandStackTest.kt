@@ -2,6 +2,8 @@ package com.betterhv.note.doc
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -70,5 +72,58 @@ class CommandStackTest {
     assertTrue(stack.canUndo)
     stack.undo()
     assertEquals(listOf("undo:a"), log)
+  }
+
+  @Test
+  fun `default max depth is 100 and custom maxDepth evicts oldest for execute and push`() {
+    assertEquals(100, CommandStack.DEFAULT_MAX_DEPTH)
+
+    val executeStack = CommandStack(maxDepth = 3)
+    val log = mutableListOf<String>()
+    val cmd1 = RecordingCommand(log, "1")
+    val cmd2 = RecordingCommand(log, "2")
+    val cmd3 = RecordingCommand(log, "3")
+    val cmd4 = RecordingCommand(log, "4")
+    executeStack.execute(cmd1)
+    executeStack.execute(cmd2)
+    executeStack.execute(cmd3)
+    executeStack.execute(cmd4)
+
+    log.clear()
+    while (executeStack.canUndo) executeStack.undo()
+    assertEquals(listOf("undo:4", "undo:3", "undo:2"), log)
+
+    val pushStack = CommandStack(maxDepth = 3)
+    log.clear()
+    pushStack.push(RecordingCommand(log, "p1"))
+    pushStack.push(RecordingCommand(log, "p2"))
+    pushStack.push(RecordingCommand(log, "p3"))
+    pushStack.push(RecordingCommand(log, "p4"))
+    while (pushStack.canUndo) pushStack.undo()
+    assertEquals(listOf("undo:p4", "undo:p3", "undo:p2"), log)
+  }
+
+  @Test
+  fun `peekUndo and peekRedo inspect top commands without mutating stacks`() {
+    val stack = CommandStack()
+    assertNull(stack.peekUndo())
+    assertNull(stack.peekRedo())
+
+    val log = mutableListOf<String>()
+    val first = RecordingCommand(log, "first")
+    val second = RecordingCommand(log, "second")
+    stack.execute(first)
+    stack.execute(second)
+
+    assertSame(second, stack.peekUndo())
+    assertSame(second, stack.peekUndo())
+    assertNull(stack.peekRedo())
+
+    stack.undo()
+    assertSame(first, stack.peekUndo())
+    assertSame(second, stack.peekRedo())
+    assertSame(second, stack.peekRedo())
+    assertTrue(stack.canUndo)
+    assertTrue(stack.canRedo)
   }
 }

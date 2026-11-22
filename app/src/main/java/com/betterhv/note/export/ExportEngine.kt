@@ -1,8 +1,15 @@
 package com.betterhv.note.export
 
 import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.Color
+import android.graphics.Paint
+import android.graphics.RectF
+import androidx.core.graphics.createBitmap
 import com.betterhv.note.EventLog
+import com.betterhv.note.doc.ImageObject
 import com.betterhv.note.doc.PageKind
+import com.betterhv.note.doc.TextObject
 import com.betterhv.note.pdf.MuPdfEngine
 import com.betterhv.note.storage.NotebookRepository
 import com.betterhv.note.storage.PageSnapshot
@@ -110,7 +117,7 @@ class ExportEngine(
       when (loaded.format) {
         ExportFormat.PNG -> {
           val pngStart = System.nanoTime()
-          generatePng(loaded.notebookId, sources.first(), tempFile, sink, checkActive)
+          rasterScale = generatePng(loaded.notebookId, sources.first(), tempFile, sink, checkActive)
           timings.renderMs += elapsedMs(pngStart)
         }
 
@@ -185,39 +192,36 @@ class ExportEngine(
     output: File,
     sink: ExportProgressSink,
     checkActive: () -> Unit,
-  ) {
+  ): Float {
     sink.begin(ExportProgress.Stage.RENDERING, 1, 0, source.id)
     val page = notebookRepository.loadPage(source.id) ?: error("Page has been deleted")
     val snapshot = PageSnapshot.capture(page)
-    val width = (snapshot.metadata.width * 2f).roundToInt().coerceAtLeast(1)
-    val height = (snapshot.metadata.height * 2f).roundToInt().coerceAtLeast(1)
+    val (width, height) = ExportRaster.pixelSize(snapshot.metadata.width, snapshot.metadata.height)
+    val rasterScale = ExportRaster.scaleFor(snapshot.metadata.width, snapshot.metadata.height)
     val bitmap = if (page.kind == PageKind.PDF_SOURCE) {
-      val record = notebookRepository.pdfDocument(notebookId) ?: error("PDF asset record is missing")
-      val file = notebookRepository.resolveDocumentAsset(record.assetPath) ?: error("PDF asset file is missing")
       // PNG output never needs editable annotations: composite the source page
-      // and the current ink in one bitmap instead of writing a temporary PDF.
-      val background = ensureMutable(
-        muPdf.renderPage(file, requireNotNull(page.pdfSource).sourcePageIndex, width),
+      // onto an opaque white canvas with the current objects instead of writing a temporary PDF.
+      renderPdfSourceOntoWhite(
+        notebookId,
+        requireNotNull(page.pdfSource).sourcePageIndex,
+        width,
+        height,
+        snapshot,
+        checkActive,
       )
-      try {
-        renderer.renderObjectsOnto(background, snapshot, checkActive)
-        background
-      } catch (t: Throwable) {
-        background.recycle()
-        throw t
-      }
     } else {
       renderer.renderToBitmap(snapshot, width, height, checkActive = checkActive)
     }
     try {
       FileOutputStream(output).use { stream ->
-        check(bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, stream)) { "PNG encoding failed" }
+        check(bitmap.compress(Bitmap.CompressFormat.PNG, 100, stream)) { "PNG encoding failed" }
         stream.fd.sync()
       }
     } finally {
       bitmap.recycle()
     }
     sink.begin(ExportProgress.Stage.RENDERING, 1, 1, source.id)
+    return rasterScale
   }
 
   private suspend fun generatePdf(
@@ -265,12 +269,19 @@ class ExportEngine(
                 ?: error("PDF asset record is missing")
               val original = notebookRepository.resolveDocumentAsset(record.assetPath)
                 ?: error("PDF asset file is missing")
+              val overlayPdf = if (snapshot.objects.any { it is TextObject || it is ImageObject }) {
+                renderer.renderSinglePagePdfOverlay(snapshot, basePage, checkActive)
+                basePage
+              } else {
+                null
+              }
               pdfWriter.writeAnnotatedSourcePage(
                 original,
                 requireNotNull(page.pdfSource).sourcePageIndex,
                 snapshot,
                 tempPage,
                 checkActive,
+                overlayPdf,
               )
             }
 
@@ -327,41 +338,67 @@ class ExportEngine(
     val (widthPx, heightPx) = ExportRaster.pixelSize(page.width, page.height)
     val widthPoints = (page.width * PDF_POINTS_PER_LOGICAL_PIXEL).roundToInt().coerceAtLeast(1)
     val heightPoints = (page.height * PDF_POINTS_PER_LOGICAL_PIXEL).roundToInt().coerceAtLeast(1)
-    if (page.kind == PageKind.PDF_SOURCE) {
-      val record = notebookRepository.pdfDocument(task.notebookId) ?: error("PDF asset record is missing")
-      val original = notebookRepository.resolveDocumentAsset(record.assetPath)
-        ?: error("PDF asset file is missing")
-      val bitmap = ensureMutable(
-        muPdf.renderPage(
-          original,
-          requireNotNull(page.pdfSource).sourcePageIndex,
-          widthPx,
-        ),
+    val bitmap = if (page.kind == PageKind.PDF_SOURCE) {
+      renderPdfSourceOntoWhite(
+        task.notebookId,
+        requireNotNull(page.pdfSource).sourcePageIndex,
+        widthPx,
+        heightPx,
+        snapshot,
+        checkActive,
       )
-      try {
-        renderer.renderObjectsOnto(bitmap, snapshot, checkActive)
-        PdfPageImageWriter.write(bitmap, widthPoints, heightPoints, output)
-      } finally {
-        bitmap.recycle()
-      }
     } else {
-      val bitmap = renderer.renderToBitmap(snapshot, widthPx, heightPx, checkActive = checkActive)
-      try {
-        PdfPageImageWriter.write(bitmap, widthPoints, heightPoints, output)
-      } finally {
-        bitmap.recycle()
-      }
+      renderer.renderToBitmap(snapshot, widthPx, heightPx, checkActive = checkActive)
+    }
+    try {
+      PdfPageImageWriter.write(bitmap, widthPoints, heightPoints, output)
+    } finally {
+      bitmap.recycle()
     }
     return widthPx / page.width
   }
 
-  /** MuPDF returns an immutable pixmap-backed bitmap; Canvas needs a mutable one. */
-  private fun ensureMutable(bitmap: Bitmap): Bitmap {
-    if (bitmap.isMutable) return bitmap
-    val copy = bitmap.copy(Bitmap.Config.ARGB_8888, true)
-      ?: error("Could not copy PDF page bitmap for ink overlay")
-    bitmap.recycle()
-    return copy
+  /**
+   * Renders a PDF source page over an opaque white [ARGB_8888] bitmap so
+   * transparent PDF pages never leave dark ink illegible, then draws page objects.
+   */
+  private fun renderPdfSourceOntoWhite(
+    notebookId: UUID,
+    sourcePageIndex: Int,
+    targetWidth: Int,
+    targetHeight: Int,
+    snapshot: PageSnapshot,
+    checkActive: () -> Unit,
+  ): Bitmap {
+    val record = notebookRepository.pdfDocument(notebookId) ?: error("PDF asset record is missing")
+    val file = notebookRepository.resolveDocumentAsset(record.assetPath) ?: error("PDF asset file is missing")
+    val sourceBitmap = muPdf.renderPage(file, sourcePageIndex, targetWidth)
+    val composited = try {
+      createBitmap(targetWidth, targetHeight)
+    } catch (t: Throwable) {
+      sourceBitmap.recycle()
+      throw t
+    }
+    try {
+      try {
+        Canvas(composited).apply {
+          drawColor(Color.WHITE)
+          drawBitmap(
+            sourceBitmap,
+            null,
+            RectF(0f, 0f, targetWidth.toFloat(), targetHeight.toFloat()),
+            Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG),
+          )
+        }
+      } finally {
+        sourceBitmap.recycle()
+      }
+      renderer.renderObjectsOnto(composited, snapshot, checkActive)
+      return composited
+    } catch (t: Throwable) {
+      composited.recycle()
+      throw t
+    }
   }
 
   private fun saveReport(report: ExportRunReport) {

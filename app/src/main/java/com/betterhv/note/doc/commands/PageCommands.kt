@@ -12,12 +12,15 @@ import java.util.UUID
  */
 class AddPageCommand(
   private val notebook: Notebook,
-  private val page: Page = Page(),
+  private var page: Page = Page(),
   private val index: Int = notebook.pageOrder.size,
 ) : Command {
   override val affectedPages = setOf(page.id)
   override val changesPageStructure = true
   override fun currentPage(pageId: UUID): Page? = if (pageId == page.id) page else null
+  override fun rebindPage(livePage: Page) {
+    if (livePage.id == page.id) page = livePage
+  }
 
   override fun execute() {
     notebook.addPage(page, index)
@@ -28,7 +31,11 @@ class AddPageCommand(
   }
 }
 
-class DeletePageCommand(private val notebook: Notebook, private val pageId: UUID) : Command {
+class DeletePageCommand(
+  private val notebook: Notebook,
+  private val pageId: UUID,
+  private val fallbackPageProvider: ((UUID) -> Page?)? = null,
+) : Command {
   override val affectedPages = setOf(pageId)
   override val changesPageStructure = true
 
@@ -38,7 +45,9 @@ class DeletePageCommand(private val notebook: Notebook, private val pageId: UUID
 
   override fun execute() {
     removedIndex = notebook.pageOrder.indexOf(pageId)
-    removedPage = notebook.removePage(pageId)
+    val fallback = if (notebook.getPage(pageId) == null) fallbackPageProvider?.invoke(pageId) else null
+    val removed = notebook.removePage(pageId)
+    removedPage = removed ?: fallback
   }
 
   override fun undo() {

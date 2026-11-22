@@ -25,6 +25,7 @@ import androidx.core.graphics.withMatrix
 import androidx.core.graphics.withRotation
 import androidx.core.graphics.withScale
 import androidx.core.graphics.withTranslation
+import com.betterhv.note.doc.Command
 import com.betterhv.note.doc.CommandStack
 import com.betterhv.note.doc.DEFAULT_TEMPLATE_ID
 import com.betterhv.note.doc.ImageObject
@@ -85,10 +86,20 @@ import java.util.ArrayDeque
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
+import java.util.concurrent.RejectedExecutionException
 import java.util.concurrent.TimeUnit
 import kotlin.math.atan2
 import kotlin.math.exp
 import kotlin.math.hypot
+import com.betterhv.note.hardware.EinkRefreshController
+import com.betterhv.note.hardware.HanvonHardware
+import com.betterhv.note.canvas.PdfViewportMath
+import com.betterhv.note.canvas.PdfViewportState
+import com.betterhv.note.hardware.PenButtonTracker
+import com.betterhv.note.settings.PenProfiles
+import com.betterhv.note.hardware.PenSideButton
+import com.betterhv.note.canvas.ViewportTransform
+import com.betterhv.note.canvas.tailErasesSelection
 
 enum class LinkedNoteContent { REGION_IMAGE, REGION_TEXT }
 
@@ -183,39 +194,49 @@ class PenDrawView @JvmOverloads constructor(context: Context, attrs: AttributeSe
     context.cacheDir,
     java.io.File(context.filesDir, "documents"),
   )
-  private val autosave = AutosaveController(repository) { t ->
-    persistenceAvailable = false
-    persistenceError = "Autosave failed: ${t.message ?: t.javaClass.simpleName}"
-    EventLog.log(TAG, "ERROR autosave: ${t.javaClass.simpleName}: ${t.message}")
-    post {
-      emitNotice(persistenceError ?: "Autosave failed")
-      onDocChanged?.invoke()
-    }
-  }
+  private val autosave = AutosaveController(
+    repository = repository,
+    onError = { t ->
+      persistenceAvailable = false
+      persistenceError = "Autosave failed: ${t.message ?: t.javaClass.simpleName}"
+      EventLog.log(TAG, "ERROR autosave: ${t.javaClass.simpleName}: ${t.message}")
+      post {
+        emitNotice(persistenceError ?: "Autosave failed")
+        onDocChanged?.invoke()
+      }
+    },
+    onRecovered = {
+      persistenceAvailable = true
+      persistenceError = null
+      post { onDocChanged?.invoke() }
+    },
+  )
   private var pendingTransferReceipt: TransferReceipt? = null
   private var pendingTransferPersisted: Boolean? = null
-  private val commandStack = CommandStack { command, action ->
-    val affectedPageIds = command.affectedObjects.keys + command.affectedPages
-    affectedPageIds.forEach { id ->
-      command.currentPage(id)?.let(notebook::refreshPageMetadata)
-    }
-    affectedPageIds.forEach { id ->
-      command.currentPage(id)?.let { changed ->
-        thumbnails.invalidate(
-          id,
-          changed.contentRevision,
-          templateStore.visualFingerprint(changed.templateId),
-        )
+  private val commandStack = CommandStack(
+    onCommitted = { command, action ->
+      val affectedPageIds = command.affectedObjects.keys + command.affectedPages
+      affectedPageIds.forEach { id ->
+        command.currentPage(id)?.let(notebook::refreshPageMetadata)
       }
-    }
-    val change = DocumentChange.forCommand(notebook, command, action)
-    val receipt = pendingTransferReceipt.also { pendingTransferReceipt = null }
-    if (receipt != null) {
-      pendingTransferPersisted = persistenceAvailable && autosave.persistWithReceipt(change, receipt)
-    } else {
-      scheduleSave(change)
-    }
-  }
+      affectedPageIds.forEach { id ->
+        command.currentPage(id)?.let { changed ->
+          thumbnails.invalidate(
+            id,
+            changed.contentRevision,
+            templateStore.visualFingerprint(changed.templateId),
+          )
+        }
+      }
+      val change = DocumentChange.forCommand(notebook, command, action)
+      val receipt = pendingTransferReceipt.also { pendingTransferReceipt = null }
+      if (receipt != null) {
+        pendingTransferPersisted = persistenceAvailable && autosave.persistWithReceipt(change, receipt)
+      } else {
+        scheduleSave(change)
+      }
+    },
+  )
 
   private class RenderContext {
     val renderer = InkRenderer()
@@ -893,7 +914,10 @@ class PenDrawView @JvmOverloads constructor(context: Context, attrs: AttributeSe
       } else {
         thumbnails.request(
           key,
-          snapshotProvider = { repository.loadPage(metadata.id)?.let(PageSnapshot::capture) },
+          snapshotProvider = {
+            autosave.awaitPending()
+            repository.loadPage(metadata.id)?.let(PageSnapshot::capture)
+          },
           backgroundProvider = pageThumbnailBackground(summary.id, metadata),
         ) { onDocChanged?.invoke() }
       }
@@ -1048,17 +1072,19 @@ class PenDrawView @JvmOverloads constructor(context: Context, attrs: AttributeSe
       templateStore.renderer.renderOwned(definition, targetWidth, targetHeight)
     }
 
-  fun refreshTemplates(force: Boolean = false): TemplateCatalogSnapshot {
+  suspend fun refreshTemplates(force: Boolean = false): TemplateCatalogSnapshot {
     val before = templateStore.snapshot().generation
-    val updated = templateStore.refresh()
-    if (force || updated.generation != before) {
-      pageBitmapCache.evictAll()
-      notebook.allPageMetadata().forEach { metadata ->
-        thumbnails.invalidate(metadata.id, metadata.contentRevision, backgroundRevision(metadata))
+    val updated = templateStore.refreshAsync()
+    withContext(Dispatchers.Main.immediate) {
+      if (!tornDown && (force || updated.generation != before)) {
+        pageBitmapCache.evictAll()
+        notebook.allPageMetadata().forEach { metadata ->
+          thumbnails.invalidate(metadata.id, metadata.contentRevision, backgroundRevision(metadata))
+        }
+        redrawAll()
+        requestThumbnail(page)
+        onDocChanged?.invoke()
       }
-      redrawAll()
-      requestThumbnail(page)
-      onDocChanged?.invoke()
     }
     return updated
   }
@@ -1319,9 +1345,15 @@ class PenDrawView @JvmOverloads constructor(context: Context, attrs: AttributeSe
     if (deletingCurrent) materialize()
     val oldIndex = notebook.pageOrder.indexOf(pageId)
     if (notebook.getPage(pageId) == null) {
+      autosave.awaitPending()
       repository.loadPage(pageId)?.let(notebook::attachPage) ?: return false
     }
-    commandStack.execute(DeletePageCommand(notebook, pageId))
+    commandStack.execute(
+      DeletePageCommand(notebook, pageId) { id ->
+        autosave.awaitPending()
+        repository.loadPage(id)
+      },
+    )
     thumbnails.delete(pageId)
     pageCache.retain(notebook.pageOrder.toSet())
     if (deletingCurrent) {
@@ -1376,7 +1408,10 @@ class PenDrawView @JvmOverloads constructor(context: Context, attrs: AttributeSe
       } else {
         thumbnails.request(
           key,
-          snapshotProvider = { repository.loadPage(id)?.let(PageSnapshot::capture) },
+          snapshotProvider = {
+            autosave.awaitPending()
+            repository.loadPage(id)?.let(PageSnapshot::capture)
+          },
           backgroundProvider = pageThumbnailBackground(notebook.id, metadata),
         ) { onDocChanged?.invoke() }
       }
@@ -1385,8 +1420,10 @@ class PenDrawView @JvmOverloads constructor(context: Context, attrs: AttributeSe
 
   private fun activatePage(index: Int) {
     val id = notebook.pageOrder[index]
-    val target = notebook.getPage(id) ?: pageCache.get(id) ?: repository.loadPage(id)
-      ?: Page(id = id).also { notebook.attachPage(it) }
+    val target = notebook.getPage(id) ?: pageCache.get(id) ?: run {
+      autosave.awaitPending()
+      repository.loadPage(id)
+    } ?: Page(id = id).also { notebook.attachPage(it) }
     notebook.attachPage(target)
     pageCache.put(target)?.let { evicted ->
       if (evicted.id != target.id) notebook.detachPage(evicted.id)
@@ -1466,54 +1503,86 @@ class PenDrawView @JvmOverloads constructor(context: Context, attrs: AttributeSe
     )
     if (pageBitmapCache.get(key) != null || !pagePreRenderInFlight.add(key)) return
     val residentSnapshot = (notebook.getPage(id) ?: pageCache.get(id))?.let(PageSnapshot::capture)
-    pagePreRenderExecutor.execute {
-      try {
-        if (pagePreRenderClosed || desiredWarmNotebookId != notebookId || id !in desiredWarmPageIds) {
-          return@execute
-        }
-        val loaded = if (residentSnapshot == null) repository.loadPage(id) else null
-        val snapshot = residentSnapshot ?: loaded?.let(PageSnapshot::capture) ?: return@execute
-        if (pagePreRenderClosed || desiredWarmNotebookId != notebookId ||
-          snapshot.metadata.contentRevision != key.contentRevision || id !in desiredWarmPageIds
-        ) {
-          return@execute
-        }
-        val viewport = viewportFor(
-          snapshot.metadata.id,
-          snapshot.metadata.width,
-          snapshot.metadata.height,
-          renderWidth,
-          renderHeight,
-        )
-        val rendered = renderPageBitmap(notebookId, snapshot, renderWidth, renderHeight, viewport)
-        post {
-          val currentMetadata = if (notebook.id == notebookId) notebook.metadata(id) else null
-          if (!pagePreRenderClosed && desiredWarmNotebookId == notebookId &&
-            currentMetadata?.contentRevision == key.contentRevision &&
-            currentMetadata.let(::backgroundRevision) == key.backgroundRevision &&
-            id in desiredWarmPageIds
-          ) {
-            if (loaded != null && notebook.getPage(id) == null) {
-              notebook.attachPage(loaded)
-              pageCache.put(loaded)?.let { evicted ->
-                if (evicted.id != page.id) notebook.detachPage(evicted.id)
-              }
-            }
-            pageBitmapCache.put(key, rendered)
-            if (page.id == id) {
-              val ready = pageBitmapCache.remove(key)
-              if (ready != null) {
-                foreBitmap = ready
-                bitmapCanvas = Canvas(ready)
-                markCurrentPageRendered()
-                postInvalidate()
-              }
-            }
+    if (pagePreRenderClosed || pagePreRenderExecutor.isShutdown) {
+      pagePreRenderInFlight.remove(key)
+      return
+    }
+    try {
+      pagePreRenderExecutor.execute {
+        try {
+          if (pagePreRenderClosed || desiredWarmNotebookId != notebookId || id !in desiredWarmPageIds) {
+            return@execute
           }
+          val loaded = if (residentSnapshot == null) {
+            autosave.awaitPending()
+            repository.loadPage(id)
+          } else {
+            null
+          }
+          val snapshot = residentSnapshot ?: loaded?.let(PageSnapshot::capture) ?: return@execute
+          if (pagePreRenderClosed || desiredWarmNotebookId != notebookId ||
+            snapshot.metadata.contentRevision != key.contentRevision || id !in desiredWarmPageIds ||
+            (pdfViewportStates[id]?.revision ?: 0) != key.viewportRevision
+          ) {
+            return@execute
+          }
+          val viewport = viewportFor(
+            snapshot.metadata.id,
+            snapshot.metadata.width,
+            snapshot.metadata.height,
+            renderWidth,
+            renderHeight,
+          )
+          val rendered = renderPageBitmap(notebookId, snapshot, renderWidth, renderHeight, viewport)
+          val posted = try {
+            post {
+              var adopted = false
+              try {
+                val currentMetadata = if (notebook.id == notebookId) notebook.metadata(id) else null
+                val currentViewportRevision = pdfViewportStates[id]?.revision ?: 0
+                if (!tornDown && !pagePreRenderClosed && desiredWarmNotebookId == notebookId &&
+                  currentMetadata?.contentRevision == key.contentRevision &&
+                  currentMetadata.let(::backgroundRevision) == key.backgroundRevision &&
+                  currentViewportRevision == key.viewportRevision &&
+                  width == key.width &&
+                  height == key.height &&
+                  id in desiredWarmPageIds
+                ) {
+                  if (loaded != null && notebook.getPage(id) == null) {
+                    notebook.attachPage(loaded)
+                    pageCache.put(loaded)?.let { evicted ->
+                      if (evicted.id != page.id) notebook.detachPage(evicted.id)
+                    }
+                  }
+                  if (page.id == id) {
+                    foreBitmap = rendered
+                    bitmapCanvas = Canvas(rendered)
+                    adopted = true
+                    markCurrentPageRendered()
+                    postInvalidate()
+                  } else {
+                    pageBitmapCache.put(key, rendered)
+                    adopted = pageBitmapCache.get(key) === rendered
+                  }
+                }
+              } finally {
+                if (!adopted && !rendered.isRecycled) {
+                  rendered.recycle()
+                }
+              }
+            }
+          } catch (_: Throwable) {
+            false
+          }
+          if (!posted && !rendered.isRecycled) {
+            rendered.recycle()
+          }
+        } finally {
+          pagePreRenderInFlight.remove(key)
         }
-      } finally {
-        pagePreRenderInFlight.remove(key)
       }
+    } catch (_: RejectedExecutionException) {
+      pagePreRenderInFlight.remove(key)
     }
   }
 
@@ -2130,17 +2199,24 @@ class PenDrawView @JvmOverloads constructor(context: Context, attrs: AttributeSe
    */
   private fun repaintRegion(dirty: android.graphics.Rect) {
     val canvas = bitmapCanvas ?: return
-    val testBounds = Bounds(
-      dirty.left.toFloat(),
-      dirty.top.toFloat(),
-      dirty.right.toFloat(),
-      dirty.bottom.toFloat(),
+    val viewport = currentViewport()
+    val topLeft = viewport.screenToPage(dirty.left.toFloat(), dirty.top.toFloat())
+    val bottomRight = viewport.screenToPage(dirty.right.toFloat(), dirty.bottom.toFloat())
+    val pageDirtyBounds = Bounds(
+      minOf(topLeft[0], bottomRight[0]),
+      minOf(topLeft[1], bottomRight[1]),
+      maxOf(topLeft[0], bottomRight[0]),
+      maxOf(topLeft[1], bottomRight[1]),
     )
+    val objectsToDraw = page.queryObjects(pageDirtyBounds)
+      .filter { it.pageBounds.intersects(pageDirtyBounds) }
+      .sortedWith(compareBy(PageObject::zIndex, PageObject::createdAt))
     canvas.withClip(dirty) {
       canvas.drawColor(android.graphics.Color.WHITE)
-      drawTemplateBackground(canvas, page.toMetadataForTemplate(), currentViewport())
-      for (obj in page.scene.all()) {
-        if (obj.pageBounds.intersects(testBounds)) drawObject(canvas, obj, viewRenderContext)
+      drawTemplateBackground(canvas, page.toMetadataForTemplate(), viewport)
+      canvas.withTranslation(viewport.offsetX, viewport.offsetY) {
+        canvas.scale(viewport.scale, viewport.scale)
+        for (obj in objectsToDraw) drawObject(canvas, obj, viewRenderContext)
       }
     }
     markCurrentPageRendered()
@@ -2286,18 +2362,54 @@ class PenDrawView @JvmOverloads constructor(context: Context, attrs: AttributeSe
 
   fun undo() {
     if (gestureOpen) finishGesture()
+    prepareCommandForExecution(commandStack.peekUndo())
     commandStack.undo()
+    this.page = notebook.getPage(page.id) ?: this.page
     ensureCurrentPageExists()
+    rebuildTools()
+    warmAdjacentPages(currentPageIndex())
     redrawAll()
+    requestThumbnail(page)
     onDocChanged?.invoke()
   }
 
   fun redo() {
     if (gestureOpen) finishGesture()
+    prepareCommandForExecution(commandStack.peekRedo())
     commandStack.redo()
+    this.page = notebook.getPage(page.id) ?: this.page
     ensureCurrentPageExists()
+    rebuildTools()
+    warmAdjacentPages(currentPageIndex())
     redrawAll()
+    requestThumbnail(page)
     onDocChanged?.invoke()
+  }
+
+  private fun prepareCommandForExecution(cmd: Command?) {
+    if (cmd == null) return
+    val pageIds = cmd.affectedObjects.keys + cmd.affectedPages
+    var awaitedPending = false
+    for (pid in pageIds) {
+      if (pid !in notebook.pageOrder) continue
+      val live = notebook.getPage(pid) ?: pageCache.get(pid)?.also { notebook.attachPage(it) } ?: run {
+        if (!awaitedPending) {
+          autosave.awaitPending()
+          awaitedPending = true
+        }
+        repository.loadPage(pid)?.also { loaded ->
+          notebook.attachPage(loaded)
+          pageCache.put(loaded)?.let { evicted ->
+            if (evicted.id != page.id && evicted.id !in pageIds) {
+              notebook.detachPage(evicted.id)
+            }
+          }
+        }
+      }
+      if (live != null) {
+        cmd.rebindPage(live)
+      }
+    }
   }
 
   private fun ensureCurrentPageExists() {
@@ -2895,25 +3007,45 @@ class PenDrawView @JvmOverloads constructor(context: Context, attrs: AttributeSe
     normalizedBounds: Bounds,
     snapshot: PageSnapshot,
   ): Bitmap {
-    val bitmap = pdfEngine.renderRegion(file, sourceIndex, normalizedBounds)
-    val metadata = snapshot.metadata
-    val pageRegion = Bounds(
-      normalizedBounds.left * metadata.width,
-      normalizedBounds.top * metadata.height,
-      normalizedBounds.right * metadata.width,
-      normalizedBounds.bottom * metadata.height,
-    )
-    if (pageRegion.width <= 0f || pageRegion.height <= 0f) return bitmap
-    val canvas = Canvas(bitmap)
-    canvas.withScale(bitmap.width / pageRegion.width, bitmap.height / pageRegion.height) {
-      canvas.translate(-pageRegion.left, -pageRegion.top)
-      val renderContext = RenderContext()
-      snapshot.objects.asSequence()
-        .filter { it.pageBounds.intersects(pageRegion) }
-        .sortedBy(PageObject::zIndex)
-        .forEach { drawObject(canvas, it, renderContext) }
+    val regionBitmap = pdfEngine.renderRegion(file, sourceIndex, normalizedBounds)
+    val output = try {
+      Bitmap.createBitmap(
+        regionBitmap.width.coerceAtLeast(1),
+        regionBitmap.height.coerceAtLeast(1),
+        Bitmap.Config.ARGB_8888,
+      )
+    } catch (t: Throwable) {
+      regionBitmap.recycle()
+      throw t
     }
-    return bitmap
+    try {
+      val canvas = Canvas(output)
+      canvas.drawColor(android.graphics.Color.WHITE)
+      canvas.drawBitmap(regionBitmap, 0f, 0f, null)
+      val metadata = snapshot.metadata
+      val pageRegion = Bounds(
+        normalizedBounds.left * metadata.width,
+        normalizedBounds.top * metadata.height,
+        normalizedBounds.right * metadata.width,
+        normalizedBounds.bottom * metadata.height,
+      )
+      if (pageRegion.width > 0f && pageRegion.height > 0f) {
+        canvas.withScale(output.width / pageRegion.width, output.height / pageRegion.height) {
+          canvas.translate(-pageRegion.left, -pageRegion.top)
+          val renderContext = RenderContext()
+          snapshot.objects.asSequence()
+            .filter { it.pageBounds.intersects(pageRegion) }
+            .sortedWith(compareBy(PageObject::zIndex, PageObject::createdAt))
+            .forEach { drawObject(canvas, it, renderContext) }
+        }
+      }
+      return output
+    } catch (t: Throwable) {
+      output.recycle()
+      throw t
+    } finally {
+      regionBitmap.recycle()
+    }
   }
 
   fun placePendingLinkedNote(screenX: Float, screenY: Float, onComplete: (Result<UUID>) -> Unit) {
@@ -3216,14 +3348,24 @@ class PenDrawView @JvmOverloads constructor(context: Context, attrs: AttributeSe
     return autosave.flush() && persistenceAvailable
   }
 
-  suspend fun flushPersistenceForExport(): Boolean {
-    val ready = withContext(Dispatchers.Main.immediate) {
+  suspend fun flushPersistenceForMaintenance(): Boolean {
+    withContext(Dispatchers.Main.immediate) {
       if (gestureOpen) finishGesture()
-      if (!persistenceAvailable) return@withContext false
-      scheduleSave(DocumentChange.fullPage(notebook, page, "export:flush"))
-      true
     }
-    return ready && withContext(Dispatchers.IO) { autosave.flush() } && persistenceAvailable
+    val flushOk = withContext(Dispatchers.IO) {
+      autosave.flush(truncateWal = true)
+    }
+    return flushOk && persistenceAvailable
+  }
+
+  suspend fun flushPersistenceForExport(): Boolean {
+    withContext(Dispatchers.Main.immediate) {
+      if (gestureOpen) finishGesture()
+    }
+    val flushOk = withContext(Dispatchers.IO) {
+      autosave.flush()
+    }
+    return flushOk && persistenceAvailable
   }
 
   companion object {

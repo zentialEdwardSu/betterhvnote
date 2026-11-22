@@ -148,3 +148,52 @@ object BackupArchive {
     require(total == size) { "Archive entry is truncated" }
   }
 }
+
+internal class BackupProgressThrottle(
+  private val minIntervalMillis: Long = DEFAULT_MIN_INTERVAL_MILLIS,
+  private val minDelta: Float = DEFAULT_MIN_DELTA,
+  private val clockMillis: () -> Long = System::currentTimeMillis,
+) {
+  private var lastEmittedAt = Long.MIN_VALUE
+  private var lastEmittedFraction = Float.NaN
+
+  fun shouldEmit(done: Int, total: Int): Boolean {
+    val fraction = fraction(done, total)
+    val now = clockMillis()
+    if (lastEmittedFraction.isNaN()) {
+      record(fraction, now)
+      return true
+    }
+    if (fraction == 0f && lastEmittedFraction != 0f) {
+      record(fraction, now)
+      return true
+    }
+    if (fraction >= 1f && lastEmittedFraction < 1f) {
+      record(fraction, now)
+      return true
+    }
+    val elapsed = now - lastEmittedAt
+    val delta = kotlin.math.abs(fraction - lastEmittedFraction)
+    if (elapsed >= minIntervalMillis || delta >= minDelta) {
+      if (fraction == lastEmittedFraction && (fraction == 0f || fraction >= 1f)) {
+        return false
+      }
+      record(fraction, now)
+      return true
+    }
+    return false
+  }
+
+  private fun record(fraction: Float, now: Long) {
+    lastEmittedAt = now
+    lastEmittedFraction = fraction
+  }
+
+  companion object {
+    const val DEFAULT_MIN_INTERVAL_MILLIS = 100L
+    const val DEFAULT_MIN_DELTA = 0.02f
+
+    fun fraction(done: Int, total: Int): Float =
+      if (total <= 0) 0f else (done.toFloat() / total).coerceIn(0f, 1f)
+  }
+}

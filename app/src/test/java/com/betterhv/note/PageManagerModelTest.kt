@@ -5,6 +5,8 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.util.UUID
+import com.betterhv.note.notebook.DeleteDecision
+import com.betterhv.note.notebook.PageManagerModel
 
 class PageManagerModelTest {
   @Test

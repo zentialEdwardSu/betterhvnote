@@ -25,6 +25,40 @@ import java.io.File
 import java.io.FileOutputStream
 import kotlin.math.roundToInt
 
+/** Computes power-of-two BitmapFactory sampling bounded by target and max decoded dimension. */
+internal object ExportImageSampling {
+  fun inSampleSize(
+    srcWidth: Int,
+    srcHeight: Int,
+    reqWidth: Int,
+    reqHeight: Int,
+    maxDimension: Int = 4096,
+  ): Int {
+    if (srcWidth <= 0 || srcHeight <= 0) return 1
+    var sample = 1
+    if (reqWidth > 0 && reqHeight > 0) {
+      val halfWidth = srcWidth / 2
+      val halfHeight = srcHeight / 2
+      while (
+        sample <= Int.MAX_VALUE / 2 &&
+        halfWidth / sample >= reqWidth &&
+        halfHeight / sample >= reqHeight
+      ) {
+        sample *= 2
+      }
+    }
+    if (maxDimension > 0) {
+      while (
+        sample <= Int.MAX_VALUE / 2 &&
+        (srcWidth / sample > maxDimension || srcHeight / sample > maxDimension)
+      ) {
+        sample *= 2
+      }
+    }
+    return sample
+  }
+}
+
 /** One Canvas rendering path is shared by screen-independent PNG and PDF output. */
 class PageRenderer(private val documentsDir: File, private val templates: TemplateStore? = null) {
   private val inkRenderer = InkRenderer()
@@ -38,14 +72,17 @@ class PageRenderer(private val documentsDir: File, private val templates: Templa
     checkActive: () -> Unit = {},
   ): Bitmap {
     require(widthPx > 0 && heightPx > 0) { "Invalid export dimensions" }
+    requireValidPageDimensions(snapshot)
     checkActive()
     val bitmap = createBitmap(widthPx, heightPx)
+    val scaleX = widthPx / snapshot.metadata.width
+    val scaleY = heightPx / snapshot.metadata.height
     Canvas(bitmap).apply {
       drawColor(backgroundColor)
       renderTemplate(this, snapshot, RectF(0f, 0f, widthPx.toFloat(), heightPx.toFloat()))
       withSave {
-        scale(widthPx / snapshot.metadata.width, heightPx / snapshot.metadata.height)
-        renderSnapshot(this, snapshot, checkActive = checkActive)
+        scale(scaleX, scaleY)
+        renderSnapshot(this, snapshot, canvasScale = maxOf(scaleX, scaleY), checkActive = checkActive)
       }
     }
     return bitmap
@@ -59,10 +96,12 @@ class PageRenderer(private val documentsDir: File, private val templates: Templa
   fun renderObjectsOnto(bitmap: Bitmap, snapshot: PageSnapshot, checkActive: () -> Unit = {}) {
     require(!bitmap.isRecycled) { "Cannot render onto a recycled bitmap" }
     require(bitmap.isMutable) { "renderObjectsOnto requires a mutable bitmap" }
-    require(snapshot.metadata.width > 0f && snapshot.metadata.height > 0f) { "Invalid page dimensions" }
+    requireValidPageDimensions(snapshot)
+    val scaleX = bitmap.width / snapshot.metadata.width
+    val scaleY = bitmap.height / snapshot.metadata.height
     Canvas(bitmap).withSave {
-      scale(bitmap.width / snapshot.metadata.width, bitmap.height / snapshot.metadata.height)
-      renderSnapshot(this, snapshot, checkActive = checkActive)
+      scale(scaleX, scaleY)
+      renderSnapshot(this, snapshot, canvasScale = maxOf(scaleX, scaleY), checkActive = checkActive)
     }
   }
 
@@ -71,25 +110,50 @@ class PageRenderer(private val documentsDir: File, private val templates: Templa
    * editable PDF Ink annotations by [PdfInkAnnotationWriter].
    */
   fun renderSinglePagePdfBase(snapshot: PageSnapshot, output: File, checkActive: () -> Unit = {}) {
+    renderSinglePagePdf(snapshot, output, drawBackground = true, checkActive = checkActive)
+  }
+
+  /**
+   * Render only non-ink objects (text and images) onto a transparent PDF page
+   * for grafting over an existing [PageKind.PDF_SOURCE] page.
+   */
+  fun renderSinglePagePdfOverlay(snapshot: PageSnapshot, output: File, checkActive: () -> Unit = {}) {
+    renderSinglePagePdf(snapshot, output, drawBackground = false, checkActive = checkActive)
+  }
+
+  private fun renderSinglePagePdf(
+    snapshot: PageSnapshot,
+    output: File,
+    drawBackground: Boolean,
+    checkActive: () -> Unit,
+  ) {
+    requireValidPageDimensions(snapshot)
     output.parentFile?.mkdirs()
     val widthPoints = (snapshot.metadata.width * PDF_POINTS_PER_LOGICAL_PIXEL).roundToInt().coerceAtLeast(1)
     val heightPoints = (snapshot.metadata.height * PDF_POINTS_PER_LOGICAL_PIXEL).roundToInt().coerceAtLeast(1)
+    val scaleX = widthPoints / snapshot.metadata.width
+    val scaleY = heightPoints / snapshot.metadata.height
     val document = PdfDocument()
     try {
       checkActive()
       val page = document.startPage(PdfDocument.PageInfo.Builder(widthPoints, heightPoints, 1).create())
-      page.canvas.drawColor(Color.WHITE)
-      renderTemplate(
+      if (drawBackground) {
+        page.canvas.drawColor(Color.WHITE)
+        renderTemplate(
+          page.canvas,
+          snapshot,
+          RectF(0f, 0f, widthPoints.toFloat(), heightPoints.toFloat()),
+        )
+      }
+      page.canvas.save()
+      page.canvas.scale(scaleX, scaleY)
+      renderSnapshot(
         page.canvas,
         snapshot,
-        RectF(0f, 0f, widthPoints.toFloat(), heightPoints.toFloat()),
+        canvasScale = maxOf(scaleX, scaleY),
+        includeStrokes = false,
+        checkActive = checkActive,
       )
-      page.canvas.save()
-      page.canvas.scale(
-        widthPoints / snapshot.metadata.width,
-        heightPoints / snapshot.metadata.height,
-      )
-      renderSnapshot(page.canvas, snapshot, includeStrokes = false, checkActive = checkActive)
       page.canvas.restore()
       document.finishPage(page)
       FileOutputStream(output).use(document::writeTo)
@@ -98,9 +162,19 @@ class PageRenderer(private val documentsDir: File, private val templates: Templa
     }
   }
 
+  private fun requireValidPageDimensions(snapshot: PageSnapshot) {
+    require(
+      snapshot.metadata.width.isFinite() &&
+        snapshot.metadata.height.isFinite() &&
+        snapshot.metadata.width > 0f &&
+        snapshot.metadata.height > 0f,
+    ) { "Invalid page dimensions" }
+  }
+
   private fun renderSnapshot(
     canvas: Canvas,
     snapshot: PageSnapshot,
+    canvasScale: Float = 1f,
     includeStrokes: Boolean = true,
     checkActive: () -> Unit = {},
   ) {
@@ -111,7 +185,7 @@ class PageRenderer(private val documentsDir: File, private val templates: Templa
         when (obj) {
           is StrokeObject -> inkRenderer.drawStroke(canvas, obj.stroke)
           is TextObject -> drawText(canvas, obj)
-          is ImageObject -> drawImage(canvas, obj)
+          is ImageObject -> drawImage(canvas, obj, canvasScale)
         }
       }
     }
@@ -140,12 +214,29 @@ class PageRenderer(private val documentsDir: File, private val templates: Templa
     }
   }
 
-  private fun drawImage(canvas: Canvas, obj: ImageObject) {
+  private fun drawImage(canvas: Canvas, obj: ImageObject, canvasScale: Float) {
     val file = runCatching { File(documentsDir, obj.assetPath).canonicalFile }.getOrNull()
       ?.takeIf { it.toPath().startsWith(imageRoot) && it.isFile } ?: return
-    val bitmap = BitmapFactory.decodeFile(file.absolutePath) ?: return
+    val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+    BitmapFactory.decodeFile(file.absolutePath, bounds)
+    if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return
+    val effectiveScale = (canvasScale * obj.transform.approximateScale()).let {
+      if (it.isFinite() && it > 0f) it else 1f
+    }
+    val reqWidth = (obj.pixelWidth * effectiveScale).roundToInt().coerceAtLeast(1)
+    val reqHeight = (obj.pixelHeight * effectiveScale).roundToInt().coerceAtLeast(1)
+    val sampleSize = ExportImageSampling.inSampleSize(
+      bounds.outWidth,
+      bounds.outHeight,
+      reqWidth,
+      reqHeight,
+    )
+    val bitmap = BitmapFactory.decodeFile(
+      file.absolutePath,
+      BitmapFactory.Options().apply { inSampleSize = sampleSize },
+    ) ?: return
     try {
-      canvas.withMatrix(exifMatrix(obj.exifOrientation, bitmap.width.toFloat(), bitmap.height.toFloat())) {
+      canvas.withMatrix(exifMatrix(obj.exifOrientation, obj.pixelWidth.toFloat(), obj.pixelHeight.toFloat())) {
         canvas.drawBitmap(
           bitmap,
           null,

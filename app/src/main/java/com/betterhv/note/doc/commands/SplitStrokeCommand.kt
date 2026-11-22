@@ -11,12 +11,18 @@ import java.util.UUID
  * it was split into. Undo removes the pieces and restores the exact original
  * object (snapshotted, same as [DeleteObjectsCommand]).
  */
-class SplitStrokeCommand(private val page: Page, private val originalId: UUID, private val pieces: List<StrokeObject>) :
-  Command {
+class SplitStrokeCommand(
+  private var page: Page,
+  private val originalId: UUID,
+  private val pieces: List<StrokeObject>,
+) : Command {
   override val affectedObjects = mapOf(page.id to (setOf(originalId) + pieces.map { it.id }))
   override fun currentObject(pageId: UUID, objectId: UUID): PageObject? =
     if (pageId == page.id) page.getObject(objectId) else null
   override fun currentPage(pageId: UUID): Page? = if (pageId == page.id) page else null
+  override fun rebindPage(livePage: Page) {
+    if (livePage.id == page.id) page = livePage
+  }
 
   private var originalSnapshot: PageObject? = null
 

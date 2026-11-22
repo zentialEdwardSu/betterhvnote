@@ -29,6 +29,7 @@ import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import java.io.File
+import com.betterhv.note.hardware.PenButtonTracker
 
 @RunWith(AndroidJUnit4::class)
 @SuppressLint("DiscouragedApi")

@@ -6,8 +6,11 @@ import com.betterhv.note.doc.PageObject
 import java.util.UUID
 
 /** Replaces one object's content/style as one undoable operation. */
-class UpdateObjectCommand(private val page: Page, private val before: PageObject, private val after: PageObject) :
-  Command {
+class UpdateObjectCommand(
+  private var page: Page,
+  private val before: PageObject,
+  private val after: PageObject,
+) : Command {
   init {
     require(before.id == after.id) { "Object identity must not change" }
   }
@@ -16,6 +19,9 @@ class UpdateObjectCommand(private val page: Page, private val before: PageObject
   override fun currentObject(pageId: UUID, objectId: UUID): PageObject? =
     if (pageId == page.id && objectId == before.id) page.getObject(objectId) else null
   override fun currentPage(pageId: UUID): Page? = if (pageId == page.id) page else null
+  override fun rebindPage(livePage: Page) {
+    if (livePage.id == page.id) page = livePage
+  }
 
   override fun execute() {
     page.updateObject(before.id, after)

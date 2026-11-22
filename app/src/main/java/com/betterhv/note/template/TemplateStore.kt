@@ -5,15 +5,70 @@ import android.content.Context
 import android.content.Intent
 import android.graphics.BitmapFactory
 import android.net.Uri
+import android.os.Looper
 import androidx.documentfile.provider.DocumentFile
-import com.betterhv.note.AppSettingsStore
 import com.betterhv.note.doc.DEFAULT_TEMPLATE_ID
+import com.betterhv.note.settings.AppSettingsStore
 import com.google.gson.JsonParser
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.FileOutputStream
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption
 import java.security.MessageDigest
+
+private const val BUILTIN_TEMPLATE_PREFIX = "builtin."
+
+internal fun blankTemplateDefinition(): TemplateDefinition = TemplateDefinition(
+  entry = TemplateManifestEntry(
+    id = DEFAULT_TEMPLATE_ID,
+    name = "Blank",
+    description = "纯白纸",
+    file = "",
+    width = 1,
+    height = 1,
+  ),
+  assetFile = null,
+  fingerprint = "builtin.blank:white-v1",
+  availability = TemplateAvailability.AVAILABLE,
+)
+
+internal fun initialTemplateCatalog(directoryUri: String? = null): TemplateCatalogSnapshot =
+  TemplateCatalogSnapshot(listOf(blankTemplateDefinition()), directoryUri, emptyList(), 0L)
+
+internal fun mergeTemplateDefinitions(
+  builtins: List<TemplateDefinition>,
+  external: List<TemplateDefinition>,
+): List<TemplateDefinition> {
+  val merged = LinkedHashMap<String, TemplateDefinition>()
+  builtins.forEach { merged[it.id] = it }
+  // APK-owned ids are reserved. This also prevents old files previously
+  // seeded into the public directory from shadowing updated bundled SVGs.
+  external.filterNot { it.id.startsWith(BUILTIN_TEMPLATE_PREFIX) }.forEach { merged[it.id] = it }
+  return merged.values.toList()
+}
+
+internal fun templateCatalogSignature(
+  templates: List<TemplateDefinition>,
+  errors: List<String>,
+  directoryUri: String?,
+): String = templates.joinToString("|") {
+  "${it.id}:${it.name}:${it.description}:${it.fingerprint}:${it.availability}:${it.error}"
+} + "|" + errors.joinToString("|") + "|" + directoryUri.orEmpty()
+
+internal fun resolveTemplateFingerprint(catalog: TemplateCatalogSnapshot, templateId: String?): String {
+  val requested = templateId ?: return "none"
+  val resolved = catalog.templates.firstOrNull { it.id == requested }
+  return if (resolved != null) {
+    resolved.fingerprint
+  } else {
+    "missing:$requested:${catalog.find(DEFAULT_TEMPLATE_ID)?.fingerprint.orEmpty()}"
+  }
+}
 
 class TemplateStore private constructor(context: Context) : TemplateResolver {
   private val context = context.applicationContext
@@ -22,18 +77,20 @@ class TemplateStore private constructor(context: Context) : TemplateResolver {
   private val builtinRoot = File(root, "builtin").also(File::mkdirs)
   private val cacheRoot = File(root, "cache").also(File::mkdirs)
   private val lastManifest = File(root, "last-manifest.json")
+  private val refreshLock = Any()
   val renderer = TemplateRenderer()
   private var generation = 0L
-  private var catalog = TemplateCatalogSnapshot(emptyList(), settings.templateDirectoryUri, emptyList(), generation)
 
-  init {
-    refresh()
-  }
+  @Volatile private var hasRefreshed = false
 
-  @Synchronized fun snapshot(): TemplateCatalogSnapshot = catalog
+  @Volatile private var catalog = initialTemplateCatalog(settings.templateDirectoryUri)
+  private val _catalogFlow = MutableStateFlow(catalog)
+  val catalogFlow: StateFlow<TemplateCatalogSnapshot> = _catalogFlow.asStateFlow()
+
+  fun snapshot(): TemplateCatalogSnapshot = catalog
 
   fun hasOfflineTemplates(): Boolean = lastManifest.isFile && snapshot().templates.any {
-    !it.id.startsWith(BUILTIN_ID_PREFIX) && it.assetFile?.isFile == true
+    !it.id.startsWith(BUILTIN_TEMPLATE_PREFIX) && it.assetFile?.isFile == true
   }
 
   /** True only while the configured SAF tree still has persisted read/write access. */
@@ -46,31 +103,38 @@ class TemplateStore private constructor(context: Context) : TemplateResolver {
     return tree?.isDirectory == true && tree.canRead() && tree.canWrite()
   }
 
-  @Synchronized
-  override fun resolve(templateId: String?): TemplateDefinition? = catalog.find(templateId ?: DEFAULT_TEMPLATE_ID)
+  override fun resolve(templateId: String?): TemplateDefinition? {
+    ensureLoadedIfBackground()
+    return catalog.find(templateId ?: DEFAULT_TEMPLATE_ID)
+  }
 
-  @Synchronized
   override fun visualFingerprint(templateId: String?): String {
-    val requested = templateId ?: return "none"
-    val resolved = catalog.templates.firstOrNull { it.id == requested }
-    return if (resolved != null) {
-      resolved.fingerprint
-    } else {
-      "missing:$requested:${catalog.find(DEFAULT_TEMPLATE_ID)?.fingerprint.orEmpty()}"
+    ensureLoadedIfBackground()
+    return resolveTemplateFingerprint(catalog, templateId)
+  }
+
+  private fun ensureLoadedIfBackground() {
+    if (!hasRefreshed && !isMainLooper()) {
+      synchronized(refreshLock) {
+        if (!hasRefreshed) refresh()
+      }
     }
   }
 
-  @Synchronized
-  fun connect(uri: Uri): TemplateCatalogSnapshot {
+  private fun isMainLooper(): Boolean =
+    runCatching { Looper.myLooper() == Looper.getMainLooper() }.getOrDefault(false)
+
+  fun connect(uri: Uri): TemplateCatalogSnapshot = synchronized(refreshLock) {
     val flags = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
     context.contentResolver.takePersistableUriPermission(uri, flags)
     settings.templateDirectoryUri = uri.toString()
     seedBuiltins(uri)
-    return refresh()
+    refresh()
   }
 
-  @Synchronized
-  fun refresh(): TemplateCatalogSnapshot {
+  suspend fun refreshAsync(): TemplateCatalogSnapshot = withContext(Dispatchers.IO) { refresh() }
+
+  fun refresh(): TemplateCatalogSnapshot = synchronized(refreshLock) {
     val errors = ArrayList<String>()
     val builtins = loadBuiltins(errors)
     val uri = settings.templateDirectoryUri?.let(Uri::parse)
@@ -100,37 +164,21 @@ class TemplateStore private constructor(context: Context) : TemplateResolver {
     } else {
       loadLastManifest(errors)
     }
-    val merged = LinkedHashMap<String, TemplateDefinition>()
-    builtins.forEach { merged[it.id] = it }
-    // APK-owned ids are reserved. This also prevents old files previously
-    // seeded into the public directory from shadowing updated bundled SVGs.
-    external.filterNot { it.id.startsWith(BUILTIN_ID_PREFIX) }.forEach { merged[it.id] = it }
-    val nextTemplates = merged.values.toList()
-    val signature = nextTemplates.joinToString("|") {
-      "${it.id}:${it.name}:${it.description}:${it.fingerprint}:${it.availability}:${it.error}"
-    } + errors.joinToString("|") + uri
-    val oldSignature = catalog.templates.joinToString("|") {
-      "${it.id}:${it.name}:${it.description}:${it.fingerprint}:${it.availability}:${it.error}"
-    } + catalog.errors.joinToString("|") + catalog.directoryUri
+    val nextTemplates = mergeTemplateDefinitions(builtins, external)
+    val uriString = uri?.toString()
+    val signature = templateCatalogSignature(nextTemplates, errors, uriString)
+    val previous = catalog
+    val oldSignature = templateCatalogSignature(previous.templates, previous.errors, previous.directoryUri)
     if (signature != oldSignature) generation++
-    catalog = TemplateCatalogSnapshot(nextTemplates, uri?.toString(), errors, generation)
-    return catalog
+    val updated = TemplateCatalogSnapshot(nextTemplates, uriString, errors, generation)
+    catalog = updated
+    hasRefreshed = true
+    _catalogFlow.value = updated
+    updated
   }
 
   private fun loadBuiltins(errors: MutableList<String>): List<TemplateDefinition> {
-    val blank = TemplateDefinition(
-      entry = TemplateManifestEntry(
-        id = DEFAULT_TEMPLATE_ID,
-        name = "Blank",
-        description = "纯白纸",
-        file = "",
-        width = 1,
-        height = 1,
-      ),
-      assetFile = null,
-      fingerprint = "builtin.blank:white-v1",
-      availability = TemplateAvailability.AVAILABLE,
-    )
+    val blank = blankTemplateDefinition()
     val text = runCatching { context.assets.open(ASSET_MANIFEST).bufferedReader().use { it.readText() } }
       .getOrElse {
         errors += "Could not read built-in template manifest: ${it.message}"
@@ -338,7 +386,6 @@ class TemplateStore private constructor(context: Context) : TemplateResolver {
   companion object {
     private const val MANIFEST_NAME = "manifest.json"
     private const val ASSET_MANIFEST = "templates/manifest.json"
-    private const val BUILTIN_ID_PREFIX = "builtin."
     private const val MAX_TEMPLATE_BYTES = 32L * 1024L * 1024L
     private const val MAX_SVG_TEXT = 4 * 1024 * 1024
     private val VIEW_BOX = Regex("""viewBox\s*=\s*[\"']([^\"']+)[\"']""", RegexOption.IGNORE_CASE)

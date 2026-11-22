@@ -42,8 +42,8 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.betterhv.note.DockEdge
-import com.betterhv.note.PenButtonTracker
-import com.betterhv.note.PenSideButton
+import com.betterhv.note.hardware.PenButtonTracker
+import com.betterhv.note.hardware.PenSideButton
 import com.betterhv.note.StylusClickResolver
 
 @Composable
@@ -411,14 +411,4 @@ fun EinkDialogSurface(
   EinkSurface(modifier = modifier, color = EinkColors.Paper) {
     content()
   }
-}
-
-@Composable
-fun EinkDialogAction(
-  label: String,
-  modifier: Modifier = Modifier,
-  onClick: () -> Unit,
-  enabled: Boolean = true,
-) {
-  EinkActionRow(label = label, modifier = modifier, enabled = enabled, onClick = onClick)
 }

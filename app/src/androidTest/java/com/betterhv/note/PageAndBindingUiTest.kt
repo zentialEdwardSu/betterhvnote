@@ -23,6 +23,10 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import java.io.File
 import java.util.UUID
+import com.betterhv.note.settings.HardwareBindingsPanel
+import com.betterhv.note.notebook.PageManagerPanel
+import com.betterhv.note.notebook.PageManagerPanelActions
+import com.betterhv.note.notebook.PageManagerPanelState
 
 @RunWith(AndroidJUnit4::class)
 class PageAndBindingUiTest {

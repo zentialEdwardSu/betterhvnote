@@ -30,6 +30,10 @@ import java.io.File
 import java.util.UUID
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.TimeUnit
+import com.betterhv.note.settings.AppSettingsStore
+import com.betterhv.note.notelink.ClipboardContent
+import com.betterhv.note.notelink.ClipboardSource
+import com.betterhv.note.canvas.EraserOverlayView
 
 @RunWith(AndroidJUnit4::class)
 class EditorFeatureUiTest {

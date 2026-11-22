@@ -101,10 +101,12 @@ import com.betterhv.note.toolbar.ToolbarFlyoutRequest
 import com.betterhv.note.toolbar.ToolbarScreenId
 import com.betterhv.note.toolbar.ToolbarUiState
 import com.betterhv.note.toolbar.ToolbarWindowId
+import com.betterhv.note.storage.NotebookSummary
 import com.betterhv.note.storage.StartupBehavior
 import com.betterhv.note.template.TemplateStore
 import com.betterhv.transfer.android.TransferPermissions
 import com.betterhv.transfer.core.ContentKind
+import com.betterhv.transfer.core.PairedDevice
 import com.betterhv.transfer.core.RemotePayload
 import com.betterhv.transfer.core.TransferPhase
 import com.betterhv.transfer.core.TransferSnapshot
@@ -117,6 +119,52 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.UUID
+import com.betterhv.note.settings.AppSettingsStore
+import com.betterhv.note.ui.EinkDialogAction
+import com.betterhv.note.ui.EinkModalOverlay
+import com.betterhv.note.ui.EinkModalPosition
+import com.betterhv.note.canvas.EraserOverlayView
+import com.betterhv.note.notelink.InsertionCoordinator
+import com.betterhv.note.notelink.InsertionState
+import com.betterhv.note.canvas.LassoOverlayView
+import com.betterhv.note.hardware.N10ProHardwareKeys
+import com.betterhv.note.canvas.ObjectEditOverlayView
+import com.betterhv.note.canvas.PageControlOverlayView
+import com.betterhv.note.hardware.PenButtonTracker
+import com.betterhv.note.settings.PenPalette
+import com.betterhv.note.settings.PenProfiles
+import com.betterhv.note.settings.PenSettingsStore
+import com.betterhv.note.settings.PenToolbarSettings
+import com.betterhv.note.notelink.PhoneTransferClient
+import com.betterhv.note.ui.rememberInAppNotificationState
+import com.betterhv.note.template.DocumentSettingsOverlay
+import com.betterhv.note.export.ExportManagerCallbacks
+import com.betterhv.note.export.ExportManagerInput
+import com.betterhv.note.export.ExportManagerScreen
+import com.betterhv.note.ui.InAppNotificationDuration
+import com.betterhv.note.ui.InAppNotificationHost
+import com.betterhv.note.ui.InAppNotificationState
+import com.betterhv.note.notebook.NotebookManagerActions
+import com.betterhv.note.notebook.NotebookManagerScreen
+import com.betterhv.note.notebook.NotebookManagerState
+import com.betterhv.note.notebook.NotebookNameDialog
+import com.betterhv.note.notebook.NotebookNameDialogActions
+import com.betterhv.note.notebook.NotebookNameDialogState
+import com.betterhv.note.notebook.PAGE_MANAGER_CONTENT_PADDING
+import com.betterhv.note.notebook.PAGE_MANAGER_HEADER_HEIGHT
+import com.betterhv.note.notebook.PAGE_MANAGER_SIDE_EXTRA_WIDTH
+import com.betterhv.note.notebook.PAGE_MANAGER_TAB_RAIL_WIDTH
+import com.betterhv.note.notebook.PageManagerPanel
+import com.betterhv.note.notebook.PageManagerPanelActions
+import com.betterhv.note.notebook.PageManagerPanelState
+import com.betterhv.note.ui.PageSelectionGrid
+import com.betterhv.note.settings.SettingsActions
+import com.betterhv.note.settings.SettingsScreen
+import com.betterhv.note.settings.SettingsState
+import com.betterhv.note.template.TemplateChooserActions
+import com.betterhv.note.template.TemplateChooserOverlay
+import com.betterhv.note.template.TemplateChooserState
+import com.betterhv.note.notebook.hasLinkedPageLane
 
 class MainActivity : ComponentActivity() {
   private var penView: PenDrawView? = null
@@ -313,8 +361,6 @@ private fun AppRoot(
         ?: NoteAppUpdateUiState.Idle,
     )
   }
-  val transferSnapshot by phoneTransfer.snapshot.collectAsState()
-  val transferEvents by phoneTransfer.eventHistory.collectAsState()
   val insertion = remember(phoneTransfer) { InsertionCoordinator(phoneTransfer) }
   val insertionState by insertion.state.collectAsState()
   DisposableEffect(insertion) { onDispose { insertion.close() } }
@@ -512,9 +558,11 @@ private fun AppRoot(
                 transferStatusRevision++
               }
             } else {
-              penView?.recoverAfterWake()
-              templateCatalog = penView?.refreshTemplates() ?: templateCatalog
-              transferStatusRevision++
+              appScope.launch {
+                penView?.recoverAfterWake()
+                templateCatalog = penView?.refreshTemplates() ?: templateCatalog
+                transferStatusRevision++
+              }
             }
           }
 
@@ -530,12 +578,13 @@ private fun AppRoot(
     val transferStatus = remember(transferStatusRevision, pairedClients, language) {
       noteTransferStatus(context, pairedClients.isNotEmpty(), missingTransferPermissions.isEmpty())
     }
-    val peerLinkStates by phoneTransfer.connections.states.collectAsState()
     LaunchedEffect(transferStatusRevision, pairedClients, missingTransferPermissions.size) {
       if (missingTransferPermissions.isEmpty() && pairedClients.isNotEmpty()) phoneTransfer.startLinks()
     }
-    LaunchedEffect(peerLinkStates, pairedClients) {
-      onlineNoteLinks = phoneTransfer.onlineNoteLinks()
+    LaunchedEffect(phoneTransfer, pairedClients) {
+      phoneTransfer.connections.states.collect {
+        onlineNoteLinks = phoneTransfer.onlineNoteLinks()
+      }
     }
 
     val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
@@ -604,6 +653,10 @@ private fun AppRoot(
     )
     LaunchedEffect(penView, activePenStyle) {
       penView?.setPenStyle(activePenStyle)
+    }
+    LaunchedEffect(penView) {
+      val pv = penView ?: return@LaunchedEffect
+      templateCatalog = pv.refreshTemplates()
     }
     // Eraser input layer: a non-hvpen view stacked above the pen canvas so it
     // receives the full touch stream the ROM withholds from the hvpen-
@@ -728,11 +781,16 @@ private fun AppRoot(
       }
     }
     LaunchedEffect(Unit) {
-      val store = TemplateStore.get(context)
-      if (!skipTemplateDirectoryPrompt && !store.hasUsableDirectoryPermission() && !store.hasOfflineTemplates()) {
-        val previous = appSettingsStore.templateDirectoryUri
-          ?.let { runCatching { it.toUri() }.getOrNull() }
-        templateDirectoryPicker.launch(previous)
+      if (!skipTemplateDirectoryPrompt) {
+        val needsPrompt = withContext(Dispatchers.IO) {
+          val store = TemplateStore.get(context)
+          !store.hasUsableDirectoryPermission() && !store.hasOfflineTemplates()
+        }
+        if (needsPrompt) {
+          val previous = appSettingsStore.templateDirectoryUri
+            ?.let { runCatching { it.toUri() }.getOrNull() }
+          templateDirectoryPicker.launch(previous)
+        }
       }
     }
 
@@ -1035,8 +1093,11 @@ private fun AppRoot(
               }
             }
             "settings.document" -> {
-              templateCatalog = penView?.refreshTemplates() ?: templateCatalog
-              documentSettingsOpen = true; pageManagerOpen = false
+              documentSettingsOpen = true
+              pageManagerOpen = false
+              appScope.launch {
+                templateCatalog = penView?.refreshTemplates() ?: templateCatalog
+              }
             }
             "settings.app" -> { settingsOpen = true; pageManagerOpen = false }
             "editor.debug" -> debugMode = !debugMode
@@ -1294,39 +1355,21 @@ private fun AppRoot(
       }
     }
 
-    val pages = gen.let { penView?.pageUiItems().orEmpty() }
-    val currentPageIndex = gen.let { penView?.currentPageIndex() ?: 0 }
-    val currentPageId = pages.getOrNull(currentPageIndex)?.id
-    val bookmarked = gen.let { penView?.currentPageBookmarked() ?: false }
-    Surface(
-      modifier = Modifier
-        .align(Alignment.BottomEnd)
-        .padding(12.dp)
-        .penInputGuard { pageControlInteractionBlocked = it }
-        .stylusModifiedClickable(
-          onSide1Click = {
-            penView?.let { pv ->
-              val isBookmarked = pv.toggleCurrentPageBookmark()
-              showNotice(
-                if (isBookmarked) noteText("已添加书签", "Bookmark added") else noteText("已取消书签", "Bookmark removed"),
-              )
-            }
-          },
-        ),
-      color = Color(0xDDF2F2F2),
-      contentColor = Color.Black,
-      tonalElevation = 3.dp,
-    ) {
-      Row(
-        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-      ) {
-        if (bookmarked) {
-          Icon(Icons.Filled.Bookmark, contentDescription = "Bookmarked")
-        }
-        Text("${currentPageIndex + 1}/${pages.size.coerceAtLeast(1)}")
-      }
+    PageIndicatorPill(
+      penView = penView,
+      docVersionProvider = { docVersion },
+      onInteractionBlockChange = { pageControlInteractionBlocked = it },
+      onNotice = showNotice,
+      modifier = Modifier.align(Alignment.BottomEnd),
+    )
+
+    val pages = if (pageManagerOpen || notebookManagerOpen) {
+      gen.let { penView?.pageUiItems().orEmpty() }
+    } else {
+      emptyList()
     }
+    val currentPageIndex = if (pageManagerOpen) gen.let { penView?.currentPageIndex() ?: 0 } else 0
+    val currentPageId = pages.getOrNull(currentPageIndex)?.id
 
     if (pageManagerOpen && penView != null) {
       val laneCount = if (hasLinkedPageLane(pages)) 2 else 1
@@ -1393,10 +1436,15 @@ private fun AppRoot(
       )
     }
 
-    val notebookSummaries = if (notebookManagerOpen && penView != null) {
-      gen.let { runCatching { penView!!.notebookSummaries() }.getOrElse { emptyList() } }
-    } else {
-      emptyList()
+    var notebookSummaries by remember { mutableStateOf<List<NotebookSummary>>(emptyList()) }
+    LaunchedEffect(notebookManagerOpen, penView, docVersion) {
+      notebookSummaries = if (notebookManagerOpen && penView != null) {
+        withContext(Dispatchers.IO) {
+          runCatching { penView!!.notebookSummaries() }.getOrElse { emptyList() }
+        }
+      } else {
+        emptyList()
+      }
     }
     if (notebookManagerOpen && penView != null) {
       NotebookManagerScreen(
@@ -1477,6 +1525,8 @@ private fun AppRoot(
     }
 
     if (settingsOpen) {
+      val transferSnapshot by phoneTransfer.snapshot.collectAsState()
+      val transferEvents by phoneTransfer.eventHistory.collectAsState()
       SettingsScreen(
         state = SettingsState(
           debugMode = debugMode,
@@ -1612,17 +1662,22 @@ private fun AppRoot(
           onOpenBackup = {
             if (!notebookBusy) {
               notebookBusy = true
+              val restoreBlocked = uiInputBlockState.blocked
+              val restoreEraserBlocked = uiInputBlockState.eraserBlocked || pendingLinkedNoteRequest != null
               appScope.launch {
                 runCatching {
                   insertion.cancel()
                   insertion.awaitAssetImports()
                   penView?.setUiInputBlocked(true)
                   penView?.setEraserInputBlocked(true)
-                  check(penView?.flushPersistenceForExport() == true) { "无法保存当前笔记" }
+                  check(penView?.flushPersistenceForMaintenance() == true) { "无法保存当前笔记" }
                   exportViewModel.closeForMaintenance()
                   penView?.closeForMaintenance()
                   onBackupReady()
                 }.onFailure {
+                  exportViewModel.reopenAfterFailedMaintenance()
+                  penView?.setUiInputBlocked(restoreBlocked)
+                  penView?.setEraserInputBlocked(restoreEraserBlocked)
                   notebookBusy = false
                   showNotice("无法进入备份维护：${it.message}")
                 }
@@ -1694,8 +1749,10 @@ private fun AppRoot(
         templateEnabled = pv.currentPageKind() != PageKind.PDF_SOURCE,
         preview = pv::templatePreview,
         onTemplate = {
-          templateCatalog = pv.refreshTemplates()
           templateChooserOpen = true
+          appScope.launch {
+            templateCatalog = pv.refreshTemplates()
+          }
         },
         onDismiss = { documentSettingsOpen = false },
       )
@@ -1728,7 +1785,7 @@ private fun AppRoot(
             }
           },
           onConnectDirectory = { templateDirectoryPicker.launch(null) },
-          onRefresh = { templateCatalog = pv.refreshTemplates(force = true) },
+          onRefresh = { appScope.launch { templateCatalog = pv.refreshTemplates(force = true) } },
           onDismiss = { templateChooserOpen = false },
         ),
       )
@@ -1757,7 +1814,9 @@ private fun AppRoot(
           },
           onConnectDirectory = { templateDirectoryPicker.launch(null) },
           onRefresh = {
-            templateCatalog = pvForDialog?.refreshTemplates(force = true) ?: templateCatalog
+            appScope.launch {
+              templateCatalog = pvForDialog?.refreshTemplates(force = true) ?: templateCatalog
+            }
           },
           onConfirm = { title, templateId ->
             pendingNotebookCreation = null
@@ -1804,36 +1863,100 @@ private fun AppRoot(
         )
       }
     }
-    Column(
+    ActiveTransferOverlayHost(
+      phoneTransfer = phoneTransfer,
+      pairedClients = pairedClients,
+      settingsOpen = settingsOpen,
+      notificationState = notificationState,
+      updateNotificationState = updateNotificationState,
+      onNotificationInteractionBlockChange = { notificationInteractionBlocked = it },
       modifier = Modifier.align(Alignment.TopCenter).padding(top = 72.dp).width(620.dp),
-      horizontalAlignment = Alignment.CenterHorizontally,
-      verticalArrangement = Arrangement.spacedBy(8.dp),
+    )
+  }
+}
+
+@Composable
+private fun PageIndicatorPill(
+  penView: PenDrawView?,
+  docVersionProvider: () -> Int,
+  onInteractionBlockChange: (Boolean) -> Unit,
+  onNotice: (String) -> Unit,
+  modifier: Modifier = Modifier,
+) {
+  val gen = docVersionProvider()
+  val pageCount = gen.let { penView?.pageCount() ?: 1 }.coerceAtLeast(1)
+  val currentPageIndex = gen.let { penView?.currentPageIndex() ?: 0 }
+  val bookmarked = gen.let { penView?.currentPageBookmarked() ?: false }
+  Surface(
+    modifier = modifier
+      .padding(12.dp)
+      .penInputGuard { onInteractionBlockChange(it) }
+      .stylusModifiedClickable(
+        onSide1Click = {
+          penView?.let { pv ->
+            val isBookmarked = pv.toggleCurrentPageBookmark()
+            onNotice(
+              if (isBookmarked) noteText("已添加书签", "Bookmark added") else noteText("已取消书签", "Bookmark removed"),
+            )
+          }
+        },
+      ),
+    color = Color(0xDDF2F2F2),
+    contentColor = Color.Black,
+    tonalElevation = 3.dp,
+  ) {
+    Row(
+      modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+      verticalAlignment = Alignment.CenterVertically,
     ) {
-      if (
-        !settingsOpen &&
-        transferSnapshot.phase.isActiveTransferPhase &&
-        transferSnapshot.phase != TransferPhase.AWAITING_COMMIT
-      ) {
-        ActiveTransferOverlay(
-          snapshot = transferSnapshot,
-          endpointName = pairedClients.firstOrNull { it.id == transferSnapshot.deviceId }?.name,
-          onCancel = phoneTransfer::cancel,
-          modifier = Modifier.width(460.dp),
-        )
+      if (bookmarked) {
+        Icon(Icons.Filled.Bookmark, contentDescription = "Bookmarked")
       }
+      Text("${currentPageIndex + 1}/$pageCount")
+    }
+  }
+}
 
-      InAppNotificationHost(
-        state = notificationState,
-        modifier = Modifier.fillMaxWidth()
-          .penInputGuard { notificationInteractionBlocked = it },
+@Composable
+private fun ActiveTransferOverlayHost(
+  phoneTransfer: PhoneTransferClient,
+  pairedClients: List<PairedDevice>,
+  settingsOpen: Boolean,
+  notificationState: InAppNotificationState,
+  updateNotificationState: InAppNotificationState,
+  onNotificationInteractionBlockChange: (Boolean) -> Unit,
+  modifier: Modifier = Modifier,
+) {
+  val transferSnapshot by phoneTransfer.snapshot.collectAsState()
+  Column(
+    modifier = modifier,
+    horizontalAlignment = Alignment.CenterHorizontally,
+    verticalArrangement = Arrangement.spacedBy(8.dp),
+  ) {
+    if (
+      !settingsOpen &&
+      transferSnapshot.phase.isActiveTransferPhase &&
+      transferSnapshot.phase != TransferPhase.AWAITING_COMMIT
+    ) {
+      ActiveTransferOverlay(
+        snapshot = transferSnapshot,
+        endpointName = pairedClients.firstOrNull { it.id == transferSnapshot.deviceId }?.name,
+        onCancel = phoneTransfer::cancel,
+        modifier = Modifier.width(460.dp),
       )
+    }
 
-      if (!settingsOpen && !transferSnapshot.phase.isActiveTransferPhase) {
-        InAppNotificationHost(
-          state = updateNotificationState,
-          modifier = Modifier.fillMaxWidth(),
-        )
-      }
+    InAppNotificationHost(
+      state = notificationState,
+      modifier = Modifier.fillMaxWidth()
+        .penInputGuard { onNotificationInteractionBlockChange(it) },
+    )
+
+    if (!settingsOpen && !transferSnapshot.phase.isActiveTransferPhase) {
+      InAppNotificationHost(
+        state = updateNotificationState,
+        modifier = Modifier.fillMaxWidth(),
+      )
     }
   }
 }

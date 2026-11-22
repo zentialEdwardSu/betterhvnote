@@ -70,11 +70,17 @@ private fun BackupScreenContent(onClose: () -> Unit, initialError: String?) {
     job = scope.launch {
       try {
         val operationContext = currentCoroutineContext()
+        val throttle = BackupProgressThrottle()
         withContext(if (commit) Dispatchers.IO + NonCancellable else Dispatchers.IO) {
           BackupMaintenance.mutex.withLock {
             operation { done, total ->
               if (!commit) operationContext.ensureActive()
-              progress = if (total == 0) 0f else done.toFloat() / total
+              if (throttle.shouldEmit(done, total)) {
+                val nextProgress = BackupProgressThrottle.fraction(done, total)
+                scope.launch(Dispatchers.Main) {
+                  if (busy) progress = nextProgress
+                }
+              }
             }
           }
         }
@@ -93,10 +99,10 @@ private fun BackupScreenContent(onClose: () -> Unit, initialError: String?) {
     ActivityResultContracts.CreateDocument("application/zip"),
   ) { uri ->
     if (uri != null) runOperation { report ->
-      message = "正在导出备份…"
+      withContext(Dispatchers.Main) { message = "正在导出备份…" }
       try {
         manager.export(uri, report)
-        message = "备份已导出"
+        withContext(Dispatchers.Main) { message = "备份已导出" }
       } catch (error: Throwable) {
         runCatching { android.provider.DocumentsContract.deleteDocument(context.contentResolver, uri) }
         throw error
@@ -105,9 +111,12 @@ private fun BackupScreenContent(onClose: () -> Unit, initialError: String?) {
   }
   val importPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
     if (uri != null) runOperation { report ->
-      message = "正在校验备份…"
-      prepared = manager.prepare(uri, report)
-      message = "备份校验通过，请确认恢复"
+      withContext(Dispatchers.Main) { message = "正在校验备份…" }
+      val result = manager.prepare(uri, report)
+      withContext(Dispatchers.Main) {
+        prepared = result
+        message = "备份校验通过，请确认恢复"
+      }
     }
   }
 
@@ -152,7 +161,13 @@ private fun BackupScreenContent(onClose: () -> Unit, initialError: String?) {
         ) { Text("导入备份") }
         OutlinedButton(
           onClick = {
-            runOperation { prepared = manager.prepareRollback(); message = "恢复前副本已就绪" }
+            runOperation {
+              val rollback = manager.prepareRollback()
+              withContext(Dispatchers.Main) {
+                prepared = rollback
+                message = "恢复前副本已就绪"
+              }
+            }
           },
           enabled = !busy && hasRollback && !recoveryRequired,
           shape = RectangleShape,
@@ -161,8 +176,10 @@ private fun BackupScreenContent(onClose: () -> Unit, initialError: String?) {
           onClick = {
             runOperation(commit = true) {
               manager.recoverInterruptedRestore()
-              recoveryRequired = false
-              message = "回滚完成，可以返回笔记"
+              withContext(Dispatchers.Main + NonCancellable) {
+                recoveryRequired = false
+                message = "回滚完成，可以返回笔记"
+              }
             }
           },
           enabled = !busy,
@@ -180,16 +197,19 @@ private fun BackupScreenContent(onClose: () -> Unit, initialError: String?) {
         Button(
           onClick = {
             runOperation(commit = true) {
-              prepared = null
+              withContext(Dispatchers.Main + NonCancellable) { prepared = null }
               try {
                 manager.restore(candidate, it)
               } catch (error: Exception) {
-                recoveryRequired = manager.needsRecovery()
+                val needsRecovery = manager.needsRecovery()
+                withContext(Dispatchers.Main + NonCancellable) { recoveryRequired = needsRecovery }
                 throw error
               } finally {
                 manager.discard(candidate)
               }
-              message = "恢复完成，返回后将重新加载笔记"
+              withContext(Dispatchers.Main + NonCancellable) {
+                message = "恢复完成，返回后将重新加载笔记"
+              }
             }
           },
           enabled = !busy,

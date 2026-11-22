@@ -115,7 +115,8 @@ object StrokeGeometry {
     val left = FloatArray(emitted * 2)
     val right = FloatArray(emitted * 2)
     val discs = FloatArray(emitted * 3)
-    val bodies = ArrayList<Float>((emitted - 1).coerceAtLeast(0) * 8)
+    val bodiesBuffer = FloatArray((emitted - 1).coerceAtLeast(0) * 8)
+    var bodiesCursor = 0
 
     var minX = Float.MAX_VALUE
     var minY = Float.MAX_VALUE
@@ -195,7 +196,14 @@ object StrokeGeometry {
       discs[discIndex + 2] = halfWidth
 
       if (i > start) {
-        appendExternalTangentBody(all[i - 1], style.widthAt(all[i - 1]) * 0.5f, p, halfWidth, bodies)
+        bodiesCursor = appendExternalTangentBody(
+          all[i - 1],
+          style.widthAt(all[i - 1]) * 0.5f,
+          p,
+          halfWidth,
+          bodiesBuffer,
+          bodiesCursor,
+        )
       }
 
       if (p.x - halfWidth < minX) minX = p.x - halfWidth
@@ -204,7 +212,8 @@ object StrokeGeometry {
       if (p.y + halfWidth > maxY) maxY = p.y + halfWidth
     }
 
-    return StrokeOutline(left, right, Bounds(minX, minY, maxX, maxY), discs, bodies.toFloatArray())
+    val bodies = if (bodiesCursor == bodiesBuffer.size) bodiesBuffer else bodiesBuffer.copyOf(bodiesCursor)
+    return StrokeOutline(left, right, Bounds(minX, minY, maxX, maxY), discs, bodies)
   }
 
   /**
@@ -217,15 +226,16 @@ object StrokeGeometry {
     firstRadius: Float,
     second: InkPoint,
     secondRadius: Float,
-    target: MutableList<Float>,
-  ) {
+    target: FloatArray,
+    cursor: Int,
+  ): Int {
     val dx = second.x - first.x
     val dy = second.y - first.y
     val distanceSquared = dx * dx + dy * dy
-    if (distanceSquared <= 1e-12f) return
+    if (distanceSquared <= 1e-12f) return cursor
     val distance = sqrt(distanceSquared)
     val radiusDelta = firstRadius - secondRadius
-    if (distance <= abs(radiusDelta)) return
+    if (distance <= abs(radiusDelta)) return cursor
 
     val ux = dx / distance
     val uy = dy / distance
@@ -239,28 +249,42 @@ object StrokeGeometry {
     val secondNormalX = ux * along - perpendicularX * across
     val secondNormalY = uy * along - perpendicularY * across
 
-    val quad = floatArrayOf(
-      first.x + firstNormalX * firstRadius,
-      first.y + firstNormalY * firstRadius,
-      second.x + firstNormalX * secondRadius,
-      second.y + firstNormalY * secondRadius,
-      second.x + secondNormalX * secondRadius,
-      second.y + secondNormalY * secondRadius,
-      first.x + secondNormalX * firstRadius,
-      first.y + secondNormalY * firstRadius,
-    )
+    val x0 = first.x + firstNormalX * firstRadius
+    val y0 = first.y + firstNormalY * firstRadius
+    val x1 = second.x + firstNormalX * secondRadius
+    val y1 = second.y + firstNormalY * secondRadius
+    val x2 = second.x + secondNormalX * secondRadius
+    val y2 = second.y + secondNormalY * secondRadius
+    val x3 = first.x + secondNormalX * firstRadius
+    val y3 = first.y + secondNormalY * firstRadius
+
     // Keep every body winding the same way as Path.Direction.CW circles. A
     // backtracking centerline otherwise reverses quad winding and non-zero
     // filling can cancel overlap at the round join.
-    val signedArea = (0 until 4).sumOf { index ->
-      val next = (index + 1) % 4
-      (quad[index * 2] * quad[next * 2 + 1] - quad[index * 2 + 1] * quad[next * 2]).toDouble()
+    val signedArea = (x0 * y1 - y0 * x1).toDouble() +
+      (x1 * y2 - y1 * x2).toDouble() +
+      (x2 * y3 - y2 * x3).toDouble() +
+      (x3 * y0 - y3 * x0).toDouble()
+    if (signedArea >= 0.0) {
+      target[cursor] = x0
+      target[cursor + 1] = y0
+      target[cursor + 2] = x1
+      target[cursor + 3] = y1
+      target[cursor + 4] = x2
+      target[cursor + 5] = y2
+      target[cursor + 6] = x3
+      target[cursor + 7] = y3
+    } else {
+      target[cursor] = x0
+      target[cursor + 1] = y0
+      target[cursor + 2] = x3
+      target[cursor + 3] = y3
+      target[cursor + 4] = x2
+      target[cursor + 5] = y2
+      target[cursor + 6] = x1
+      target[cursor + 7] = y1
     }
-    val order = if (signedArea >= 0.0) intArrayOf(0, 1, 2, 3) else intArrayOf(0, 3, 2, 1)
-    order.forEach { index ->
-      target += quad[index * 2]
-      target += quad[index * 2 + 1]
-    }
+    return cursor + 8
   }
 
   /**

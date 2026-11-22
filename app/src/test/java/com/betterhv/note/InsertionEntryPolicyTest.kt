@@ -2,6 +2,8 @@ package com.betterhv.note
 
 import org.junit.Assert.assertEquals
 import org.junit.Test
+import com.betterhv.note.notelink.AutomaticRemoteDecision
+import com.betterhv.note.notelink.automaticRemoteDecision
 
 class InsertionEntryPolicyTest {
   @Test fun disabledSettingAlwaysChoosesSource() {

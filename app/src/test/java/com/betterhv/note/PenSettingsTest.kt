@@ -4,6 +4,11 @@ import com.betterhv.note.ink.PenStyle
 import com.betterhv.note.ink.PenType
 import org.junit.Assert.assertEquals
 import org.junit.Test
+import com.betterhv.note.settings.PenPreset
+import com.betterhv.note.settings.PenProfiles
+import com.betterhv.note.settings.PenSettings
+import com.betterhv.note.settings.PenSettingsCodec
+import com.betterhv.note.settings.PenToolbarSettings
 
 class PenSettingsTest {
   @Test

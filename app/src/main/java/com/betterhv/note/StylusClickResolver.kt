@@ -11,6 +11,9 @@ import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.composed
 import androidx.compose.ui.input.pointer.pointerInteropFilter
+import com.betterhv.note.hardware.PenButtonTracker
+import com.betterhv.note.hardware.PenFunctionKey
+import com.betterhv.note.hardware.PenSideButton
 
 /** Per-control bridge between pointer DOWN classification and Compose onClick. */
 internal class StylusClickResolver {

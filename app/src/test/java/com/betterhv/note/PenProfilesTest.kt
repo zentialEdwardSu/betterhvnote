@@ -5,6 +5,8 @@ import com.betterhv.note.ink.PenType
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import com.betterhv.note.settings.PenProfiles
+import com.betterhv.note.settings.PenSettings
 
 class PenProfilesTest {
   @Test

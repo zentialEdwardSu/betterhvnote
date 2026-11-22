@@ -12,9 +12,24 @@ class Scene {
   private val byId = HashMap<UUID, Int>()
 
   fun add(obj: PageObject) {
-    byId[obj.id] = objects.size
-    objects.add(obj)
+    if (objects.isEmpty() || sortsAfterOrEqual(obj, objects.last())) {
+      byId[obj.id] = objects.size
+      objects.add(obj)
+      return
+    }
+    var insertAt = objects.size - 1
+    while (insertAt > 0 && !sortsAfterOrEqual(obj, objects[insertAt - 1])) {
+      insertAt--
+    }
+    objects.add(insertAt, obj)
+    for (i in insertAt..objects.lastIndex) {
+      byId[objects[i].id] = i
+    }
   }
+
+  private fun sortsAfterOrEqual(candidate: PageObject, existing: PageObject): Boolean =
+    candidate.zIndex > existing.zIndex ||
+      (candidate.zIndex == existing.zIndex && candidate.createdAt >= existing.createdAt)
 
   fun removeById(id: UUID): PageObject? {
     val index = byId.remove(id) ?: return null

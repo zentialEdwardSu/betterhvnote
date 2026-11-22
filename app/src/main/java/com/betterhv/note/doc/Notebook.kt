@@ -41,6 +41,7 @@ class Notebook(
   fun addPage(page: Page = Page(), index: Int = pageOrder.size) {
     pages[page.id] = page
     pageMetadata[page.id] = page.toMetadata()
+    pageOrder.remove(page.id)
     pageOrder.add(index.coerceIn(0, pageOrder.size), page.id)
     touch()
   }
@@ -68,10 +69,10 @@ class Notebook(
   fun detachPage(id: UUID): Page? = pages.remove(id)
 
   fun removePage(id: UUID): Page? {
-    val page = pages.remove(id) ?: return null
-    pageOrder.remove(id)
-    pageMetadata.remove(id)
-    touch()
+    val page = pages.remove(id)
+    val removedOrder = pageOrder.remove(id)
+    val removedMetadata = pageMetadata.remove(id)
+    if (page != null || removedOrder || removedMetadata != null) touch()
     return page
   }
 

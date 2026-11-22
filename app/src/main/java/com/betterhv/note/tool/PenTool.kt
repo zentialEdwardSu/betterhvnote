@@ -9,6 +9,7 @@ import com.betterhv.note.ink.Bounds
 import com.betterhv.note.ink.InkPoint
 import com.betterhv.note.ink.PenStyle
 import com.betterhv.note.ink.StrokeBuilder
+import com.betterhv.note.ink.StrokeSmoother
 import com.betterhv.note.jni.ModelerStrokeSmoother
 import java.util.UUID
 
@@ -23,7 +24,15 @@ class PenTool(
   private val commandStack: CommandStack,
   private val host: ToolHost,
   private val styleProvider: () -> PenStyle,
+  private val smootherProvider: () -> StrokeSmoother = { ModelerStrokeSmoother() },
 ) : Tool {
+  constructor(
+    page: Page,
+    commandStack: CommandStack,
+    host: ToolHost,
+    styleProvider: () -> PenStyle,
+  ) : this(page, commandStack, host, styleProvider, { ModelerStrokeSmoother() })
+
   private var builder: StrokeBuilder? = null
 
   /** Live outline bounds while the gesture is in progress, for host repaint. */
@@ -34,12 +43,12 @@ class PenTool(
   fun builderOrNull(): StrokeBuilder? = builder
 
   override fun onDown(x: Float, y: Float) {
-    builder = StrokeBuilder(style = styleProvider(), smoother = ModelerStrokeSmoother())
+    builder = StrokeBuilder(style = styleProvider(), smoother = smootherProvider())
   }
 
   override fun onBatch(points: List<InkPoint>) {
     val b = builder ?: run {
-      builder = StrokeBuilder(style = styleProvider(), smoother = ModelerStrokeSmoother())
+      builder = StrokeBuilder(style = styleProvider(), smoother = smootherProvider())
       builder
     } ?: return
     b.append(points)
@@ -49,11 +58,13 @@ class PenTool(
     val b = builder ?: return
     builder = null
     val stroke = b.finish() ?: return
+    val now = System.currentTimeMillis()
     val obj = StrokeObject(
       id = UUID.randomUUID(),
       transform = Transform2D.IDENTITY,
-      createdAt = System.currentTimeMillis(),
-      updatedAt = System.currentTimeMillis(),
+      zIndex = page.nextZIndex(),
+      createdAt = now,
+      updatedAt = now,
       stroke = stroke,
     )
     commandStack.execute(AddObjectCommand(page, obj))

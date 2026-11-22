@@ -64,6 +64,8 @@ class Page(
 
   fun getObject(id: UUID): PageObject? = scene.getById(id)
 
+  fun nextZIndex(): Int = (scene.all().maxOfOrNull(PageObject::zIndex) ?: -1) + 1
+
   /** Replaces an object's content/style while keeping Scene and index synchronized. */
   fun updateObject(id: UUID, updated: PageObject): PageObject? {
     val existing = scene.getById(id) ?: return null
@@ -115,9 +117,9 @@ class Page(
   }
 
   /** Storage-only restore path: rebuilds Scene + index without changing persisted timestamps. */
-  fun restoreObject(obj: PageObject) {
+  fun restoreObject(obj: PageObject, pageBounds: Bounds = obj.pageBounds) {
     scene.add(obj)
-    spatialIndex.insert(obj.id, obj.pageBounds)
+    spatialIndex.insert(obj.id, pageBounds)
   }
 
   private fun touch(contentChanged: Boolean = true) {

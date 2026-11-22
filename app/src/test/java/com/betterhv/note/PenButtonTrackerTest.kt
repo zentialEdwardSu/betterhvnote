@@ -5,6 +5,7 @@ import android.annotation.SuppressLint
 import android.view.KeyEvent
 import org.junit.Assert.assertEquals
 import org.junit.Test
+import com.betterhv.note.hardware.PenButtonTracker
 
 @SuppressLint("InlinedApi")
 class PenButtonTrackerTest {

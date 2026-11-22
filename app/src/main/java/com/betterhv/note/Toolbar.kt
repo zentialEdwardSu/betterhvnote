@@ -93,6 +93,12 @@ import com.betterhv.note.ui.EinkFlyoutSurface
 import com.betterhv.note.ui.EinkTheme
 import com.betterhv.note.ui.EinkToolButton
 import com.betterhv.transfer.core.ContentKind
+import com.betterhv.note.notebook.NotebookBookIcon
+import com.betterhv.note.settings.PenColorChoice
+import com.betterhv.note.settings.PenPalette
+import com.betterhv.note.settings.PenProfiles
+import com.betterhv.note.settings.PenSettings
+import com.betterhv.note.settings.PenToolbarSettings
 
 /** Which edge of the screen the toolbar is currently docked to. */
 enum class DockEdge { TOP, END, BOTTOM, START }

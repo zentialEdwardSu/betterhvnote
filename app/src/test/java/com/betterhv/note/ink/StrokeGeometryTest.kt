@@ -284,6 +284,73 @@ class StrokeGeometryTest {
     for (v in range.right) assertFalse(v.isNaN())
   }
 
+  @Test
+  fun `200 point curved degenerate and reversing stroke keeps valid winding and seam match`() {
+    val points = ArrayList<InkPoint>(200)
+    for (i in 0 until 200) {
+      val t = i.toFloat()
+      when {
+        i in 40..44 -> points += points.last()
+        i in 90..115 -> {
+          val back = 90 - (i - 90)
+          points += point(
+            back * 4f,
+            kotlin.math.sin(back * 0.25f) * 30f,
+            0.2f + (i % 7) * 0.12f,
+          )
+        }
+        i == 150 -> points += point(t * 4f, kotlin.math.sin(t * 0.25f) * 30f, 4.5f)
+        else -> points += point(
+          t * 4f,
+          kotlin.math.sin(t * 0.25f) * 30f,
+          0.25f + (i % 5) * 0.15f,
+        )
+      }
+    }
+    assertEquals(200, points.size)
+
+    val full = StrokeGeometry.build(points, style)
+    assertEquals(200, full.pointCount)
+    assertEquals(200 * 3, full.discs.size)
+    assertEquals(0, full.bodies.size % 8)
+    assertTrue(full.bodies.isNotEmpty())
+
+    for (v in full.left) assertFalse(v.isNaN())
+    for (v in full.right) assertFalse(v.isNaN())
+    for (v in full.discs) assertFalse(v.isNaN())
+    for (v in full.bodies) assertFalse(v.isNaN())
+
+    for (offset in full.bodies.indices step 8) {
+      val area = (0 until 4).sumOf { index ->
+        val next = (index + 1) % 4
+        val ax = full.bodies[offset + index * 2]
+        val ay = full.bodies[offset + index * 2 + 1]
+        val bx = full.bodies[offset + next * 2]
+        val by = full.bodies[offset + next * 2 + 1]
+        (ax * by - ay * bx).toDouble()
+      }
+      assertTrue("negative signed area $area at quad offset $offset", area >= 0.0)
+    }
+
+    val seamIndex = 120
+    val tail = StrokeGeometry.buildRange(points, seamIndex, style)
+    assertEquals(points.size - seamIndex, tail.pointCount)
+    for (i in seamIndex until points.size) {
+      val tIdx = (i - seamIndex) * 2
+      val fIdx = i * 2
+      assertEquals(full.left[fIdx], tail.left[tIdx], EPS)
+      assertEquals(full.left[fIdx + 1], tail.left[tIdx + 1], EPS)
+      assertEquals(full.right[fIdx], tail.right[tIdx], EPS)
+      assertEquals(full.right[fIdx + 1], tail.right[tIdx + 1], EPS)
+    }
+    assertTrue(tail.bodies.isNotEmpty())
+    assertEquals(0, tail.bodies.size % 8)
+    val tailStartInFull = full.bodies.size - tail.bodies.size
+    for (i in tail.bodies.indices) {
+      assertEquals(full.bodies[tailStartInFull + i], tail.bodies[i], EPS)
+    }
+  }
+
   private fun point(x: Float, y: Float, pressure: Float = 0.5f) =
     InkPoint(x = x, y = y, pressure = pressure, timestamp = 1_000L)
 

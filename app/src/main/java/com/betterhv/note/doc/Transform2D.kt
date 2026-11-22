@@ -42,7 +42,7 @@ data class Transform2D(val a: Float, val b: Float, val c: Float, val d: Float, v
   /** Inverse transform, or null if this transform is singular (det == 0). */
   fun invert(): Transform2D? {
     val det = a * d - b * c
-    if (kotlin.math.abs(det) < 1e-9f) return null
+    if (!det.isFinite() || kotlin.math.abs(det) < 1e-9f) return null
     val invDet = 1.0f / det
     val ia = d * invDet
     val ib = -b * invDet

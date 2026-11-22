@@ -3,6 +3,8 @@ package com.betterhv.note
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import com.betterhv.note.canvas.PdfViewportMath
+import com.betterhv.note.canvas.PdfViewportState
 
 class PdfViewportMathTest {
   @Test fun zoomKeepsFocusPagePointStationaryAwayFromEdges() {

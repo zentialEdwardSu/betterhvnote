@@ -10,15 +10,16 @@ import java.util.UUID
 data class PageSnapshot(val metadata: Notebook.PageMetadata, val objects: List<PageObject>) {
   companion object {
     fun capture(page: Page) = PageSnapshot(
-      metadata = Notebook.PageMetadata(
-        page.id, page.width, page.height, page.bookmarked, page.contentRevision,
-        page.createdAt, page.updatedAt, page.kind, page.parentPdfPageId, page.pdfSource,
-        page.templateId,
-      ),
+      metadata = page.toMetadata(),
       objects = page.scene.all().toList(),
     )
   }
 }
+
+private fun Page.toMetadata() = Notebook.PageMetadata(
+  id, width, height, bookmarked, contentRevision, createdAt, updatedAt,
+  kind, parentPdfPageId, pdfSource, templateId,
+)
 
 data class ObjectChange(val pageId: UUID, val objectId: UUID, val value: PageObject?)
 
@@ -34,6 +35,7 @@ data class DocumentChange(
   val objectChanges: List<ObjectChange>,
   val fullPages: List<PageSnapshot>,
   val description: String,
+  val pageStructureChanged: Boolean = true,
 ) {
   companion object {
     fun forCommand(notebook: Notebook, command: Command, action: CommandAction): DocumentChange {
@@ -41,16 +43,33 @@ data class DocumentChange(
       val incremental = command.affectedObjects.flatMap { (pageId, ids) ->
         ids.map { id -> ObjectChange(pageId, id, command.currentObject(pageId, id)) }
       }
-      val full = if (command.changesPageStructure) {
+      val structureChanged = command.changesPageStructure
+      val full = if (structureChanged) {
         command.affectedPages.mapNotNull(notebook::getPage).map(PageSnapshot::capture)
       } else {
         emptyList()
       }
-      return captureBase(
-        notebook,
-        incremental,
-        full,
-        "${action.name.lowercase()}:${command.javaClass.simpleName}",
+      val affectedPageIds = command.affectedObjects.keys + command.affectedPages
+      val pages = if (structureChanged) {
+        notebook.allPageMetadata()
+      } else {
+        affectedPageIds.mapNotNull { id ->
+          command.currentPage(id)?.toMetadata() ?: notebook.metadata(id)
+        }
+      }
+      val pageOrder = if (structureChanged) notebook.pageOrder.toList() else emptyList()
+      return DocumentChange(
+        notebookId = notebook.id,
+        title = notebook.title,
+        notebookKind = notebook.kind,
+        createdAt = notebook.createdAt,
+        updatedAt = notebook.updatedAt,
+        pageOrder = pageOrder,
+        pages = pages,
+        objectChanges = incremental,
+        fullPages = full,
+        description = "${action.name.lowercase()}:${command.javaClass.simpleName}",
+        pageStructureChanged = structureChanged,
       )
     }
 
@@ -80,6 +99,7 @@ data class DocumentChange(
       objectChanges = objectChanges,
       fullPages = fullPages,
       description = description,
+      pageStructureChanged = true,
     )
   }
 }

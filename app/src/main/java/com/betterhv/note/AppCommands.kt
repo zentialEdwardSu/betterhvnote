@@ -3,6 +3,8 @@ package com.betterhv.note
 import com.betterhv.note.toolbar.EditorCommandParameters
 import com.betterhv.note.toolbar.ToolbarCatalog
 import com.betterhv.note.toolbar.ToolbarWindowContent
+import com.betterhv.note.settings.PenPalette
+import com.betterhv.note.settings.PenProfiles
 
 /** Persisted invocation, separate from the undoable document Command. */
 data class CommandBinding(val commandId: String, val arguments: Map<String, String> = emptyMap())

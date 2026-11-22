@@ -19,13 +19,24 @@ class ExportRasterTest {
   }
 
   @Test fun sideBudgetCapsElongatedPages() {
-    val (pixelWidth, pixelHeight) = ExportRaster.pixelSize(100f, 10000f)
-    assertTrue(pixelHeight <= 8192)
-    assertTrue(pixelWidth >= 1)
+    val (tallWidth, tallHeight) = ExportRaster.pixelSize(100f, 10000f)
+    assertTrue(tallHeight <= 8192)
+    assertTrue(tallWidth >= 1)
+
+    val (wideWidth, wideHeight) = ExportRaster.pixelSize(10000f, 100f)
+    assertTrue(wideWidth <= 8192)
+    assertTrue(wideHeight >= 1)
   }
 
   @Test fun degeneratePagesAreRejected() {
-    listOf(0f to 100f, 100f to 0f, -1f to 100f, Float.NaN to 100f).forEach { (width, height) ->
+    listOf(
+      0f to 100f,
+      100f to 0f,
+      -1f to 100f,
+      Float.NaN to 100f,
+      Float.POSITIVE_INFINITY to 100f,
+      100f to Float.NEGATIVE_INFINITY,
+    ).forEach { (width, height) ->
       runCatching { ExportRaster.scaleFor(width, height) }
         .onSuccess { error("Expected rejection for $width x $height") }
     }

@@ -6,6 +6,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Assert.assertFalse
 import org.junit.Test
 import java.util.UUID
+import com.betterhv.note.canvas.tailErasesSelection
 
 class TailEraserSelectionTest {
   @Test fun onlyNonemptySelectionAtDownIsDeleted() {

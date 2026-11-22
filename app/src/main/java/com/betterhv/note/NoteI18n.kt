@@ -4,6 +4,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import java.util.Locale
+import com.betterhv.note.settings.PenColorChoice
 
 /** User-selected UI language. Storage IDs are part of the preferences contract. */
 enum class NoteLanguage(val storageId: String) {

@@ -3,6 +3,7 @@ package com.betterhv.note
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
+import com.betterhv.note.hardware.N10ProHardwareKeys
 
 class N10ProHardwareKeysTest {
   @Test

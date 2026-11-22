@@ -6,6 +6,7 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import com.betterhv.note.settings.decodeVisibleToolbarItems
 
 class EditorInteractionTest {
   @Test fun toolbarDefaultsContainEveryConfigurableItemButMenu() {

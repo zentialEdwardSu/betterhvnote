@@ -14,7 +14,7 @@ import java.util.UUID
  * drag" (spec §44's command-merge intent) without a separate merge pass.
  */
 class TransformObjectsCommand(
-  private val page: Page,
+  private var page: Page,
   private val ids: List<UUID>,
   private val before: Map<UUID, Transform2D>,
   private var after: Map<UUID, Transform2D>,
@@ -23,6 +23,9 @@ class TransformObjectsCommand(
   override fun currentObject(pageId: UUID, objectId: UUID): PageObject? =
     if (pageId == page.id) page.getObject(objectId) else null
   override fun currentPage(pageId: UUID): Page? = if (pageId == page.id) page else null
+  override fun rebindPage(livePage: Page) {
+    if (livePage.id == page.id) page = livePage
+  }
 
   fun updateAfter(newAfter: Map<UUID, Transform2D>) {
     after = newAfter

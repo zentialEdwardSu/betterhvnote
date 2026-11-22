@@ -37,13 +37,9 @@ data class ExportManagerState(
 )
 
 class ExportViewModel(application: Application) : AndroidViewModel(application) {
-  private val taskRepository = ExportTaskRepository(application)
-  private val notebookRepository = NotebookRepository(application)
-  private val engine = ExportEngine(
-    notebookRepository, taskRepository,
-    PageRenderer(File(application.filesDir, "documents"), TemplateStore.get(application)),
-    File(application.filesDir, "exports"),
-  )
+  private var taskRepository = ExportTaskRepository(application)
+  private var notebookRepository = NotebookRepository(application)
+  private var engine = createEngine(application)
   private val downloads = ExportDownloads(application)
   private val diagnosticsDirectory = File(application.filesDir, "export-diagnostics")
   private val mutableState = MutableStateFlow(ExportManagerState())
@@ -55,6 +51,13 @@ class ExportViewModel(application: Application) : AndroidViewModel(application) 
   private var maintenanceClosed = false
 
   init { refresh() }
+
+  private fun createEngine(application: Application): ExportEngine = ExportEngine(
+    notebookRepository,
+    taskRepository,
+    PageRenderer(File(application.filesDir, "documents"), TemplateStore.get(application)),
+    File(application.filesDir, "exports"),
+  )
 
   fun refresh() {
     if (maintenanceClosed) return
@@ -261,6 +264,16 @@ class ExportViewModel(application: Application) : AndroidViewModel(application) 
       taskRepository.close()
       notebookRepository.close()
     }
+  }
+
+  fun reopenAfterFailedMaintenance() {
+    if (!maintenanceClosed) return
+    val app = getApplication<Application>()
+    taskRepository = ExportTaskRepository(app)
+    notebookRepository = NotebookRepository(app)
+    engine = createEngine(app)
+    maintenanceClosed = false
+    refresh()
   }
 
   override fun onCleared() {

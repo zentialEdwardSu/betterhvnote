@@ -2,6 +2,7 @@ package com.betterhv.note.toolbar
 
 import com.betterhv.note.CommandBinding
 import com.betterhv.note.ToolbarItem
+import com.betterhv.note.settings.PenSettings
 
 /** Stable internal ids for surfaces opened by toolbar tools. */
 enum class ToolbarWindowId {
