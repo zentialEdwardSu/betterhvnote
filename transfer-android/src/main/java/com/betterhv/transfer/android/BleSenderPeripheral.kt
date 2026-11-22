@@ -50,7 +50,8 @@ class BleSenderPeripheral(
 ) : AutoCloseable {
   private val appContext = context.applicationContext
   private val manager = appContext.getSystemService(BluetoothManager::class.java)
-  private val adapter: BluetoothAdapter get() = manager.adapter
+  private val adapter: BluetoothAdapter? get() = manager?.adapter
+  private val notifyLock = Any()
   @Volatile private var server: BluetoothGattServer? = null
   @Volatile private var control: BluetoothGattCharacteristic? = null
   private val devices = ConcurrentHashMap<String, BluetoothDevice>()
@@ -124,8 +125,10 @@ class BleSenderPeripheral(
 
   @SuppressLint("MissingPermission")
   fun start() {
-    check(adapter.isEnabled) { "Bluetooth is off" }
-    val advertiser = adapter.bluetoothLeAdvertiser ?: error("BLE peripheral advertising is unsupported")
+    val btManager = manager ?: error("Bluetooth is unavailable")
+    val btAdapter = btManager.adapter ?: error("Bluetooth is unavailable")
+    check(btAdapter.isEnabled) { "Bluetooth is off" }
+    val advertiser = btAdapter.bluetoothLeAdvertiser ?: error("BLE peripheral advertising is unsupported")
     closed = false
     val characteristic = BluetoothGattCharacteristic(
       BleConstants.CONTROL_UUID,
@@ -142,22 +145,30 @@ class BleSenderPeripheral(
     val service = BluetoothGattService(BleConstants.SERVICE_UUID, BluetoothGattService.SERVICE_TYPE_PRIMARY)
       .apply { addCharacteristic(characteristic) }
     control = characteristic
-    server = manager.openGattServer(appContext, callback)?.also { it.addService(service) }
+    val openedServer = btManager.openGattServer(appContext, callback)?.also { it.addService(service) }
       ?: error("Could not open the GATT server")
-    val parameters = AdvertisingSetParameters.Builder()
-      .setLegacyMode(true)
-      .setConnectable(true)
-      .setScannable(true)
-      .setInterval(AdvertisingSetParameters.INTERVAL_LOW)
-      .setTxPowerLevel(AdvertisingSetParameters.TX_POWER_MEDIUM)
-      .build()
-    val data = AdvertiseData.Builder()
-      .addServiceUuid(ParcelUuid(BleConstants.SERVICE_UUID))
-      .setIncludeDeviceName(false)
-      .build()
-    val response = scanResponse()
-    lastScanResponse = response.second
-    advertiser.startAdvertisingSet(parameters, data, response.first, null, null, advertiseCallback)
+    server = openedServer
+    try {
+      val parameters = AdvertisingSetParameters.Builder()
+        .setLegacyMode(true)
+        .setConnectable(true)
+        .setScannable(true)
+        .setInterval(AdvertisingSetParameters.INTERVAL_LOW)
+        .setTxPowerLevel(AdvertisingSetParameters.TX_POWER_MEDIUM)
+        .build()
+      val data = AdvertiseData.Builder()
+        .addServiceUuid(ParcelUuid(BleConstants.SERVICE_UUID))
+        .setIncludeDeviceName(false)
+        .build()
+      val response = scanResponse()
+      lastScanResponse = response.second
+      advertiser.startAdvertisingSet(parameters, data, response.first, null, null, advertiseCallback)
+    } catch (error: Throwable) {
+      server = null
+      control = null
+      runCatching { openedServer.close() }
+      throw error
+    }
   }
 
   /** Re-publishes queue counts and the pairing flag without interrupting advertising. */
@@ -205,17 +216,25 @@ class BleSenderPeripheral(
       val accepted = if (Build.VERSION.SDK_INT >= 33) {
         active.notifyCharacteristicChanged(device, characteristic, false, record) == BluetoothStatusCodes.SUCCESS
       } else {
-        @Suppress("DEPRECATION")
-        characteristic.value = record
-        @Suppress("DEPRECATION")
-        active.notifyCharacteristicChanged(device, characteristic, false)
+        synchronized(notifyLock) {
+          @Suppress("DEPRECATION")
+          characteristic.value = record
+          @Suppress("DEPRECATION")
+          active.notifyCharacteristicChanged(device, characteristic, false)
+        }
       }
       if (accepted) {
         val status = withTimeoutOrNull(NOTIFY_TIMEOUT_MILLIS) { waiter.await() }
         if (status == BluetoothGatt.GATT_SUCCESS) return
+        notifyWaiters.remove(peerKey, waiter)
         if (devices[peerKey] == null) throw V4LinkException("Central $peerKey disconnected")
+        if (status == null) {
+          throw V4LinkException("Notification to $peerKey timed out after $NOTIFY_TIMEOUT_MILLIS ms")
+        }
+        throw V4LinkException("Notification to $peerKey failed: $status")
       }
       notifyWaiters.remove(peerKey, waiter)
+      if (devices[peerKey] == null) throw V4LinkException("Central $peerKey disconnected")
       kotlinx.coroutines.delay(BUSY_BACKOFF_MILLIS * (attempt + 1))
     }
     throw V4LinkException("Notification to $peerKey failed repeatedly")
@@ -224,7 +243,7 @@ class BleSenderPeripheral(
   @SuppressLint("MissingPermission")
   override fun close() {
     closed = true
-    runCatching { adapter.bluetoothLeAdvertiser?.stopAdvertisingSet(advertiseCallback) }
+    runCatching { adapter?.bluetoothLeAdvertiser?.stopAdvertisingSet(advertiseCallback) }
     advertisingSet = null
     notifyWaiters.values.forEach { it.complete(BluetoothGatt.GATT_FAILURE) }
     notifyWaiters.clear()
@@ -242,7 +261,7 @@ class BleSenderPeripheral(
       if (status == ADVERTISE_SUCCESS && set != null) {
         advertisingSet = set
         Log.i(TAG, "BLE advertising started tx=$txPower")
-        if (closed) runCatching { adapter.bluetoothLeAdvertiser?.stopAdvertisingSet(this) }
+        if (closed) runCatching { adapter?.bluetoothLeAdvertiser?.stopAdvertisingSet(this) }
       } else {
         Log.e(TAG, "BLE advertising failed: $status")
       }

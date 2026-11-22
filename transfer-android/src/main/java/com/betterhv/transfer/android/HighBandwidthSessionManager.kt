@@ -21,13 +21,24 @@ sealed interface HostedGroupState {
   data class Unavailable(val message: String, val retryInMillis: Long) : HostedGroupState
 }
 
+internal interface HostedGroupDriver : AutoCloseable {
+  var pairingKey: ByteArray?
+  val session: StateFlow<WifiDirectSession?>
+  suspend fun ensureHostedGroup(): WifiDirectSession
+  fun requestCloseGroup()
+}
+
 /** Owns one Android Wi-Fi Direct group for the enclosing foreground-service lifetime. */
-class HighBandwidthSessionManager(
-  context: Context,
+class HighBandwidthSessionManager internal constructor(
   private val scope: CoroutineScope,
-  pairingKey: ByteArray? = null,
+  private val controller: HostedGroupDriver,
 ) : AutoCloseable {
-  private val controller = WifiDirectController(context, pairingKey)
+  constructor(
+    context: Context,
+    scope: CoroutineScope,
+    pairingKey: ByteArray? = null,
+  ) : this(scope, WifiDirectController(context, pairingKey))
+
   private val mutableState = MutableStateFlow<HostedGroupState>(HostedGroupState.Stopped)
   val state: StateFlow<HostedGroupState> = mutableState.asStateFlow()
   private var job: Job? = null
@@ -38,6 +49,7 @@ class HighBandwidthSessionManager(
     job?.cancel()
     if (!controller.pairingKey.contentEqualsNullable(pairingKey)) controller.requestCloseGroup()
     controller.pairingKey = pairingKey
+    mutableState.value = HostedGroupState.Preparing(1)
     start()
   }
 
@@ -49,6 +61,7 @@ class HighBandwidthSessionManager(
 
   @Synchronized fun start() {
     if (job?.isActive == true) return
+    mutableState.value = HostedGroupState.Preparing(1)
     job = scope.launch {
       var attempt = 0
       while (isActive) {

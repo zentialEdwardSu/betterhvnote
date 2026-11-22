@@ -40,30 +40,32 @@ private const val GROUP_OWNER_CAPABILITY = 1
 class WifiDirectController(
   context: Context,
   pairingKey: ByteArray? = null,
-) : AutoCloseable {
+) : HostedGroupDriver {
   /** Derives the hosted group's SSID/passphrase; set per peer before [ensureHostedGroup]. */
-  @Volatile var pairingKey: ByteArray? = pairingKey
+  @Volatile override var pairingKey: ByteArray? = pairingKey
   private val appContext = context.applicationContext
   private val groupPolicy = P2pGroupPolicy()
   private var lastGroupUsedAtMillis = 0L
   private val manager = appContext.getSystemService(WifiP2pManager::class.java)
     ?: error("Wi-Fi Direct is unsupported")
   private val channel = manager.initialize(appContext, appContext.mainLooper, null)
-  private var connectionWaiter: CompletableDeferred<WifiP2pInfo>? = null
-  private var peerWaiter: CompletableDeferred<WifiP2pDevice>? = null
-  private var expectedPeerAddress: String? = null
+  @Volatile private var connectionWaiter: CompletableDeferred<WifiP2pInfo>? = null
+  @Volatile private var peerWaiter: CompletableDeferred<WifiP2pDevice>? = null
+  @Volatile private var expectedPeerAddress: String? = null
   private var activeNetworkId: Int? = null
 
   @Volatile private var currentSession: WifiDirectSession? = null
   private val mutableSession = MutableStateFlow<WifiDirectSession?>(null)
-  val session: StateFlow<WifiDirectSession?> = mutableSession.asStateFlow()
+  override val session: StateFlow<WifiDirectSession?> = mutableSession.asStateFlow()
   private val receiver = object : BroadcastReceiver() {
     @SuppressLint("MissingPermission")
     override fun onReceive(context: Context, intent: Intent) {
       if (intent.action == WifiP2pManager.WIFI_P2P_CONNECTION_CHANGED_ACTION) {
         manager.requestConnectionInfo(channel) { info ->
           if (info.groupFormed) {
-            connectionWaiter?.complete(info)
+            if (info.groupOwnerAddress != null) {
+              connectionWaiter?.complete(info)
+            }
           } else {
             currentSession = null
             mutableSession.value = null
@@ -88,6 +90,8 @@ class WifiDirectController(
       appContext.registerReceiver(receiver, filter)
     }
   }
+
+  override suspend fun ensureHostedGroup(): WifiDirectSession = ensureHostedGroup(30_000L, true)
 
   @SuppressLint("MissingPermission")
   suspend fun ensureHostedGroup(
@@ -277,7 +281,7 @@ class WifiDirectController(
 
   @SuppressLint("MissingPermission")
   private suspend fun awaitConnectionInfo(timeoutMillis: Long): WifiP2pInfo = withTimeout(timeoutMillis) {
-    val waiter = connectionWaiter ?: CompletableDeferred<WifiP2pInfo>().also { connectionWaiter = it }
+    var waiter = connectionWaiter ?: CompletableDeferred<WifiP2pInfo>().also { connectionWaiter = it }
     val current = requestConnectionInfo()
     if (current.groupFormed && current.groupOwnerAddress != null) return@withTimeout current
     // WIFI_P2P_CONNECTION_CHANGED completes the waiter; the slow re-check only covers vendor
@@ -285,6 +289,10 @@ class WifiDirectController(
     while (true) {
       val info = withTimeoutOrNull(BROADCAST_RECHECK_MILLIS) { waiter.await() } ?: requestConnectionInfo()
       if (info.groupFormed && info.groupOwnerAddress != null) return@withTimeout info
+      if (waiter.isCompleted) {
+        waiter = CompletableDeferred<WifiP2pInfo>().also { connectionWaiter = it }
+        delay(BROADCAST_RECHECK_MILLIS)
+      }
     }
     error("unreachable")
   }
@@ -305,7 +313,7 @@ class WifiDirectController(
 
   /** Dispatches group removal without waiting for vendor callbacks on an Android main thread. */
   @SuppressLint("MissingPermission")
-  fun requestCloseGroup() {
+  override fun requestCloseGroup() {
     runCatching {
       manager.removeGroup(
         channel,

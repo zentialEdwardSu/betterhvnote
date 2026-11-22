@@ -25,7 +25,7 @@ import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 
 /** App-level pairing. It intentionally does not create an Android Bluetooth bond. */
-class AndroidPairingController(context: Context) : PairingController {
+class AndroidPairingController(context: Context) : PairingController, AutoCloseable {
   private val appContext = context.applicationContext
   private val prefs = appContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
   private val database = PairingDatabase(appContext).apply {
@@ -180,10 +180,12 @@ class AndroidPairingController(context: Context) : PairingController {
   /** Resolves the PSK selected by a v4 record's key id. */
   fun pairingKeyStore(): PairingKeyStore = PairingKeyStore { keyId ->
     pairedClients.firstNotNullOfOrNull { client ->
-      val key = sharedKey(client.id) ?: return@firstNotNullOfOrNull null
+      val key = runCatching { sharedKey(client.id) }.getOrNull() ?: return@firstNotNullOfOrNull null
       if (SessionKeys.keyId(key) == keyId) PairingKey(client.id, key) else null
     }
   }
+
+  override fun close() = database.close()
 
   private fun upsert(device: PairedDevice, encryptedSecret: String) {
     insert(database.writableDatabase, device, encryptedSecret, SQLiteDatabase.CONFLICT_REPLACE)
@@ -240,7 +242,7 @@ class AndroidPairingController(context: Context) : PairingController {
       prefs.edit { putString(KEY_LOCAL_ID, id) }
     }
 
-  private fun masterKey(): SecretKey {
+  private fun masterKey(): SecretKey = synchronized(masterKeyLock) {
     val store = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
     (store.getKey(KEYSTORE_ALIAS, null) as? SecretKey)?.let { return it }
     return KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore").run {
@@ -310,6 +312,15 @@ class AndroidPairingController(context: Context) : PairingController {
       "legacy",
     )
     val INFO = "betterhv-transfer-pairing-v1".toByteArray(StandardCharsets.UTF_8)
+    private val masterKeyLock = Any()
+    @Volatile private var sharedInstance: AndroidPairingController? = null
+
+    fun shared(context: Context): AndroidPairingController =
+      sharedInstance ?: synchronized(this) {
+        sharedInstance ?: AndroidPairingController(context.applicationContext).also {
+          sharedInstance = it
+        }
+      }
 
     fun identityHash(deviceId: String): String = TransferCrypto.sha256(deviceId.encodeToByteArray())
       .copyOf(5)

@@ -19,14 +19,6 @@ interface SenderEndpoint :
   override fun close() = stop()
 }
 
-interface ReceiverEndpoint :
-  AutoCloseable,
-  TransferObservable {
-  suspend fun discover(timeoutMillis: Long = 20_000L): List<DiscoveredSender>
-  suspend fun requestNext(kind: ContentKind, stagingDirectory: File): ReceivedLease?
-  override fun close()
-}
-
 data class DiscoveredSender(
   val bluetoothAddress: String,
   val deviceId: String,
@@ -89,13 +81,4 @@ data class PairingConfirmation(
   val remoteDeviceName: String,
   val verificationCode: String,
   internal val sharedKey: ByteArray,
-)
-
-data class BleIdentity(
-  val protocolVersion: Int,
-  val imageCount: Int,
-  val textCount: Int,
-  val pdfCount: Int,
-  val deviceId: String,
-  val deviceName: String,
 )

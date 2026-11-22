@@ -14,6 +14,7 @@ import android.os.Build
 import android.util.Log
 import com.betterhv.transfer.core.v4.session.PeerConnection
 import com.betterhv.transfer.core.v4.session.RecordLink
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
@@ -177,13 +178,21 @@ class BleProtocolClient private constructor(
       val active = gatt ?: throw V4LinkException("GATT is closed")
       val characteristic = control ?: throw V4LinkException("GATT is not ready")
       repeat(WRITE_ATTEMPTS) { attempt ->
-        val status = runCatching {
-          await(Op.WRITE, WRITE_TIMEOUT_MILLIS) { write(active, characteristic, record) }
+        var accepted = false
+        val status = try {
+          await(Op.WRITE, WRITE_TIMEOUT_MILLIS) {
+            write(active, characteristic, record).also { accepted = it }
+          }
+        } catch (cancelled: CancellationException) {
+          throw cancelled
+        } catch (error: Throwable) {
+          if (closed || disconnected.isCompleted) throw V4LinkException("GATT disconnected", error)
+          if (accepted) throw error
+          null
         }
-        val value = status.getOrNull()
-        if (value == BluetoothGatt.GATT_SUCCESS) return
+        if (status == BluetoothGatt.GATT_SUCCESS) return
         if (closed || disconnected.isCompleted) throw V4LinkException("GATT disconnected")
-        if (value != null) throw V4LinkException("GATT write failed: $value")
+        if (status != null) throw V4LinkException("GATT write failed: $status")
         // Refused as busy: the controller's buffers are full. Back off one connection event.
         delay(BUSY_BACKOFF_MILLIS * (attempt + 1))
       }

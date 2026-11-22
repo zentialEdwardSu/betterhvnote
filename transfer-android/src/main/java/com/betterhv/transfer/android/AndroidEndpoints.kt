@@ -1,20 +1,17 @@
 package com.betterhv.transfer.android
 
 import android.content.Context
-import com.betterhv.transfer.core.ContentKind
 import com.betterhv.transfer.core.TransferErrorCode
 import com.betterhv.transfer.core.TransferEvent
 import com.betterhv.transfer.core.TransferFailure
 import com.betterhv.transfer.core.TransferPhase
 import com.betterhv.transfer.core.TransferSnapshot
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
-import java.io.File
 
 /**
  * Android endpoint shells keep lifecycle and radio code out of app UI. The wire command
@@ -69,36 +66,4 @@ class AndroidSenderEndpoint(
     )
     mutableEvents.tryEmit(TransferEvent.Failed(null, failure))
   }
-}
-
-class AndroidReceiverEndpoint(context: Context, private val fetcher: suspend (ContentKind, File) -> ReceivedLease?) :
-  ReceiverEndpoint {
-  private val scanner = BleReceiverScanner(context)
-  private val mutableSnapshot = MutableStateFlow(TransferSnapshot())
-  private val mutableEvents = MutableSharedFlow<TransferEvent>(extraBufferCapacity = 16)
-  override val snapshot: StateFlow<TransferSnapshot> = mutableSnapshot.asStateFlow()
-  override val events: SharedFlow<TransferEvent> = mutableEvents.asSharedFlow()
-
-  override suspend fun discover(timeoutMillis: Long): List<DiscoveredSender> {
-    mutableSnapshot.value = TransferSnapshot(phase = TransferPhase.DISCOVERING, canCancel = true)
-    return try {
-      scanner.discover(timeoutMillis).also { mutableSnapshot.value = TransferSnapshot() }
-    } catch (cancelled: CancellationException) {
-      mutableSnapshot.value = TransferSnapshot()
-      throw cancelled
-    } catch (error: Throwable) {
-      val failure = TransferFailure(TransferErrorCode.INTERNAL, error.message ?: "BLE scan failed", true)
-      mutableSnapshot.value = TransferSnapshot(phase = TransferPhase.FAILED, lastFailure = failure, canRetry = true)
-      mutableEvents.tryEmit(TransferEvent.Failed(null, failure))
-      throw error
-    }
-  }
-
-  override suspend fun requestNext(kind: ContentKind, stagingDirectory: File): ReceivedLease? =
-    fetcher(kind, stagingDirectory)
-
-  override fun cancel() {
-    mutableSnapshot.value = TransferSnapshot()
-  }
-  override fun close() = cancel()
 }
