@@ -159,10 +159,10 @@ jobs:
           set -euo pipefail
           mkdir -p release-assets
           if [[ "$PRODUCT" == 'note' ]]; then
-            source_apk='app/build/outputs/apk/release/app-release.apk'
+            source_apk='build/app/outputs/apk/release/app-release.apk'
             target_apk="release-assets/BetterHvNote-$VERSION-android-arm64.apk"
           else
-            source_apk='phone-app/build/outputs/apk/release/phone-app-release.apk'
+            source_apk='build/phone-app/outputs/apk/release/phone-app-release.apk'
             target_apk="release-assets/NoteLink-$VERSION-android.apk"
           fi
           test -f "$source_apk"
@@ -225,7 +225,7 @@ jobs:
           VERSION: ${{ needs.prepare.outputs.version }}
         run: |
           $ErrorActionPreference = 'Stop'
-          $zip = Get-Item "phone-desktop/build/distributions/NoteLink-$env:VERSION-windows-x64.zip"
+          $zip = Get-Item "build/phone-desktop/distributions/NoteLink-$env:VERSION-windows-x64.zip"
           $target = Join-Path $env:RUNNER_TEMP ("notelink-release-check-{0}" -f [guid]::NewGuid())
           Expand-Archive -LiteralPath $zip.FullName -DestinationPath $target
           $root = Join-Path $target "NoteLink-$env:VERSION"
@@ -252,7 +252,7 @@ jobs:
         uses: actions/upload-artifact@v7.0.1
         with:
           name: release-windows-${{ needs.prepare.outputs.tag }}
-          path: phone-desktop/build/distributions/NoteLink-${{ needs.prepare.outputs.version }}-windows-x64.zip
+          path: build/phone-desktop/distributions/NoteLink-${{ needs.prepare.outputs.version }}-windows-x64.zip
           if-no-files-found: error
           retention-days: 7
 

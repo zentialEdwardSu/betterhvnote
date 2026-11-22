@@ -44,12 +44,12 @@ jobs:
         shell: bash
         run: chmod +x ./gradlew
 
-      - name: Run tests, static analysis, lint, and debug builds
+      - name: Run tests, static analysis, and lint
         shell: bash
-        run: ./gradlew test detekt lint :app:assembleDebug :phone-app:assembleDebug --stacktrace
+        run: ./gradlew test detekt lint --stacktrace
 
-  windows-portable:
-    name: Windows portable package
+  windows-tests-and-lint:
+    name: Windows tests and lint
     runs-on: windows-2025
     steps:
       - name: Check out sources
@@ -68,40 +68,9 @@ jobs:
         with:
           cache-provider: basic
 
-      - name: Test and package NoteLink
+      - name: Run Windows tests and lint
         shell: pwsh
-        run: ./gradlew.bat :phone-desktop:test :transfer-windows:test :phone-desktop:packagePortableZip --stacktrace
-
-      - name: Verify portable archive
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $zip = Get-Item 'phone-desktop/build/distributions/NoteLink-*-windows-x64.zip'
-          $target = Join-Path $env:RUNNER_TEMP ("notelink-portable-check-{0}" -f [guid]::NewGuid())
-          Expand-Archive -LiteralPath $zip.FullName -DestinationPath $target
-          $roots = @(Get-ChildItem -LiteralPath $target -Directory)
-          if ($roots.Count -ne 1) { throw "Expected one archive root, found $($roots.Count)" }
-          $root = $roots[0]
-          @('NoteLink.exe', 'README.txt', 'Allow-NoteLink-Firewall.ps1', 'Remove-NoteLink-Firewall.ps1') | ForEach-Object {
-            if (-not (Test-Path -LiteralPath (Join-Path $root.FullName $_) -PathType Leaf)) { throw "Missing $_" }
-          }
-          if (-not (Test-Path -LiteralPath (Join-Path $root.FullName 'runtime') -PathType Container)) {
-            throw 'Missing runtime directory'
-          }
-          if (-not (Test-Path -LiteralPath (Join-Path $root.FullName 'notelink_windows.dll') -PathType Leaf)) {
-            throw 'Missing notelink_windows.dll'
-          }
-          @('Allow-NoteLink-Firewall.ps1', 'Remove-NoteLink-Firewall.ps1') | ForEach-Object {
-            $tokens = $null
-            $errors = $null
-            $ast = [System.Management.Automation.Language.Parser]::ParseFile(
-              (Join-Path $root.FullName $_), [ref]$tokens, [ref]$errors
-            )
-            if ($errors.Count -ne 0) { throw "PowerShell syntax error in $_`: $errors" }
-            if (-not ($ast.ParamBlock.Parameters.Name.VariablePath.UserPath -contains 'Elevated')) {
-              throw "Missing -Elevated parameter in $_"
-            }
-          }
+        run: ./gradlew.bat :phone-desktop:test :transfer-windows:test :phone-desktop:detekt :transfer-windows:detekt :phone-desktop:lint :transfer-windows:lint --stacktrace
 
   proto-schema:
     name: Proto schema
