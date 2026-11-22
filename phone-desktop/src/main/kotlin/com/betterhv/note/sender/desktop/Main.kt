@@ -28,29 +28,24 @@ import androidx.compose.ui.window.Tray
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
-import com.betterhv.note.sender.shared.DashboardActions
-import com.betterhv.note.sender.shared.DashboardHistoryItem
-import com.betterhv.note.sender.shared.DashboardItem
-import com.betterhv.note.sender.shared.DashboardItemState
-import com.betterhv.note.sender.shared.DashboardPairedDevice
-import com.betterhv.note.sender.shared.DashboardPairing
-import com.betterhv.note.sender.shared.DashboardState
-import com.betterhv.note.sender.shared.NoteLinkDashboard
-import com.betterhv.note.sender.shared.NoteLinkI18n
-import com.betterhv.note.sender.shared.NoteLinkLanguage
-import com.betterhv.note.sender.shared.noteLinkText
 import com.betterhv.transfer.core.ContentKind
 import com.betterhv.transfer.core.QueueItem
 import com.betterhv.transfer.core.QueueState
 import com.betterhv.transfer.core.SendOrder
 import com.betterhv.transfer.core.SendOrderSelector
 import com.betterhv.transfer.core.SendOutcome
+import com.betterhv.transfer.core.i18n.NoteLinkI18n
+import com.betterhv.transfer.core.i18n.NoteLinkLanguage
+import com.betterhv.transfer.core.i18n.noteLinkText
+import com.betterhv.transfer.core.i18n.text
 import com.betterhv.transfer.windows.JnaWindowsNativeApi
 import com.betterhv.update.UpdateCheckState
 import com.betterhv.update.UpdateChecker
 import com.betterhv.update.UpdateProduct
 import com.betterhv.update.UpdateUiState
 import com.betterhv.update.NoteAppUpdateTaskState
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -78,10 +73,15 @@ import java.nio.file.Files
 import java.nio.file.StandardCopyOption
 import java.util.Properties
 import java.util.UUID
+import java.util.concurrent.atomic.AtomicBoolean
 import javax.imageio.ImageIO
+import javax.swing.JOptionPane
 import javax.swing.SwingUtilities
 
 fun main() {
+  Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
+    DesktopLog.error("uncaught.${thread.name}", throwable)
+  }
   DesktopLog.info(
     "app.start",
     "os=${System.getProperty("os.name")} ${System.getProperty("os.version")}",
@@ -95,6 +95,18 @@ fun main() {
   }
   try {
     runNoteLink(guard)
+  } catch (error: Throwable) {
+    DesktopLog.error("app.fatal", error)
+    runCatching {
+      JOptionPane.showMessageDialog(
+        null,
+        "NoteLink failed to start:\n${error.javaClass.simpleName}: ${error.message.orEmpty()}\n\n" +
+          "Log: ${File(paths.root, "notelink.log").absolutePath}",
+        "NoteLink",
+        JOptionPane.ERROR_MESSAGE,
+      )
+    }
+    throw error
   } finally {
     guard.close()
   }
@@ -183,8 +195,11 @@ private fun runNoteLink(guard: SingleInstanceGuard) {
       guard.startListening {
         SwingUtilities.invokeLater {
           windowVisible = true
-          mainWindow.value?.toFront()
-          mainWindow.value?.requestFocus()
+          mainWindow.value?.let { win ->
+            win.extendedState = win.extendedState and Frame.ICONIFIED.inv()
+            win.toFront()
+            win.requestFocus()
+          }
         }
       }
     }
@@ -194,8 +209,9 @@ private fun runNoteLink(guard: SingleInstanceGuard) {
       tooltip = "NoteLink",
       onAction = { windowVisible = true },
       menu = {
+        val trayState by controller.state.collectAsState()
         Item("Open NoteLink", onClick = { windowVisible = true })
-        if (controller.state.value.receiveEnabled) {
+        if (trayState.receiveEnabled) {
           Item("Pause receiving", onClick = { controller.setReceiveEnabled(false) })
         } else {
           Item("Resume receiving", onClick = { controller.setReceiveEnabled(true) })
@@ -204,8 +220,8 @@ private fun runNoteLink(guard: SingleInstanceGuard) {
         Item(
           "Exit",
           onClick = {
-            controller.close();
-            guard.close();
+            controller.close()
+            guard.close()
             exitApplication()
           },
         )
@@ -293,33 +309,35 @@ private fun runNoteLink(guard: SingleInstanceGuard) {
 }
 
 private class DesktopAppController(private val native: JnaWindowsNativeApi) : AutoCloseable {
-  private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-  private val paths = DesktopPaths()
-  private val settings = DesktopSettings(paths, native)
-
-  init {
-    NoteLinkI18n.language = settings.language
-  }
-
-  private val queue = DesktopQueueRepository(
-    paths,
-    sendOrder = { settings.sendOrder },
-    deviceName = { id ->
-      id?.let { deviceId -> settings.pairings.firstOrNull { it.deviceId == deviceId }?.deviceName }
-    },
+  private data class Services(
+    val settings: DesktopSettings,
+    val queue: DesktopQueueRepository,
+    val inbox: DesktopInboxRepository,
+    val transfer: DesktopTransferService,
   )
-  private val inbox = DesktopInboxRepository(paths)
+
+  private val exceptionHandler = CoroutineExceptionHandler { _, throwable ->
+    DesktopLog.error("controller.coroutine", throwable)
+    notice.value = throwable.message ?: throwable.javaClass.simpleName
+  }
+  private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO + exceptionHandler)
+  private val paths = DesktopPaths()
+  private val closed = AtomicBoolean(false)
+  private val servicesDeferred = CompletableDeferred<Services>()
+  @Volatile private var services: Services? = null
   private val notice = MutableStateFlow<String?>(null)
   private val updateUiState = MutableStateFlow(UpdateUiState())
   private val notePackageStatus = MutableStateFlow<String?>(null)
   private val updateChecker = UpdateChecker()
   private val appVersion = loadNoteLinkVersion()
-  private val mutableState = MutableStateFlow(DashboardState())
+  private val mutableState = MutableStateFlow(DashboardState(appVersion = appVersion))
   private val pairingRevision = MutableStateFlow(0)
-  private val transfer = DesktopTransferService(native, settings, queue, inbox, paths.updateCache) {
-    pairingRevision.value++
-  }
   val state: StateFlow<DashboardState> = mutableState
+
+  private suspend fun awaitServices(): Services = servicesDeferred.await()
+
+  private fun cachedInboxFile(id: String): File? =
+    mutableState.value.inbox.firstOrNull { it.id == id }?.file
 
   fun dashboardActions(owner: java.awt.Window) = DashboardActions(
     addFiles = { chooseFiles(owner)?.let(::addFiles) },
@@ -332,19 +350,16 @@ private class DesktopAppController(private val native: JnaWindowsNativeApi) : Au
     setSendOrder = ::setSendOrder,
     openInboxItem = ::openInboxItem,
     saveInboxItem = { id ->
-      chooseSaveLocation(owner, inboxFile(id))?.let {
-        saveInboxItem(
-          id,
-          it,
-        )
+      chooseSaveLocation(owner, cachedInboxFile(id))?.let {
+        saveInboxItem(id, it)
       }
     },
     deleteInboxItem = ::deleteInboxItem,
     setReceiveEnabled = ::setReceiveEnabled,
     saveDisplayName = ::saveDisplayName,
     beginPairing = ::beginPairing,
-    submitPairingCode = transfer::submitPairingCode,
-    cancelPairing = transfer::cancelPairing,
+    submitPairingCode = ::submitPairingCode,
+    cancelPairing = ::cancelPairing,
     selectDevice = ::selectDevice,
     unpair = ::unpair,
     refreshStatus = ::refreshStatus,
@@ -355,128 +370,156 @@ private class DesktopAppController(private val native: JnaWindowsNativeApi) : Au
     openRelease = ::openRelease,
     dismissUpdate = ::dismissUpdate,
     importNotePackage = { chooseApk(owner)?.let(::importNotePackage) },
-    dragInboxItem = { id -> desktopInboxDragModifier(inboxFile(id)) },
+    dragInboxItem = { item -> desktopInboxDragModifier(item.file) },
   )
 
   init {
     scope.launch {
-      transfer.noteUpdateState.collect { state ->
-        if (state != null) notePackageStatus.value = state.desktopText()
-      }
-    }
-    scope.launch {
-      val revisionAndUpdate =
-        combine(pairingRevision, updateUiState, notePackageStatus, transfer.pairingState) {
-            _, update, packageStatus, _ ->
-          update to packageStatus
-        }
-      val queueAndHistory = combine(queue.itemFlow, queue.historyFlow) { items, history ->
-        items to history
-      }
-      combine(queueAndHistory, inbox.itemFlow, transfer.status, notice, revisionAndUpdate) {
-          queuedAndHistory,
-          received,
-          status,
-          currentNotice,
-          updateAndPackage,
-        ->
-        val (queued, historyEntries) = queuedAndHistory
-        val pairings = settings.pairings
-        val pairing = pairings.maxByOrNull(DesktopPairing::lastUsedAt)
-        DashboardState(
-          displayName = settings.displayName,
-          status = status.summary,
-          statusDetail = status.detail,
-          transfer = status.transfer,
-          transferLog = status.transferLog,
-          timelineSummary = status.timelineSummary,
-          showRecentTransferEvents = settings.showRecentTransferEvents,
-          language = settings.language,
-          receiveEnabled = settings.receiveEnabled,
-          pairedDevices = pairings.map { DashboardPairedDevice(it.deviceId, it.deviceName) },
-          selectedDeviceId = pairing?.deviceId,
-          sendOrder = settings.sendOrder,
-          nextQueueItemId = nextQueueItemId(queued, settings.sendOrder, pairing?.deviceId),
-          pairing = when (val pairingState = transfer.pairingState.value) {
-            DesktopPairingState.Idle -> null
-            DesktopPairingState.Entering -> DashboardPairing()
-            is DesktopPairingState.Waiting -> DashboardPairing(
-              waitingCode = pairingState.code, message = pairingState.message
-            )
-            is DesktopPairingState.Paired -> DashboardPairing(pairedName = pairingState.deviceName)
-            is DesktopPairingState.Failed -> DashboardPairing(message = pairingState.message)
-          },
-          queue = queued.map { item ->
-            DashboardItem(
-              item.id.toString(),
-              item.displayName ?: if (item.kind == ContentKind.TEXT) {
-                noteLinkText(
-                  "文字",
-                  "Text",
-                )
-              } else {
-                noteLinkText("图片", "Image")
-              },
-              "${item.kind.label()} · ${formatBytes(item.byteLength)} · ${item.state.label()}",
-              when (item.state) {
-                QueueState.TRANSFERRING, QueueState.AWAITING_COMMIT -> DashboardItemState.TRANSFERRING
-                QueueState.FAILED -> DashboardItemState.FAILED
-                else -> DashboardItemState.PENDING
-              },
-            )
-          },
-          history = historyEntries.map { entry ->
-            DashboardHistoryItem(
-              id = entry.id.toString(),
-              title = entry.displayName ?: entry.kind.label(),
-              detail = listOfNotNull(
-                if (entry.outcome == SendOutcome.FAILED) {
-                  noteLinkText("失败", "Failed")
-                } else {
-                  noteLinkText("已发送", "Sent")
-                },
-                entry.destinationName ?: entry.destinationDeviceId,
-                formatBytes(entry.byteLength),
-                entry.failureReason,
-              ).joinToString(" · "),
-              failed = entry.outcome == SendOutcome.FAILED,
-              resendable = queue.canResend(entry),
-            )
-          },
-          inbox = received.map { item ->
-            DashboardItem(
-              item.artifactId.toString(),
-              item.displayName,
-              "${formatBytes(item.byteLength)} · ${item.state.name.lowercase()}",
-              when (item.state) {
-                DesktopInboxState.COMPLETE -> DashboardItemState.COMPLETE
-                DesktopInboxState.FAILED -> DashboardItemState.FAILED
-                DesktopInboxState.RECEIVING -> DashboardItemState.TRANSFERRING
-              },
-            )
-          },
-          notice = currentNotice,
-          appVersion = appVersion,
-          updateUiState = updateAndPackage.first,
-          notePackageStatus = updateAndPackage.second,
-        )
-      }.collect(mutableState)
-    }
-    if (settings.receiveEnabled) {
-      transfer.start()
-    } else {
-      mutableState.value = mutableState.value.copy(
-        receiveEnabled = false,
-        status = noteLinkText("接收已暂停", "Receiving paused"),
+      if (closed.get()) return@launch
+      val settings = DesktopSettings(paths, native)
+      NoteLinkI18n.language = settings.language
+      val queue = DesktopQueueRepository(
+        paths,
+        sendOrder = { settings.sendOrder },
+        deviceName = { id ->
+          id?.let { deviceId -> settings.pairings.firstOrNull { it.deviceId == deviceId }?.deviceName }
+        },
       )
+      val inbox = DesktopInboxRepository(paths)
+      val transfer = DesktopTransferService(native, settings, queue, inbox, paths.updateCache) {
+        pairingRevision.value++
+      }
+      if (closed.get()) {
+        transfer.close()
+        inbox.close()
+        queue.close()
+        return@launch
+      }
+      val created = Services(settings, queue, inbox, transfer)
+      services = created
+      servicesDeferred.complete(created)
+
+      scope.launch {
+        transfer.noteUpdateState.collect { state ->
+          if (state != null) notePackageStatus.value = state.desktopText()
+        }
+      }
+      scope.launch {
+        val revisionAndUpdate =
+          combine(pairingRevision, updateUiState, notePackageStatus, transfer.pairingState) {
+              _, update, packageStatus, _ ->
+            update to packageStatus
+          }
+        val queueAndHistory = combine(queue.itemFlow, queue.historyFlow) { items, history ->
+          items to history
+        }
+        combine(queueAndHistory, inbox.itemFlow, transfer.status, notice, revisionAndUpdate) {
+            queuedAndHistory,
+            received,
+            status,
+            currentNotice,
+            updateAndPackage,
+          ->
+          val (queued, historyEntries) = queuedAndHistory
+          val pairings = settings.pairings
+          val pairing = pairings.maxByOrNull(DesktopPairing::lastUsedAt)
+          DashboardState(
+            displayName = settings.displayName,
+            status = status.summary,
+            statusDetail = status.detail,
+            transfer = status.transfer,
+            transferLog = status.transferLog,
+            timelineSummary = status.timelineSummary,
+            showRecentTransferEvents = settings.showRecentTransferEvents,
+            language = settings.language,
+            receiveEnabled = settings.receiveEnabled,
+            pairedDevices = pairings.map { DashboardPairedDevice(it.deviceId, it.deviceName) },
+            selectedDeviceId = pairing?.deviceId,
+            sendOrder = settings.sendOrder,
+            nextQueueItemId = nextQueueItemId(queued, settings.sendOrder, pairing?.deviceId),
+            pairing = when (val pairingState = transfer.pairingState.value) {
+              DesktopPairingState.Idle -> null
+              DesktopPairingState.Entering -> DashboardPairing()
+              is DesktopPairingState.Waiting -> DashboardPairing(
+                waitingCode = pairingState.code, message = pairingState.message
+              )
+              is DesktopPairingState.Paired -> DashboardPairing(pairedName = pairingState.deviceName)
+              is DesktopPairingState.Failed -> DashboardPairing(message = pairingState.message)
+            },
+            queue = queued.map { item ->
+              DashboardItem(
+                item.id.toString(),
+                item.displayName ?: if (item.kind == ContentKind.TEXT) {
+                  noteLinkText(
+                    "文字",
+                    "Text",
+                  )
+                } else {
+                  noteLinkText("图片", "Image")
+                },
+                "${item.kind.label()} · ${formatBytes(item.byteLength)} · ${item.state.label()}",
+                when (item.state) {
+                  QueueState.TRANSFERRING, QueueState.AWAITING_COMMIT -> DashboardItemState.TRANSFERRING
+                  QueueState.FAILED -> DashboardItemState.FAILED
+                  else -> DashboardItemState.PENDING
+                },
+              )
+            },
+            history = historyEntries.map { entry ->
+              DashboardHistoryItem(
+                id = entry.id.toString(),
+                title = entry.displayName ?: entry.kind.label(),
+                detail = listOfNotNull(
+                  if (entry.outcome == SendOutcome.FAILED) {
+                    noteLinkText("失败", "Failed")
+                  } else {
+                    noteLinkText("已发送", "Sent")
+                  },
+                  entry.destinationName ?: entry.destinationDeviceId,
+                  formatBytes(entry.byteLength),
+                  entry.failureReason,
+                ).joinToString(" · "),
+                failed = entry.outcome == SendOutcome.FAILED,
+                resendable = queue.canResend(entry),
+              )
+            },
+            inbox = received.map { item ->
+              DashboardItem(
+                item.artifactId.toString(),
+                item.displayName,
+                "${formatBytes(item.byteLength)} · ${item.state.name.lowercase()}",
+                when (item.state) {
+                  DesktopInboxState.COMPLETE -> DashboardItemState.COMPLETE
+                  DesktopInboxState.FAILED -> DashboardItemState.FAILED
+                  DesktopInboxState.RECEIVING -> DashboardItemState.TRANSFERRING
+                },
+                file = item.file,
+              )
+            },
+            notice = currentNotice,
+            appVersion = appVersion,
+            updateUiState = updateAndPackage.first,
+            notePackageStatus = updateAndPackage.second,
+          )
+        }.collect(mutableState)
+      }
+      if (settings.receiveEnabled) {
+        transfer.start()
+      } else {
+        mutableState.value = mutableState.value.copy(
+          receiveEnabled = false,
+          status = noteLinkText("接收已暂停", "Receiving paused"),
+        )
+      }
+      checkForUpdates(manual = false)
     }
-    checkForUpdates(manual = false)
   }
 
   fun addFiles(files: List<File>) = scope.launch {
-    runCatching { queue.enqueueFiles(files, settings.pairing?.deviceId) }
+    val active = awaitServices()
+    runCatching { active.queue.enqueueFiles(files, active.settings.pairing?.deviceId) }
       .onSuccess {
-        transfer.refreshCounts();
+        active.transfer.refreshCounts()
         notice.value = noteLinkText(
           "已加入 ${it.size} 个文件",
           "Added ${it.size} files",
@@ -486,17 +529,19 @@ private class DesktopAppController(private val native: JnaWindowsNativeApi) : Au
   }
 
   fun addText(value: String) = scope.launch {
-    runCatching { queue.enqueueText(value, settings.pairing?.deviceId) }
+    val active = awaitServices()
+    runCatching { active.queue.enqueueText(value, active.settings.pairing?.deviceId) }
       .onSuccess {
-        transfer.refreshCounts();
+        active.transfer.refreshCounts()
         notice.value = noteLinkText("文字已加入发送队列", "Text added to send queue")
       }
       .onFailure { notice.value = it.message ?: "Could not add text" }
   }
 
   fun importNotePackage(file: File) = scope.launch {
+    val active = awaitServices()
     notePackageStatus.value = noteLinkText("正在校验 APK…", "Verifying APK...")
-    runCatching { transfer.importNotePackage(file) }
+    runCatching { active.transfer.importNotePackage(file) }
       .onSuccess { version ->
         notePackageStatus.value =
           noteLinkText("已验证 BetterHvNote $version", "Verified BetterHvNote $version")
@@ -505,25 +550,26 @@ private class DesktopAppController(private val native: JnaWindowsNativeApi) : Au
   }
 
   fun addClipboard() = scope.launch {
+    val active = awaitServices()
     runCatching {
       val clipboard = Toolkit.getDefaultToolkit().systemClipboard
       when {
         clipboard.isDataFlavorAvailable(DataFlavor.imageFlavor) -> {
-          addImageToQueue(clipboard.getData(DataFlavor.imageFlavor) as Image)
+          addImageToQueue(active, clipboard.getData(DataFlavor.imageFlavor) as Image)
           noteLinkText("图片已加入发送队列", "Image added to send queue")
         }
 
         clipboard.isDataFlavorAvailable(DataFlavor.javaFileListFlavor) -> {
           @Suppress("UNCHECKED_CAST")
           val files = clipboard.getData(DataFlavor.javaFileListFlavor) as List<File>
-          queue.enqueueFiles(files, settings.pairing?.deviceId)
+          active.queue.enqueueFiles(files, active.settings.pairing?.deviceId)
           noteLinkText("图片已加入发送队列", "Image added to send queue")
         }
 
         clipboard.isDataFlavorAvailable(DataFlavor.stringFlavor) -> {
-          queue.enqueueText(
+          active.queue.enqueueText(
             clipboard.getData(DataFlavor.stringFlavor) as String,
-            settings.pairing?.deviceId,
+            active.settings.pairing?.deviceId,
           )
           noteLinkText("文字已加入发送队列", "Text added to send queue")
         }
@@ -531,22 +577,23 @@ private class DesktopAppController(private val native: JnaWindowsNativeApi) : Au
         else -> error("Clipboard contains no usable text or image")
       }
     }.onSuccess {
-      transfer.refreshCounts();
+      active.transfer.refreshCounts()
       notice.value = it
     }
       .onFailure { notice.value = it.message ?: "Could not add clipboard content" }
   }
 
   fun addImage(image: Image) = scope.launch {
-    runCatching { addImageToQueue(image) }
+    val active = awaitServices()
+    runCatching { addImageToQueue(active, image) }
       .onSuccess {
-        transfer.refreshCounts();
+        active.transfer.refreshCounts()
         notice.value = noteLinkText("图片已加入发送队列", "Image added to send queue")
       }
       .onFailure { notice.value = it.message ?: "Could not add image" }
   }
 
-  private fun addImageToQueue(image: Image) {
+  private fun addImageToQueue(active: Services, image: Image) {
     val file = File(paths.outbox, "clipboard-${UUID.randomUUID()}.png")
     val buffered = BufferedImage(
       image.getWidth(null).coerceAtLeast(1),
@@ -561,15 +608,16 @@ private class DesktopAppController(private val native: JnaWindowsNativeApi) : Au
     }
     ImageIO.write(buffered, "png", file)
     try {
-      queue.enqueueFiles(listOf(file), settings.pairing?.deviceId)
+      active.queue.enqueueFiles(listOf(file), active.settings.pairing?.deviceId)
     } finally {
       file.delete()
     }
   }
 
   fun deleteQueueItem(id: String) = scope.launch {
-    runCatching { queue.delete(UUID.fromString(id)) }
-    transfer.refreshCounts()
+    val active = awaitServices()
+    runCatching { active.queue.delete(UUID.fromString(id)) }
+    active.transfer.refreshCounts()
   }
 
   /** Surfaces a non-blocking warning when Windows denies reading firewall state. */
@@ -582,13 +630,14 @@ private class DesktopAppController(private val native: JnaWindowsNativeApi) : Au
   }
 
   fun resendHistory(id: String) = scope.launch {
+    val active = awaitServices()
     runCatching {
-      val pairing = settings.pairing
+      val pairing = active.settings.pairing
       requireNotNull(
-        queue.requeueHistory(
+        active.queue.requeueHistory(
           UUID.fromString(id),
           pairing?.deviceId,
-          settings.pairings.map { it.deviceId }.toSet(),
+          active.settings.pairings.map { it.deviceId }.toSet(),
         ),
       ) {
         noteLinkText(
@@ -598,20 +647,24 @@ private class DesktopAppController(private val native: JnaWindowsNativeApi) : Au
       }
     }
       .onSuccess {
-        transfer.refreshCounts()
+        active.transfer.refreshCounts()
         notice.value = noteLinkText("已重新加入发送队列", "Added back to the send queue")
       }
       .onFailure { notice.value = it.message ?: "Could not resend history item" }
   }
 
   fun deleteHistory(id: String) = scope.launch {
-    runCatching { queue.deleteHistory(UUID.fromString(id)) }
+    val active = awaitServices()
+    runCatching { active.queue.deleteHistory(UUID.fromString(id)) }
   }
 
-  fun clearHistory() = scope.launch { queue.clearHistory() }
+  fun clearHistory() = scope.launch {
+    awaitServices().queue.clearHistory()
+  }
 
-  fun setSendOrder(order: SendOrder) {
-    settings.sendOrder = order
+  fun setSendOrder(order: SendOrder) = scope.launch {
+    val active = awaitServices()
+    active.settings.sendOrder = order
     pairingRevision.value++
     notice.value = if (order == SendOrder.QUEUE) {
       noteLinkText("发送顺序：队列（最早优先）", "Send order: queue (oldest first)")
@@ -622,19 +675,18 @@ private class DesktopAppController(private val native: JnaWindowsNativeApi) : Au
   }
 
   fun openInboxItem(id: String) = scope.launch {
+    val active = awaitServices()
     runCatching {
-      val file = requireNotNull(inbox.find(UUID.fromString(id))?.file?.takeIf(File::isFile))
+      val file = requireNotNull(active.inbox.find(UUID.fromString(id))?.file?.takeIf(File::isFile))
       require(Desktop.isDesktopSupported())
       Desktop.getDesktop().open(file)
     }.onFailure { notice.value = it.message ?: "Cannot open file" }
   }
 
-  fun inboxFile(id: String): File? =
-    runCatching { inbox.find(UUID.fromString(id))?.file }.getOrNull()
-
   fun saveInboxItem(id: String, destination: File) = scope.launch {
+    val active = awaitServices()
     runCatching {
-      val source = requireNotNull(inboxFile(id)?.takeIf(File::isFile))
+      val source = requireNotNull(active.inbox.find(UUID.fromString(id))?.file?.takeIf(File::isFile))
       Files.copy(source.toPath(), destination.toPath(), StandardCopyOption.REPLACE_EXISTING)
     }.onSuccess {
       notice.value = noteLinkText(
@@ -644,57 +696,81 @@ private class DesktopAppController(private val native: JnaWindowsNativeApi) : Au
     }.onFailure { notice.value = it.message ?: "Save failed" }
   }
 
-  fun deleteInboxItem(id: String) =
-    scope.launch { runCatching { inbox.delete(UUID.fromString(id)) } }
-
-  fun setReceiveEnabled(enabled: Boolean) {
-    settings.receiveEnabled = enabled
-    if (enabled) transfer.start() else transfer.stop()
+  fun deleteInboxItem(id: String) = scope.launch {
+    val active = awaitServices()
+    runCatching { active.inbox.delete(UUID.fromString(id)) }
   }
 
-  fun saveDisplayName(name: String) {
+  fun setReceiveEnabled(enabled: Boolean) = scope.launch {
+    val active = awaitServices()
+    active.settings.receiveEnabled = enabled
+    pairingRevision.value++
+    if (enabled) active.transfer.start() else active.transfer.stop()
+  }
+
+  fun saveDisplayName(name: String) = scope.launch {
+    val active = awaitServices()
     runCatching {
-      settings.displayName = name;
-      transfer.restart()
+      active.settings.displayName = name
+      active.transfer.restart()
     }
-      .onSuccess { notice.value = noteLinkText("显示名称已保存", "Display name saved") }
+      .onSuccess {
+        pairingRevision.value++
+        notice.value = noteLinkText("显示名称已保存", "Display name saved")
+      }
       .onFailure { notice.value = it.message ?: "Invalid name" }
   }
 
-  fun beginPairing() {
-    if (!transfer.status.value.running && settings.receiveEnabled) transfer.start()
-    transfer.openPairing()
+  fun beginPairing() = scope.launch {
+    val active = awaitServices()
+    if (!active.transfer.status.value.running && active.settings.receiveEnabled) active.transfer.start()
+    active.transfer.openPairing()
   }
 
-  fun selectDevice(deviceId: String) {
-    settings.markLastUsed(deviceId)
+  fun submitPairingCode(code: String) = scope.launch {
+    awaitServices().transfer.submitPairingCode(code)
+  }
+
+  fun cancelPairing() = scope.launch {
+    awaitServices().transfer.cancelPairing()
+  }
+
+  fun selectDevice(deviceId: String) = scope.launch {
+    val active = awaitServices()
+    active.settings.markLastUsed(deviceId)
     pairingRevision.value++
     notice.value = noteLinkText("已切换发送目标", "Send target changed")
   }
 
-  fun unpair(deviceId: String) {
-    transfer.stop()
-    settings.unpair(deviceId)
+  fun unpair(deviceId: String) = scope.launch {
+    val active = awaitServices()
+    active.transfer.stop()
+    active.settings.unpair(deviceId)
     pairingRevision.value++
-    if (settings.receiveEnabled) transfer.start()
+    if (active.settings.receiveEnabled) active.transfer.start()
     notice.value =
       noteLinkText("已解除设备配对；队列和收件箱保留", "Device unpaired; queue and inbox were kept")
   }
 
-  fun refreshStatus() {
+  fun refreshStatus() = scope.launch {
+    val active = awaitServices()
     pairingRevision.value++
-    if (settings.receiveEnabled && !transfer.status.value.running) transfer.start()
+    if (active.settings.receiveEnabled && !active.transfer.status.value.running) active.transfer.start()
   }
 
-  fun cancelTransfer() = transfer.cancel()
+  fun cancelTransfer() = scope.launch {
+    awaitServices().transfer.cancel()
+  }
 
-  fun setShowRecentTransferEvents(show: Boolean) {
-    settings.showRecentTransferEvents = show
+  fun setShowRecentTransferEvents(show: Boolean) = scope.launch {
+    val active = awaitServices()
+    active.settings.showRecentTransferEvents = show
     pairingRevision.value++
   }
 
-  fun setLanguage(language: NoteLinkLanguage) {
-    settings.language = language
+  fun setLanguage(language: NoteLinkLanguage) = scope.launch {
+    val active = awaitServices()
+    active.settings.language = language
     NoteLinkI18n.language = language
     pairingRevision.value++
   }
@@ -722,9 +798,13 @@ private class DesktopAppController(private val native: JnaWindowsNativeApi) : Au
 
   override fun close() {
     DesktopLog.info("app.stop")
-    transfer.close()
-    inbox.close()
-    queue.close()
+    closed.set(true)
+    servicesDeferred.cancel()
+    services?.let {
+      it.transfer.close()
+      it.inbox.close()
+      it.queue.close()
+    }
     scope.cancel()
   }
 }
@@ -740,18 +820,20 @@ private fun FirewallWarningDialog(
   onRetry: () -> Unit,
   onDismiss: () -> Unit,
 ) {
+  val language by NoteLinkI18n.languageFlow.collectAsState()
+  val t: (String, String) -> String = { zh, en -> language.text(zh, en) }
   val detail = when (status) {
-    WindowsFirewallRuleStatus.Missing -> noteLinkText(
+    WindowsFirewallRuleStatus.Missing -> t(
       "未找到 NoteLink TCP 39817 入站规则。",
       "The NoteLink TCP 39817 inbound rule was not found.",
     )
 
-    is WindowsFirewallRuleStatus.Misconfigured -> noteLinkText(
+    is WindowsFirewallRuleStatus.Misconfigured -> t(
       "规则存在但不正确：${status.fields.joinToString("、")}",
       "The NoteLink rule is incorrect: ${status.fields.joinToString(", ")}",
     )
 
-    is WindowsFirewallRuleStatus.Blocked -> noteLinkText(
+    is WindowsFirewallRuleStatus.Blocked -> t(
       "Windows 防火墙已禁止所有入站连接（配置文件：${status.profiles.joinToString("、")}）。" +
         "请在“高级安全 Windows Defender 防火墙 → 属性”中取消“阻止所有传入连接”，否则任何规则都不会生效。",
       "Windows Firewall is blocking all inbound connections " +
@@ -759,7 +841,7 @@ private fun FirewallWarningDialog(
         "in Windows Defender Firewall advanced settings; otherwise every rule is ignored.",
     )
 
-    is WindowsFirewallRuleStatus.CheckFailed -> noteLinkText(
+    is WindowsFirewallRuleStatus.CheckFailed -> t(
       "无法确认防火墙规则：${status.detail}",
       "Could not verify the firewall rule: ${status.detail}",
     )
@@ -768,7 +850,7 @@ private fun FirewallWarningDialog(
   }
   AlertDialog(
     onDismissRequest = onDismiss,
-    title = { Text(noteLinkText("需要配置 Windows 防火墙", "Windows Firewall setup required")) },
+    title = { Text(t("需要配置 Windows 防火墙", "Windows Firewall setup required")) },
     text = {
       androidx.compose.foundation.layout.Column {
         Text(detail)
@@ -781,7 +863,7 @@ private fun FirewallWarningDialog(
           )
         }
         Text(
-          noteLinkText(
+          t(
             "点击“启用规则”由应用提权创建规则；也可以打开程序目录手动运行脚本。",
             "Choose Enable rule to create it with an administrator prompt, or open the app folder and run the script.",
           ),
@@ -793,9 +875,9 @@ private fun FirewallWarningDialog(
       Button(onClick = onInstall, enabled = !checking && !installing) {
         Text(
           if (installing) {
-            noteLinkText("正在启用…", "Enabling...")
+            t("正在启用…", "Enabling...")
           } else {
-            noteLinkText("启用规则", "Enable rule")
+            t("启用规则", "Enable rule")
           },
         )
       }
@@ -803,17 +885,17 @@ private fun FirewallWarningDialog(
     dismissButton = {
       androidx.compose.foundation.layout.Row {
         OutlinedButton(onClick = onOpenDirectory, enabled = !installing) {
-          Text(noteLinkText("打开程序目录", "Open app folder"))
+          Text(t("打开程序目录", "Open app folder"))
         }
         OutlinedButton(onClick = onRetry, enabled = !checking && !installing) {
           Text(
-            if (checking) noteLinkText("检查中…", "Checking...") else noteLinkText(
+            if (checking) t("检查中…", "Checking...") else t(
               "重新检查",
               "Check again",
             ),
           )
         }
-        TextButton(onClick = onDismiss) { Text(noteLinkText("稍后", "Later")) }
+        TextButton(onClick = onDismiss) { Text(t("稍后", "Later")) }
       }
     },
   )

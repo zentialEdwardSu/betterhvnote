@@ -1,11 +1,13 @@
 package com.betterhv.note.sender.desktop
 
-import com.betterhv.note.sender.shared.noteLinkText
+import com.betterhv.transfer.core.i18n.noteLinkText
 import com.betterhv.transfer.core.ContentCounts
 import com.betterhv.transfer.core.ContentKind
 import com.betterhv.transfer.core.ExportTransferOffer
 import com.betterhv.transfer.core.NOTELINK_LAN_PORT
 import com.betterhv.transfer.core.NoteLinkAdvertisementCodec
+import com.betterhv.transfer.core.QueueItem
+import com.betterhv.transfer.core.QueueState
 import com.betterhv.transfer.core.TransferErrorCode
 import com.betterhv.transfer.core.TransferEvent
 import com.betterhv.transfer.core.TransferEventLog
@@ -138,7 +140,7 @@ class DesktopTransferService(
 
   @Synchronized
   fun start() {
-    if (eventJob?.isActive == true) return
+    if (server != null || eventJob?.isActive == true) return
     val version = windowsVersion()
     if (!version.supported) {
       DesktopLog.info("transfer.readiness.unsupported-os", version.message)
@@ -408,7 +410,9 @@ class DesktopTransferService(
   override fun advertisedCounts(): ContentCounts = queue.counts()
 
   override fun counts(peerDeviceId: String): ContentCounts {
-    queue.releaseExpired(System.currentTimeMillis())
+    if (queue.releaseExpired(System.currentTimeMillis()) > 0) {
+      pruneInactiveLeases()
+    }
     return queue.counts(peerDeviceId)
   }
 
@@ -416,6 +420,7 @@ class DesktopTransferService(
     val lease = queue.leaseNext(kind, peerDeviceId) ?: return null
     leases[lease.item.id] = peerDeviceId to lease
     runCatching { lease.markTransferring() }
+      .onFailure { leases.remove(lease.item.id) }
     refreshAdvertisementOnly()
     return hostLease(lease)
   }
@@ -443,19 +448,23 @@ class DesktopTransferService(
   override fun leased(peerDeviceId: String, itemId: UUID): HostLease? {
     val (owner, lease) = leases[itemId] ?: return null
     if (owner != peerDeviceId) return null
-    runCatching { lease.heartbeat() }
+    if (runCatching { lease.heartbeat() }.isFailure) {
+      leases.remove(itemId)
+      return null
+    }
     return hostLease(lease)
   }
 
   override fun heartbeat(peerDeviceId: String, itemId: UUID): Boolean {
     val (owner, lease) = leases[itemId] ?: return false
-    return owner == peerDeviceId && runCatching { lease.heartbeat() }.isSuccess
+    if (owner != peerDeviceId) return false
+    return runCatching { lease.heartbeat() }.onFailure { leases.remove(itemId) }.isSuccess
   }
 
   override fun commit(peerDeviceId: String, itemId: UUID): Boolean {
     val entry = leases[itemId] ?: return false
     if (entry.first != peerDeviceId) return false
-    leases.remove(itemId)
+    if (!leases.remove(itemId, entry)) return false
     return runCatching { entry.second.commit() }.onSuccess {
       settings.markLastUsed(peerDeviceId)
       refreshAdvertisementOnly()
@@ -466,8 +475,17 @@ class DesktopTransferService(
   override fun release(peerDeviceId: String, itemId: UUID): Boolean {
     val entry = leases[itemId] ?: return false
     if (entry.first != peerDeviceId) return false
-    leases.remove(itemId)
+    if (!leases.remove(itemId, entry)) return false
     return runCatching { entry.second.release() }.onSuccess { refreshAdvertisementOnly() }.isSuccess
+  }
+
+  private fun pruneInactiveLeases() {
+    if (leases.isEmpty()) return
+    val activeIds = queue.items()
+      .filter { it.state in ACTIVE_LEASE_STATES }
+      .map(QueueItem::id)
+      .toSet()
+    leases.entries.removeIf { (id, _) -> id !in activeIds }
   }
 
   /** Counts changed through the protocol; the server already published them to the peer. */
@@ -636,5 +654,10 @@ class DesktopTransferService(
     const val TRANSPORT_LAN = 1
     const val EVENT_WAIT_MILLIS = 5_000
     const val EVENT_ERROR_BACKOFF_MILLIS = 500L
+    val ACTIVE_LEASE_STATES = setOf(
+      QueueState.LEASED,
+      QueueState.TRANSFERRING,
+      QueueState.AWAITING_COMMIT,
+    )
   }
 }

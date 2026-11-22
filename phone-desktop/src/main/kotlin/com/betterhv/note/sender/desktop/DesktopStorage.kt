@@ -1,13 +1,10 @@
 package com.betterhv.note.sender.desktop
 
 import app.cash.sqldelight.driver.jdbc.sqlite.JdbcSqliteDriver
-import com.betterhv.note.sender.shared.NoteLinkI18n
-import com.betterhv.note.sender.shared.NoteLinkLanguage
 import com.betterhv.note.sender.shared.db.inbox.ExportInboxDatabase
 import com.betterhv.note.sender.shared.db.inbox.Inbox_exports
 import com.betterhv.note.sender.shared.db.queue.Queue_items
 import com.betterhv.note.sender.shared.db.queue.SenderQueueDatabase
-import com.betterhv.note.sender.shared.noteLinkText
 import com.betterhv.transfer.core.ContentCounts
 import com.betterhv.transfer.core.ContentKind
 import com.betterhv.transfer.core.ContentSniffer
@@ -26,6 +23,9 @@ import com.betterhv.transfer.core.SendOrderSelector
 import com.betterhv.transfer.core.SendOutcome
 import com.betterhv.transfer.core.TransferCrypto
 import com.betterhv.transfer.core.TransferLimits
+import com.betterhv.transfer.core.i18n.NoteLinkI18n
+import com.betterhv.transfer.core.i18n.NoteLinkLanguage
+import com.betterhv.transfer.core.i18n.noteLinkText
 import com.betterhv.update.NotePackageDescriptor
 import com.betterhv.update.NotePackageResolver
 import com.betterhv.transfer.windows.WindowsNativeApi
@@ -559,9 +559,11 @@ class DesktopQueueRepository(
       SendOutcome.SUCCEEDED,
       text = text
     )
-    val payload = payloadPath(item.id)?.let(::File)
-    if (payload != null && payload.isFile) {
-      history.retainPayload(payload, entry.id)?.let { recorder.attachPayload(entry, it) }
+    if (item.kind != ContentKind.APP_PACKAGE) {
+      val payload = payloadPath(item.id)?.let(::File)
+      if (payload != null && payload.isFile) {
+        history.retainPayload(payload, entry.id)?.let { recorder.attachPayload(entry, it) }
+      }
     }
     DesktopLog.info("history.success", "kind=${item.kind} bytes=${item.byteLength}")
     publishHistory()
@@ -616,7 +618,8 @@ class DesktopQueueRepository(
 
   /** Whether a retained payload or text payload is still available for re-sending. */
   fun canResend(entry: SendHistoryEntry): Boolean =
-    entry.text != null || (entry.payloadPath != null && history.payloadExists(entry))
+    entry.kind != ContentKind.APP_PACKAGE &&
+      (entry.text != null || (entry.payloadPath != null && history.payloadExists(entry)))
 
   /**
    * Re-queues a history entry without consuming it. The original destination wins while it is still
@@ -671,44 +674,78 @@ class DesktopQueueRepository(
   private inner class Lease(initial: QueueItem) : DesktopSenderLease {
     override var item = initial
     private var finished = false
-    override val file: File? get() = payloadPath(item.id)?.let(::File)?.takeIf(File::isFile)
-    override val text: String? get() = text(item.id)
-    override fun heartbeat() {
-      if (!finished) {
-        item = coordinator.heartbeat(item.id)
+
+    override val file: File?
+      get() = synchronized(this@DesktopQueueRepository) {
+        if (!isActiveLeaseLocked()) return null
+        payloadPath(item.id)?.let(::File)?.takeIf(File::isFile)
       }
+
+    override val text: String?
+      get() = synchronized(this@DesktopQueueRepository) {
+        if (!isActiveLeaseLocked()) return null
+        text(item.id)
+      }
+
+    override fun heartbeat() = synchronized(this@DesktopQueueRepository) {
+      check(!finished) { "Lease already finished" }
+      requireActiveLeaseLocked()
+      item = coordinator.heartbeat(item.id)
     }
 
-    override fun markTransferring() {
-      if (!finished) {
-        item = coordinator.transition(item.id, QueueState.TRANSFERRING)
-      }
+    override fun markTransferring() = synchronized(this@DesktopQueueRepository) {
+      check(!finished) { "Lease already finished" }
+      requireActiveLeaseLocked()
+      item = coordinator.transition(item.id, QueueState.TRANSFERRING)
     }
 
-    override fun markAwaitingCommit() {
-      if (!finished) {
-        item = coordinator.transition(item.id, QueueState.AWAITING_COMMIT)
-      }
+    override fun markAwaitingCommit() = synchronized(this@DesktopQueueRepository) {
+      check(!finished) { "Lease already finished" }
+      requireActiveLeaseLocked()
+      item = coordinator.transition(item.id, QueueState.AWAITING_COMMIT)
     }
 
-    override fun commit() {
-      if (!finished) {
-        runCatching { recordSuccess(item) }
-        file?.delete()
-        coordinator.commit(item.id)
-        pruneHistory()
-        finished = true
-        publish()
-      }
+    override fun commit() = synchronized(this@DesktopQueueRepository) {
+      check(!finished) { "Lease already finished" }
+      val current = requireActiveLeaseLocked()
+      runCatching { recordSuccess(current) }
+      payloadPath(item.id)?.let(::File)?.takeIf(File::isFile)?.delete()
+      coordinator.commit(item.id)
+      pruneHistory()
+      finished = true
+      publish()
     }
 
-    override fun release() {
-      if (!finished) {
-        coordinator.release(item.id)
-        finished = true
-        publish()
-      }
+    override fun release() = synchronized(this@DesktopQueueRepository) {
+      check(!finished) { "Lease already finished" }
+      requireActiveLeaseLocked()
+      coordinator.release(item.id)
+      finished = true
+      publish()
     }
+
+    override fun close() {
+      runCatching { release() }
+    }
+
+    private fun isActiveLeaseLocked(): Boolean =
+      !finished && find(item.id)?.state in ACTIVE_LEASE_STATES
+
+    private fun requireActiveLeaseLocked(): QueueItem {
+      val current = find(item.id)
+      check(current != null && current.state in ACTIVE_LEASE_STATES) {
+        "Lease for queue item ${item.id} is no longer active (${current?.state})"
+      }
+      return current
+    }
+  }
+
+  private companion object {
+    val ACTIVE_LEASE_STATES = setOf(
+      QueueState.LEASED,
+      QueueState.TRANSFERRING,
+      QueueState.AWAITING_COMMIT,
+    )
   }
 }
 
@@ -790,7 +827,8 @@ class DesktopInboxRepository(private val paths: DesktopPaths) : AutoCloseable {
   }
 
   @Synchronized
-  fun find(id: UUID) = items().firstOrNull { it.artifactId == id }
+  fun find(id: UUID): DesktopInboxItem? =
+    queries.selectById(id.toString()).executeAsOneOrNull()?.inboxItem()
 
   @Synchronized
   fun items(): List<DesktopInboxItem> =

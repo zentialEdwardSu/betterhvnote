@@ -1,0 +1,43 @@
+CREATE TABLE send_history(
+  id TEXT NOT NULL PRIMARY KEY,
+  queue_item_id TEXT NOT NULL,
+  destination_device_id TEXT,
+  destination_name TEXT,
+  kind TEXT NOT NULL,
+  mime_type TEXT NOT NULL,
+  byte_length INTEGER NOT NULL,
+  sha256 BLOB NOT NULL,
+  display_name TEXT,
+  completed_at INTEGER NOT NULL,
+  outcome TEXT NOT NULL,
+  failure_reason TEXT,
+  payload_path TEXT,
+  text_content TEXT
+);
+
+CREATE UNIQUE INDEX send_history_queue_item ON send_history(queue_item_id);
+CREATE INDEX send_history_completed ON send_history(completed_at DESC);
+
+selectAll:
+SELECT * FROM send_history ORDER BY completed_at DESC, id ASC;
+
+selectById:
+SELECT * FROM send_history WHERE id = ?;
+
+selectByQueueItem:
+SELECT * FROM send_history WHERE queue_item_id = ? LIMIT 1;
+
+insertIgnore:
+INSERT OR IGNORE INTO send_history(
+  id, queue_item_id, destination_device_id, destination_name, kind, mime_type, byte_length,
+  sha256, display_name, completed_at, outcome, failure_reason, payload_path, text_content
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+
+updatePayloadPath:
+UPDATE send_history SET payload_path = ? WHERE id = ?;
+
+deleteById:
+DELETE FROM send_history WHERE id = ?;
+
+deleteAll:
+DELETE FROM send_history;

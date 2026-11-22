@@ -196,12 +196,14 @@ internal class WindowsFirewallInstaller(
                 ${'$'}info.RedirectStandardError = ${'$'}true
                 ${'$'}info.CreateNoWindow = ${'$'}true
                 ${'$'}process = [System.Diagnostics.Process]::Start(${'$'}info)
+                ${'$'}stdoutTask = ${'$'}process.StandardOutput.ReadToEndAsync()
+                ${'$'}stderrTask = ${'$'}process.StandardError.ReadToEndAsync()
                 if (-not ${'$'}process.WaitForExit(20000)) {
                     try { ${'$'}process.Kill() } catch { }
                     throw 'netsh timed out after 20 seconds'
                 }
-                ${'$'}stdout = ${'$'}process.StandardOutput.ReadToEnd()
-                ${'$'}stderr = ${'$'}process.StandardError.ReadToEnd()
+                ${'$'}stdout = ${'$'}stdoutTask.Result
+                ${'$'}stderr = ${'$'}stderrTask.Result
                 ${'$'}code = ${'$'}process.ExitCode
                 if (${'$'}code -ne 0) {
                     throw ('netsh exit ' + ${'$'}code + ': ' +
@@ -335,14 +337,21 @@ private val CHECK_SCRIPT = """
             exit 0
         }
         ${'$'}queryErrors = @()
-        ${'$'}rules = @()
-        ${'$'}rules += @(Get-NetFirewallRule -Name 'NoteLink-TCP-39817' -ErrorAction SilentlyContinue `
+        ${'$'}tcpRules = @()
+        ${'$'}tcpRules += @(Get-NetFirewallRule -Name 'NoteLink-TCP-39817' -ErrorAction SilentlyContinue `
             -ErrorVariable +queryErrors)
-        ${'$'}rules += @(Get-NetFirewallRule -DisplayName 'NoteLink-TCP-39817' -ErrorAction SilentlyContinue `
+        ${'$'}tcpRules += @(Get-NetFirewallRule -DisplayName 'NoteLink-TCP-39817' -ErrorAction SilentlyContinue `
             -ErrorVariable +queryErrors)
-        ${'$'}rules += @(Get-NetFirewallRule -DisplayName 'NoteLink TCP 39817' -ErrorAction SilentlyContinue `
+        ${'$'}tcpRules += @(Get-NetFirewallRule -DisplayName 'NoteLink TCP 39817' -ErrorAction SilentlyContinue `
             -ErrorVariable +queryErrors)
-        if (${'$'}rules.Count -eq 0) {
+        ${'$'}udpRules = @()
+        ${'$'}udpRules += @(Get-NetFirewallRule -Name 'NoteLink-UDP-39818' -ErrorAction SilentlyContinue `
+            -ErrorVariable +queryErrors)
+        ${'$'}udpRules += @(Get-NetFirewallRule -DisplayName 'NoteLink-UDP-39818' -ErrorAction SilentlyContinue `
+            -ErrorVariable +queryErrors)
+        ${'$'}udpRules += @(Get-NetFirewallRule -DisplayName 'NoteLink UDP 39818' -ErrorAction SilentlyContinue `
+            -ErrorVariable +queryErrors)
+        if (${'$'}tcpRules.Count -eq 0 -or ${'$'}udpRules.Count -eq 0) {
             ${'$'}denied = @(${'$'}queryErrors | Where-Object {
                 ${'$'}_.Exception.HResult -eq -2147024891 -or
                 ${'$'}_.Exception.HResult -eq -2147942405 -or
@@ -355,23 +364,35 @@ private val CHECK_SCRIPT = """
             'NOTELINK|MISSING'
             exit 0
         }
-        ${'$'}configured = ${'$'}false
-        ${'$'}problems = @()
-        foreach (${'$'}rule in ${'$'}rules) {
-            ${'$'}issues = @()
-            if (${'$'}rule.Enabled -ne 'True') { ${'$'}issues += 'Enabled' }
-            if (${'$'}rule.Direction -ne 'Inbound') { ${'$'}issues += 'Direction' }
-            if (${'$'}rule.Action -ne 'Allow') { ${'$'}issues += 'Action' }
-            foreach (${'$'}port in @(${'$'}rule | Get-NetFirewallPortFilter)) {
-                if (${'$'}port.Protocol -ne 'TCP' -and ${'$'}port.Protocol -ne 6) { ${'$'}issues += 'Protocol' }
-                if ([string]${'$'}port.LocalPort -ne '39817') { ${'$'}issues += 'LocalPort' }
+        function Test-NoteLinkRules(${'$'}rules, [string]${'$'}expectedProtoName, [int]${'$'}expectedProtoNum, [string]${'$'}expectedPort) {
+            ${'$'}configured = ${'$'}false
+            ${'$'}problems = @()
+            foreach (${'$'}rule in ${'$'}rules) {
+                ${'$'}issues = @()
+                if (${'$'}rule.Enabled -ne 'True') { ${'$'}issues += 'Enabled' }
+                if (${'$'}rule.Direction -ne 'Inbound') { ${'$'}issues += 'Direction' }
+                if (${'$'}rule.Action -ne 'Allow') { ${'$'}issues += 'Action' }
+                ${'$'}ports = @(${'$'}rule | Get-NetFirewallPortFilter)
+                if (${'$'}ports.Count -eq 0) { ${'$'}issues += 'LocalPort' }
+                foreach (${'$'}port in ${'$'}ports) {
+                    if (${'$'}port.Protocol -ne ${'$'}expectedProtoName -and ${'$'}port.Protocol -ne ${'$'}expectedProtoNum) {
+                        ${'$'}issues += 'Protocol'
+                    }
+                    if ([string]${'$'}port.LocalPort -ne ${'$'}expectedPort) { ${'$'}issues += 'LocalPort' }
+                }
+                if (${'$'}issues.Count -eq 0) { ${'$'}configured = ${'$'}true } else { ${'$'}problems += ${'$'}issues }
             }
-            if (${'$'}issues.Count -eq 0) { ${'$'}configured = ${'$'}true } else { ${'$'}problems += ${'$'}issues }
+            return @{ Configured = ${'$'}configured; Problems = ${'$'}problems }
         }
-        if (${'$'}configured) {
+        ${'$'}tcpCheck = Test-NoteLinkRules ${'$'}tcpRules 'TCP' 6 '39817'
+        ${'$'}udpCheck = Test-NoteLinkRules ${'$'}udpRules 'UDP' 17 '39818'
+        if (${'$'}tcpCheck.Configured -and ${'$'}udpCheck.Configured) {
             'NOTELINK|CONFIGURED'
         } else {
-            'NOTELINK|MISCONFIGURED|' + ((@(${'$'}problems) | Sort-Object -Unique) -join ',')
+            ${'$'}allProblems = @()
+            if (-not ${'$'}tcpCheck.Configured) { ${'$'}allProblems += ${'$'}tcpCheck.Problems }
+            if (-not ${'$'}udpCheck.Configured) { ${'$'}allProblems += ${'$'}udpCheck.Problems }
+            'NOTELINK|MISCONFIGURED|' + ((@(${'$'}allProblems) | Sort-Object -Unique) -join ',')
         }
     } catch {
         'NOTELINK|ERROR|' + (${'$'}_.Exception.Message -replace "`r?`n", ' ')

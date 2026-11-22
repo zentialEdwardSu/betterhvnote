@@ -79,6 +79,11 @@ class WindowsFirewallRuleCheckerTest {
     assertEquals("-EncodedCommand", command[command.size - 2])
     val script = String(Base64.getDecoder().decode(command.last()), StandardCharsets.UTF_16LE)
     assertTrue(script.contains("Get-NetFirewallRule"))
+    assertTrue(script.contains("NoteLink-TCP-39817"))
+    assertTrue(script.contains("NoteLink-UDP-39818"))
+    assertTrue(script.contains("'39817'"))
+    assertTrue(script.contains("'39818'"))
+    assertTrue(script.contains("'UDP'"))
     assertTrue(script.contains("NOTELINK|MISSING"))
   }
 
@@ -158,6 +163,11 @@ class WindowsFirewallRuleCheckerTest {
     assertTrue(!inner.contains("New-NetFirewallRule"))
     assertTrue(inner.contains("ProcessStartInfo"))
     assertTrue(inner.contains("ExitCode"))
+    val stdoutAsyncIndex = inner.indexOf("StandardOutput.ReadToEndAsync()")
+    val stderrAsyncIndex = inner.indexOf("StandardError.ReadToEndAsync()")
+    val waitForExitIndex = inner.indexOf("WaitForExit(20000)")
+    assertTrue(stdoutAsyncIndex in 0 until waitForExitIndex)
+    assertTrue(stderrAsyncIndex in 0 until waitForExitIndex)
   }
 
   @Test

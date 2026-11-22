@@ -2,13 +2,19 @@ package com.betterhv.note.sender.desktop
 
 import com.betterhv.transfer.core.ContentKind
 import com.betterhv.transfer.core.SendOutcome
+import com.betterhv.update.AppVersion
+import com.betterhv.update.NotePackageDescriptor
+import com.betterhv.update.ReleaseAsset
 import java.io.File
+import java.security.MessageDigest
 import java.sql.DriverManager
 import java.util.UUID
 import kotlin.io.path.createTempDirectory
 import kotlin.test.Test
 import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -88,6 +94,90 @@ class DesktopDatabaseMigrationTest {
         assertEquals("note-b", forB.item.destinationDeviceId)
         forB.commit()
         assertNull(queue.leaseNext(ContentKind.TEXT, "note-b"))
+      }
+    } finally {
+      root.deleteRecursively()
+    }
+  }
+
+  @Test
+  fun appPackageCommitDoesNotRetainApkPayloadAndCannotBeResent() {
+    val root = createTempDirectory("notelink-app-package-history-").toFile()
+    try {
+      val paths = DesktopPaths(root)
+      val apk = File(root, "BetterHvNote-1.2.3-android-arm64.apk").apply {
+        writeBytes("fake-apk-bytes".encodeToByteArray())
+      }
+      val sha256 = MessageDigest.getInstance("SHA-256").digest(apk.readBytes())
+      val descriptor = NotePackageDescriptor(
+        version = requireNotNull(AppVersion.parse("1.2.3")),
+        tagName = "note-v1.2.3",
+        releaseTitle = "Note 1.2.3",
+        apk = ReleaseAsset(
+          name = apk.name,
+          downloadUrl = "https://github.com/zentialEdwardSu/betterhvnote/releases/download/note-v1.2.3/${apk.name}",
+          byteLength = apk.length(),
+        ),
+        checksums = ReleaseAsset(
+          name = "SHA256SUMS.txt",
+          downloadUrl = "https://github.com/zentialEdwardSu/betterhvnote/releases/download/note-v1.2.3/SHA256SUMS.txt",
+          byteLength = 64L,
+        ),
+        expectedSha256 = sha256,
+      )
+      DesktopQueueRepository(paths).use { queue ->
+        val queued = queue.enqueueAppPackage(apk, descriptor, "note-a")
+        val lease = requireNotNull(queue.leaseNext(ContentKind.APP_PACKAGE, "note-a"))
+        lease.commit()
+
+        val entry = queue.historyFlow.value.single()
+        assertEquals(queued.id, entry.queueItemId)
+        assertEquals(ContentKind.APP_PACKAGE, entry.kind)
+        assertNull(entry.payloadPath)
+        assertEquals(0, paths.history.listFiles().orEmpty().size)
+        assertFalse(queue.canResend(entry))
+        assertNull(queue.requeueHistory(entry.id, "note-a", setOf("note-a")))
+      }
+    } finally {
+      root.deleteRecursively()
+    }
+  }
+
+  @Test
+  fun inboxFindUsesSelectById() {
+    val root = createTempDirectory("notelink-inbox-find-").toFile()
+    try {
+      val paths = DesktopPaths(root)
+      val artifactId = UUID.randomUUID()
+      val hash = ByteArray(32) { it.toByte() }
+      createInboxV1(paths.inboxDatabase, artifactId, hash, File(paths.inbox, "$artifactId.pdf"))
+
+      DesktopInboxRepository(paths).use { inbox ->
+        val found = requireNotNull(inbox.find(artifactId))
+        assertEquals(artifactId, found.artifactId)
+        assertNull(inbox.find(UUID.randomUUID()))
+      }
+    } finally {
+      root.deleteRecursively()
+    }
+  }
+
+  @Test
+  fun expiredLeaseRejectsHeartbeatCommitAndRelease() {
+    val root = createTempDirectory("notelink-expired-lease-").toFile()
+    try {
+      val paths = DesktopPaths(root)
+      DesktopQueueRepository(paths).use { queue ->
+        queue.enqueueText("lease check", "note-a")
+        val lease = requireNotNull(queue.leaseNext(ContentKind.TEXT, "note-a"))
+        val expiredAt = (lease.item.leaseExpiresAt ?: 0L) + 1L
+        assertEquals(1, queue.releaseExpired(expiredAt))
+
+        assertNull(lease.text)
+        assertNull(lease.file)
+        assertFailsWith<IllegalStateException> { lease.heartbeat() }
+        assertFailsWith<IllegalStateException> { lease.commit() }
+        assertFailsWith<IllegalStateException> { lease.release() }
       }
     } finally {
       root.deleteRecursively()

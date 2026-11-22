@@ -25,6 +25,7 @@ class SingleInstanceGuard(private val root: File) : AutoCloseable {
   private var server: ServerSocket? = null
   private var listener: Thread? = null
   private val running = AtomicBoolean(false)
+  private var ownsPortFile = false
 
   /** Returns true when this process owns the instance lock. */
   fun tryAcquire(): Boolean {
@@ -43,15 +44,18 @@ class SingleInstanceGuard(private val root: File) : AutoCloseable {
 
   /** Starts the loopback listener that asks the UI to come to the front. */
   fun startListening(onShow: () -> Unit) {
+    check(isOwner()) { "Cannot start single-instance listener without holding the lock" }
     if (!running.compareAndSet(false, true)) return
     val socket = ServerSocket(0, 1, InetAddress.getLoopbackAddress())
     server = socket
     portFile.parentFile?.mkdirs()
     portFile.writeText("port=${socket.localPort}\n")
+    ownsPortFile = true
     listener = thread(isDaemon = true, name = "notelink-single-instance") {
       while (running.get()) {
         val client = runCatching { socket.accept() }.getOrNull() ?: break
         client.use {
+          runCatching { it.soTimeout = ACCEPT_TIMEOUT_MILLIS }
           val command = runCatching { it.getInputStream().bufferedReader().readLine() }.getOrNull()
           if (command == SHOW_COMMAND) onShow()
         }
@@ -82,7 +86,10 @@ class SingleInstanceGuard(private val root: File) : AutoCloseable {
     runCatching { listener?.join(CLOSE_JOIN_MILLIS) }
     runCatching { lock?.release() }
     runCatching { channel?.close() }
-    runCatching { portFile.delete() }
+    if (ownsPortFile) {
+      runCatching { portFile.delete() }
+      ownsPortFile = false
+    }
     server = null
     listener = null
     lock = null
@@ -101,5 +108,6 @@ class SingleInstanceGuard(private val root: File) : AutoCloseable {
     const val SHOW_COMMAND = "SHOW"
     private const val PORT_PREFIX = "port="
     private const val CLOSE_JOIN_MILLIS = 500L
+    private const val ACCEPT_TIMEOUT_MILLIS = 1_000
   }
 }

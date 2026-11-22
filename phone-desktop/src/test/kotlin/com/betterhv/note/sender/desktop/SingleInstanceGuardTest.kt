@@ -44,6 +44,34 @@ class SingleInstanceGuardTest {
   }
 
   @Test
+  fun secondaryGuardClosePreservesActiveInstancePortFile() {
+    val root = createTempDirectory("notelink-single-instance-").toFile()
+    val first = SingleInstanceGuard(root)
+    try {
+      assertTrue(first.tryAcquire())
+      val shown = CountDownLatch(2)
+      first.startListening { shown.countDown() }
+
+      val second = SingleInstanceGuard(root)
+      assertFalse(second.tryAcquire())
+      assertTrue(second.signalExisting())
+      second.close()
+
+      assertTrue(root.resolve("instance.json").isFile)
+
+      val third = SingleInstanceGuard(root)
+      assertFalse(third.tryAcquire())
+      assertTrue(third.signalExisting())
+      third.close()
+
+      assertTrue(shown.await(5, TimeUnit.SECONDS))
+    } finally {
+      first.close()
+      root.deleteRecursively()
+    }
+  }
+
+  @Test
   fun stalePortFileDoesNotAcquireOrSignal() {
     val root = createTempDirectory("notelink-single-instance-").toFile()
     root.resolve("instance.json").writeText("port=1\n")

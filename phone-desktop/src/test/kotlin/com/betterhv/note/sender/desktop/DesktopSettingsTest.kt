@@ -1,6 +1,6 @@
 package com.betterhv.note.sender.desktop
 
-import com.betterhv.note.sender.shared.NoteLinkLanguage
+import com.betterhv.transfer.core.i18n.NoteLinkLanguage
 import com.betterhv.transfer.core.SendOrder
 import com.betterhv.transfer.windows.WindowsCapabilities
 import com.betterhv.transfer.windows.WindowsNativeApi
