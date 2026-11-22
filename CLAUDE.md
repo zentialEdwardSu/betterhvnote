@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this project is
 
-BetterHvNote is an Android app that replaces the stock note-taking app on Hanvon e-ink stylus tablets (e.g. N10Pro, running a custom ROM on API 34/Android 14). The device ROM exposes a proprietary low-latency pen overlay service (`android.os.HvPenDrawManager` / `HvPenDrawListener`, obtained via `getSystemService("hvpen")`) and several vendor native libraries for pen rendering, gesture recognition, and e-ink dithering. This codebase is a clean-room Kotlin rewrite of the stock app's pen pipeline, reverse-engineered from the decompiled vendor app (referred to in comments as "hvNote 7.16") and ported bit-exact where the ROM's expected behavior is undocumented (coordinate transforms, mode constants).
+BetterHvNote is an Android app that replaces the stock note-taking app on Hanvon e-ink stylus tablets (e.g. N10Pro, running a custom ROM). The device ROM exposes a proprietary low-latency pen overlay service (`android.os.HvPenDrawManager` / `HvPenDrawListener`, obtained via `getSystemService("hvpen")`). This codebase is a clean-room Kotlin rewrite of the stock app's pen pipeline, reverse-engineered from the decompiled vendor app (referred to in comments as "hvNote 7.16") and ported bit-exact where the ROM's expected behavior is undocumented (coordinate transforms, mode constants).
 
 `inkengine-plan.md` is the long-term architecture spec (in Chinese). The code now implements Phases 1–6: vector ink, Notebook/Page/Scene/UUID, uniform-grid spatial queries, eraser/lasso/transform editing, Command-based undo/redo, SQLite+WAL autosave/recovery/migrations, and multi-page navigation with a three-Scene cache and asynchronous vector thumbnails. **Phase 7 export** is now implemented (PNG/PDF export with vector strokes, see `export/` package). Future image/audio/sync/AI providers are not implemented. When adding features, check the cited `inkengine-plan.md` section numbers and preserve the existing Core → storage/render boundary.
 
@@ -21,36 +21,39 @@ For refactoring, building, or deploying to a device, prefer the Android Studio M
 ./gradlew :app:testDebugUnitTest --tests "*.StrokeBuilderTest.someMethodName"          # single test method
 ```
 
-`build.sh` sets `JAVA_HOME` to a JDK 17 install and runs `assembleDebug` — useful as a reference for the required JDK version if `./gradlew` fails with a Java version error.
+The build uses JDK 17 (`JavaVersion.VERSION_17`), centralized dependency/plugin versions in `gradle/libs.versions.toml`, and `config/detekt/detekt.yml` (`warningsAsErrors: true`).
 
 The framework-free `ink`, `doc`, `tool`, and pure `storage` components use plain JUnit4 without Robolectric. Android SQLite, `android.graphics`, `View`, and vendor JNI/ROM integration (`PenDrawView`, `ThumbnailManager`, `PenGeometry`, `NativeSelfTest`) still require an Android device for end-to-end verification.
 
-GitHub Actions runs JVM tests, detekt, Android lint, both Android debug builds,
-and a Windows portable-package build for pull requests and pushes to `main`.
+GitHub Actions runs JVM tests, detekt, Android lint, Windows tests/lint, and protobuf schema lint for pull requests and pushes to `main` (release APK and Windows portable-package builds run in the tag-triggered `release.yml` workflow).
+All Gradle build outputs across every module are centralized under the root `build/<module>/` directory (e.g., `build/app/outputs/apk/`, `build/phone-app/outputs/apk/`, `build/phone-desktop/distributions/`).
 Locally, `./gradlew test` and `./gradlew assembleDebug` remain the baseline checks.
 
 ## Architecture
 
 ### Module layout
 
-- `:app` — the application module (`com.betterhv.note`), namespace/applicationId `com.betterhv.note`, `minSdk 28`/`targetSdk 34`, `arm64-v8a` only.
+- `:app` — the application module (`com.betterhv.note`), namespace/applicationId `com.betterhv.note`, `minSdk 29`/`compileSdk 37`/`targetSdk 37`, `arm64-v8a` only. Internal packages under `com.betterhv.note`:
+  - root (`MainActivity`, `PenDrawView`, `PenGeometry`, `Toolbar`, `AppCommands`, `EditorInteraction`, `EditorModes`, `StylusClickResolver`, `UiInputBlockState`, `NoteAppInstaller`, `NoteI18n`, `EventLog`, `NativeSelfTest`)
+  - `backup/`, `canvas/`, `doc/` (+ `doc/commands/`), `export/`, `hardware/`, `ink/`, `jni/` (`InkStrokeModelerJNI` + `libink_stroke_modeler_jni.so`), `notebook/`, `notelink/`, `pdf/`, `settings/`, `storage/`, `template/`, `tool/`, `toolbar/`, `ui/`
 - `:framework-stubs` — a `java-library` module providing **compile-only** stubs for the ROM's custom framework classes (`android.os.HvPenDrawManager`, `android.os.HvPenDrawListener`). These exist purely so the app compiles; the real implementations are baked into the device ROM's `framework.jar` and are never packaged into the APK (see `compileOnly(project(":framework-stubs"))` in `app/build.gradle.kts`). Method bodies in the stubs just `throw new RuntimeException("stub")` — they are never actually invoked, only linked against.
-- `:phone-app` — the Android NoteLink sender/receiver application. Its `src/commonMain` tree is also consumed by the desktop build.
-- `:phone-desktop` — the Compose Desktop NoteLink application. Desktop implementation, tests, resources, and packaging live under this module; shared UI remains in `phone-app/src/commonMain`.
-- `:transfer-core` — platform-neutral transfer protocol, cryptography, observability, and shared file-transfer orchestration.
+- `:phone-app` — the Android NoteLink sender/receiver application (`com.betterhv.note.sender`, `minSdk 29`/`compileSdk 37`/`targetSdk 37`). Subpackages under `com.betterhv.note.sender`: root (`MainActivity`, `TransferForegroundService`, `ReceiveBootReceiver`), `data/` (`PhoneQueueRepository`, `ExportInboxRepository`, `PhoneSendHistoryStore`, `NoteLinkSettings`), `share/` (`ShareIntake`, `SharePlan`, `ShareUndoNotifier`/`ShareUndoReceiver`, `ShareShortcutPublisher`), `service/` (`PhoneCommandProcessor`, `NoteLinkTransferRuntime`, `PhonePairingMode`).
+- `:phone-desktop` — the Compose Desktop NoteLink application (`phone-desktop/src/main`). Desktop UI (`NoteLinkDashboard`), SQLDelight schemas (`src/main/sqldelight/{queue,inbox,history}`), tests, resources, and portable ZIP packaging (`packagePortableZip`) live under this module.
+- `:transfer-core` — platform-neutral NoteLink v4 transfer protocol (`transfer-core/src/main`), cryptography, observability, `NoteLinkI18n` (`com.betterhv.transfer.core.i18n`), and shared file-transfer orchestration.
 - `:transfer-android` — Android BLE, LAN, and Wi-Fi Direct discovery/session integration used by the tablet and phone apps.
 - `:transfer-windows` — Windows Kotlin/JNA transport plus the native Wi-Fi Direct integration used by desktop NoteLink.
+- `:update-core` — platform-neutral Note App / NoteLink update checking, GitHub Release asset resolution, SHA-256 verification, and download coordination.
 - `icon-assets/` — versioned icon sources and the generation script for app icons.
 - `.github/` — CI and tag-triggered pre-release workflows. `note-vX.Y.Z` publishes
   BetterHvNote; `notelink-vX.Y.Z` publishes Android and portable Windows NoteLink builds.
-- `tools/elfsyms.py` — standalone ELF64 dynamic-symbol dumper (no deps) for inspecting the vendor `.so` files under `app/src/main/jniLibs/arm64-v8a/` when porting JNI bindings, to confirm exact exported symbol names before writing a Java/Kotlin wrapper.
-- `hvNote/` — decompiled reference material from the original vendor app (smali, extracted `.so`s, APK) used as the porting source. Read-only reference, not part of the build (excluded via `.gitignore`).
+- `tools/` — tracked repository scripts (`tools/build_release.py`, `tools/elfsyms.py`).
+- `hvNote/` — decompiled reference material from the original vendor app (smali, extracted `.so`s, APK) used as the porting source. Read-only reference, not part of the build (excluded via `/hvNote/` in `.gitignore`).
 
 ### NoteLink queues, history, and Windows deployment
 
 - **Share intake** (`ShareIntake` + `ContentSniffer`): the provider MIME type is only a hint. Content is sniffed from magic bytes, then file name, then declared MIME, and each item is classified independently so one unsupported item never discards the batch. `MainActivity` is `singleTask`, consumes a share only on first creation, and treats a content-free `ACTION_SEND` as "open the app".
 - **Send history**: both platforms keep a separate `send_history.db` plus a `history/` payload directory; do not add history tables to the queue database. `SendHistoryRecorder` owns the 100-entry / 30-day / 512 MiB retention policy, the re-send decision and crash reconciliation. Commit order is "rename payload → insert history row → delete queue row"; `reconcileHistory()` finishes interrupted commits and removes orphaned payloads.
-- **Send order**: `SendOrder` (`QUEUE`/`STACK`) is a sender-side setting applied by `SendOrderSelector` through `QueueStore.next`; the BLE v3 protocol is unchanged, so older peers keep working.
+- **Send order**: `SendOrder` (`QUEUE`/`STACK`) is a sender-side setting applied by `SendOrderSelector` through `QueueStore.next`; the NoteLink v4 protocol is unchanged, so older peers keep working.
 - **Windows single instance**: `SingleInstanceGuard` holds a file lock and answers `SHOW` on a loopback port, so a second launch fronts the running window instead of starting another receiver.
 - **Windows firewall**: `WindowsFirewallRuleChecker` trusts only `NOTELINK|...` ASCII markers printed by PowerShell and drains stdout on a reader thread; the installer and bundled scripts elevate through Base64 `-EncodedCommand`, so paths with spaces or non-ASCII characters never enter a command line. Keep new script output ASCII/UTF-8.
 
@@ -89,7 +92,6 @@ Key invariants to preserve when touching this path (see extensive rationale comm
 - Eraser mode is selected on the ROM side via `setDrawStatus` with an *encoded width* (`eraserWidth + 0x69`), not a mode enum — this is a reverse-engineered vendor quirk, not arbitrary.
 - The ROM callback's third float is a vendor-computed geometric width in screen pixels. For `NormalPen`, divide it by the exact integer width configured for that gesture and store the dimensionless ratio in the existing `InkPoint.pressure` scalar slot. Do not clip it: any non-finite or out-of-range scalar makes the modeler return the filtered raw stroke in full. `Pencil` and `Marker` store `1f` and resolve to fixed width.
 - All three brushes use the same modeler and swept-disc geometry. `PenStyle.widthAt(InkPoint)` is the sole geometry width boundary: `NormalPen` uses `baseWidth * point.pressure`; `Pencil` and `Marker` use `baseWidth`. Brush-specific rendering is limited to color/alpha.
-- `StrokeRenderer` + `HWPenEngine` (the vendor's native pen rasterizer) are legacy/Phase-0 code paths, superseded by `InkRenderer`'s own Skia-based rendering. `NativeSelfTest` keeps a smoke-test around for the native libs in case a future editing feature (e.g. eraser trace mode) still needs them — don't assume they're dead code without checking current usage.
 
 ### Toolbar tools and the e-ink UI layer
 
@@ -103,15 +105,7 @@ Everything in this package (`InkPoint`, `Stroke`, `PenStyle`, `PressureCurve`, `
 
 ### JNI / native library bindings
 
-Three vendor native libraries are wrapped by hand-ported JNI classes, each with a hard constraint on **exact package + class name**, because the `.so` either does dynamic `JNI_OnLoad` registration against that descriptor or has statically-linked symbols named `Java_<package>_<Class>_<method>`:
-
-| Wrapper class | Native lib | Purpose |
-|---|---|---|
-| `hanvon.aebr.dither.HVDitherJNI` | `libhvdither.so` | E-ink grayscale dithering |
-| `hanvon.aebr.hvnote.jni.GraphJniUtil` | `libHwGraphUtil.so` | Shape/gesture recognition |
-| `hanvon.aebr.penengine.HWPenEngine` | `libhw_PenEngine.so` | Native pen stroke rasterizer (legacy path, see above) |
-
-Before adding or changing a native method signature, verify the exported symbol name against the actual `.so` with `python tools/elfsyms.py <lib.so> [filter]` rather than trusting decompiled smali alone — comments note at least one case (`GraphJniUtil.getVersionFromJni`) where a smali-visible method turned out to be absent from the compiled binary.
+`com.betterhv.note.jni.InkStrokeModelerJNI` binds the C++ `ink_stroke_modeler_jni` library (`libink_stroke_modeler_jni.so`, built via `app/src/main/cpp/CMakeLists.txt` against `third_party/ink-stroke-modeler`). Preserve its exact package/class/method signature and `NativeSelfTest` smoke test. `tools/elfsyms.py <lib.so> [filter]` is available for inspecting ELF64 dynamic symbols in native binaries.
 
 ## Working conventions specific to this repo
 
@@ -146,7 +140,7 @@ The export functionality (Phase 7) follows the architecture principle: **strokes
 
 **NoteLink integration:**
 - BLE capability negotiation and push commands extend the existing protocol without renumbering Phone→Note commands.
-- NoteLink remains discoverable after pairing, uses the v3 control protocol and encrypted file channel for PDF/PNG (LAN first, Android Wi-Fi Direct fallback), and keeps a persistent inbox.
+- NoteLink remains discoverable after pairing, uses the NoteLink v4 control protocol and encrypted file channel for PDF/PNG (LAN first, Android Wi-Fi Direct fallback), and keeps a persistent inbox.
 - Artifact IDs make retry idempotent; the receiver validates declared length and SHA-256 before committing a file.
 
 **Known limitations:**

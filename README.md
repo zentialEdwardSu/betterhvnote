@@ -24,35 +24,43 @@ BetterHvNote 希望成为比汉王N10 Pro 2自带笔记软件更加顺手的笔�
 
 ```text
 BetterHvNote/
-|-- app/                 Tablet note application
+|-- app/                 Tablet note application (`com.betterhv.note`, minSdk 29 / targetSdk 37)
 |-- framework-stubs/     Compile-only stubs for Hanvon ROM APIs
-|-- phone-app/           Android NoteLink app and shared NoteLink sources
-|-- phone-desktop/       Compose Desktop NoteLink application
-|-- transfer-core/       Platform-neutral protocol, crypto, and transfer logic
+|-- phone-app/           Android NoteLink application (`com.betterhv.note.sender`)
+|-- phone-desktop/       Compose Desktop NoteLink application (`phone-desktop/src/main`)
+|-- transfer-core/       Platform-neutral NoteLink v4 protocol, crypto, i18n, and transfer logic (`transfer-core/src/main`)
 |-- transfer-android/    Android BLE, LAN, and Wi-Fi Direct integration
 |-- transfer-windows/    Windows transport and native integration
+|-- update-core/         Note App / NoteLink update resolution, SHA-256 verification, and download coordinator
+|-- docs/                Architecture ADRs and acceptance checklists
+|-- tools/               Release build and ELF symbol inspection scripts
 |-- icon-assets/         Versioned icon sources and generation script
 |-- .github/             CI, release workflows, and release tag checks
 |-- third_party/         Git submodules used by native ink rendering
-|-- gradle/              Gradle wrapper files
+|-- gradle/              Gradle wrapper and centralized version catalog (`libs.versions.toml`)
 |-- CLAUDE.md            Architecture and contributor guidance
 `-- settings.gradle.kts  Authoritative Gradle module list
 ```
 
-Shared NoteLink UI and persistence sources live under
-`phone-app/src/commonMain`. Desktop-specific implementation and resources live
-under `phone-desktop/src/main`; the `phone-desktop` module wires these source
-sets into the desktop distribution. Platform-neutral transfer sources are split
-between `transfer-core/src/commonMain` and `transfer-core/src/main` as declared
-in `transfer-core/build.gradle.kts`.
+Desktop UI (`NoteLinkDashboard`) and SQLDelight persistence schemas live under
+`phone-desktop/src/main`; Android NoteLink sources live under
+`phone-app/src/main` (split into `data/`, `share/`, `service/`, and root entry
+components). Platform-neutral NoteLink v4 protocol, `NoteLinkI18n`, and transfer
+logic live under `transfer-core/src/main`. Tablet note-taking sources under
+`app/src/main/java/com/betterhv/note` are organized by duty (`backup/`, `canvas/`,
+`doc/`, `export/`, `hardware/`, `ink/`, `jni/`, `notebook/`, `notelink/`, `pdf/`,
+`settings/`, `storage/`, `template/`, `tool/`, `toolbar/`, `ui/`).
 
-The local `hvNote/`, `tools/`, build outputs, IDE state, and architecture plans
-are intentionally ignored. They are development inputs or generated artifacts,
-not repository modules.
+The local `/hvNote/` decompiled reference, build outputs, IDE state, and scratch
+files are ignored via `.gitignore`; `tools/` and `docs/**/*.md` are tracked in the
+repository.
 
 ## Build and test
 
 The project requires JDK 17 and the Android SDK configured by `local.properties`.
+All Gradle build outputs are centralized under root `build/<module>/` (e.g.,
+`build/app/outputs/apk/`, `build/phone-app/outputs/apk/`,
+`build/phone-desktop/distributions/`).
 
 ```powershell
 .\gradlew.bat test
@@ -93,7 +101,7 @@ and module-specific development constraints.
   提示会给出文件名与原因。分享只会复用同一个 NoteLink 任务，无内容的快捷方式只打开应用。
 - 发送完成后进入“发送历史”，记录结果、目标设备、大小与时间；默认保留最近 100 条，历史载荷保留 30 天且
   总量不超过 512 MiB，载荷被清理后“重新发送”会置灰并说明原因。
-- 发送顺序可在“队列（最早优先）/ 栈（最新优先）”间切换，下一次租约立即生效；设置仅影响发送端，协议仍为 v3。
+- 发送顺序可在“队列（最早优先）/ 栈（最新优先）”间切换，下一次租约立即生效；设置仅影响发送端，NoteLink v4 协议保持不变。
 - Windows 端重复启动会复用已运行实例并把窗口带到前台，不再出现第二个接收服务或托盘图标。
 - Windows 防火墙提示支持一键“启用规则”（UAC 提权，无需手动找脚本）。规则名为 `NoteLink-TCP-39817`（旧版
   `NoteLink TCP 39817` 仍会被识别）。规则通过 `netsh` 创建，避免 PowerShell 防火墙模块在部分机器上长时间阻塞；
