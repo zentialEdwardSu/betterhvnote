@@ -13,9 +13,11 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.BufferedInputStream
@@ -119,6 +121,9 @@ object TcpAttach {
     clock: () -> Long = System::currentTimeMillis,
   ): Pair<TcpRecordLink, LinkCipher> = withContext(Dispatchers.IO) {
     val socket = Socket()
+    val cancelHandle = currentCoroutineContext()[Job]?.invokeOnCompletion { cause ->
+      if (cause != null) runCatching { socket.close() }
+    }
     try {
       TcpRecordLink.configure(socket)
       socket.connect(InetSocketAddress(host, port), connectTimeoutMillis)
@@ -144,6 +149,8 @@ object TcpAttach {
     } catch (error: Throwable) {
       runCatching { socket.close() }
       throw error
+    } finally {
+      cancelHandle?.dispose()
     }
   }
 
@@ -158,6 +165,9 @@ object TcpAttach {
     connectTimeoutMillis: Int = CONNECT_TIMEOUT_MILLIS,
   ): TcpRecordLink = withContext(Dispatchers.IO) {
     val socket = Socket()
+    val cancelHandle = currentCoroutineContext()[Job]?.invokeOnCompletion { cause ->
+      if (cause != null) runCatching { socket.close() }
+    }
     try {
       TcpRecordLink.configure(socket)
       socket.connect(InetSocketAddress(host, port), connectTimeoutMillis)
@@ -169,6 +179,8 @@ object TcpAttach {
     } catch (error: Throwable) {
       runCatching { socket.close() }
       throw error
+    } finally {
+      cancelHandle?.dispose()
     }
   }
 
@@ -200,6 +212,7 @@ class TcpAttachListener(
     clock = clock,
     sessionActive = { id -> session(SessionKeys.sessionIdLong(id)) != null },
   )
+  private val pendingHandshakes = Semaphore(MAX_PENDING_HANDSHAKES)
   private var server: ServerSocket? = null
   private var job: Job? = null
 
@@ -220,38 +233,48 @@ class TcpAttachListener(
     server = socket
     job = scope.launch(Dispatchers.IO) {
       while (isActive) {
+        pendingHandshakes.acquire()
         val accepted = try {
           socket.accept()
         } catch (_: IOException) {
+          pendingHandshakes.release()
           break
+        } catch (error: Throwable) {
+          pendingHandshakes.release()
+          throw error
         }
-        launch(Dispatchers.IO) { handle(accepted) }
+        val handlerJob = launch(Dispatchers.IO) { handle(accepted) }
+        handlerJob.invokeOnCompletion { pendingHandshakes.release() }
       }
     }
   }
 
   private fun handle(socket: Socket) {
     try {
-      TcpRecordLink.configure(socket)
       socket.soTimeout = TcpAttach.ATTACH_TIMEOUT_MILLIS
-      val input = DataInputStream(BufferedInputStream(socket.getInputStream(), TcpRecordLink.BUFFER_BYTES))
-      input.mark(TcpAttach.CONTROL_MAGIC.size)
-      if (input.readUnsignedByte() == (TcpAttach.CONTROL_MAGIC[0].toInt() and 0xff)) {
-        val rest = ByteArray(TcpAttach.CONTROL_MAGIC.size - 1).also(input::readFully)
+      val preAuthInput = DataInputStream(
+        BufferedInputStream(socket.getInputStream(), UNAUTHENTICATED_BUFFER_BYTES),
+      )
+      preAuthInput.mark(TcpAttach.CONTROL_MAGIC.size)
+      if (preAuthInput.readUnsignedByte() == (TcpAttach.CONTROL_MAGIC[0].toInt() and 0xff)) {
+        val rest = ByteArray(TcpAttach.CONTROL_MAGIC.size - 1).also(preAuthInput::readFully)
         val handler = onControl
         if (handler == null ||
           !rest.contentEquals(TcpAttach.CONTROL_MAGIC.copyOfRange(1, TcpAttach.CONTROL_MAGIC.size))) {
           return socket.close()
         }
+        TcpRecordLink.configure(socket)
         socket.soTimeout = 0
-        handler(TcpRecordLink(socket, labelFor(socket), input))
+        val upgradedInput = DataInputStream(BufferedInputStream(preAuthInput, TcpRecordLink.BUFFER_BYTES))
+        handler(TcpRecordLink(socket, labelFor(socket), upgradedInput))
         return
       }
-      input.reset()
-      val envelope = SessionTicketCodec.readEnvelope(input)
+      preAuthInput.reset()
+      val envelope = SessionTicketCodec.readEnvelope(preAuthInput)
       val ticket = authenticator.authenticate(envelope, listenerDeviceId) ?: return socket.close()
       val active = session(SessionKeys.sessionIdLong(ticket.sessionId.toByteArray())) ?: return socket.close()
       if (active.peerDeviceId != ticket.peerDeviceId) return socket.close()
+      TcpRecordLink.configure(socket)
       val salt = TransferCrypto.randomBytes(TcpAttach.SALT_BYTES)
       socket.getOutputStream().apply {
         write(salt)
@@ -259,7 +282,8 @@ class TcpAttachListener(
       }
       socket.soTimeout = 0
       val label = labelFor(socket)
-      val link = TcpRecordLink(socket, label, input)
+      val upgradedInput = DataInputStream(BufferedInputStream(preAuthInput, TcpRecordLink.BUFFER_BYTES))
+      val link = TcpRecordLink(socket, label, upgradedInput)
       val salts = ticket.connectionNonce.toByteArray() + salt
       onLink(active, link, active.linkCipher(PeerConnection.LABEL_TCP, salts, link.maxRecordBytes))
     } catch (cancelled: CancellationException) {
@@ -282,5 +306,7 @@ class TcpAttachListener(
   companion object {
     const val DEFAULT_PORT = 39817
     private const val BACKLOG = 16
+    private const val MAX_PENDING_HANDSHAKES = 16
+    private const val UNAUTHENTICATED_BUFFER_BYTES = 8 * 1024
   }
 }

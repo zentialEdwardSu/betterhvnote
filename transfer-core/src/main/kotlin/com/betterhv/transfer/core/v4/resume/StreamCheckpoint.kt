@@ -2,6 +2,7 @@ package com.betterhv.transfer.core.v4.resume
 
 import java.io.File
 import java.io.FileOutputStream
+import java.nio.file.AtomicMoveNotSupportedException
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption
 
@@ -133,12 +134,20 @@ class FileStreamCheckpointStore(private val directory: File) : StreamCheckpointS
       }
       output.fd.sync()
     }
-    Files.move(
-      temp.toPath(),
-      file.toPath(),
-      StandardCopyOption.REPLACE_EXISTING,
-      StandardCopyOption.ATOMIC_MOVE,
-    )
+    try {
+      Files.move(
+        temp.toPath(),
+        file.toPath(),
+        StandardCopyOption.REPLACE_EXISTING,
+        StandardCopyOption.ATOMIC_MOVE,
+      )
+    } catch (_: AtomicMoveNotSupportedException) {
+      Files.move(
+        temp.toPath(),
+        file.toPath(),
+        StandardCopyOption.REPLACE_EXISTING,
+      )
+    }
   }
 
   private fun encode(checkpoint: StreamCheckpoint): String = listOf(

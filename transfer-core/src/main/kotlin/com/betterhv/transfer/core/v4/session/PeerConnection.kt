@@ -137,7 +137,6 @@ class PeerConnection(
   private val remote = ConcurrentHashMap<Int, Exchange>()
   private val attached = MutableStateFlow<List<AttachedLink>>(emptyList())
   private val labels = MutableStateFlow<List<String>>(emptyList())
-  @Volatile private var highestRemoteId = 0
   @Volatile private var closed = false
   private val closedSignal = kotlinx.coroutines.CompletableDeferred<Unit>()
 
@@ -153,6 +152,7 @@ class PeerConnection(
     @Volatile internal var lastInbound = clock()
     @Volatile internal var lastOutbound = clock()
     @Volatile internal var reason: String? = null
+    internal var highestRemoteId = 0
     internal val done = Job(job)
   }
 
@@ -281,10 +281,31 @@ class PeerConnection(
       it.deliver(frame)
       return
     }
-    if (id <= highestRemoteId) return
-    highestRemoteId = id
-    val exchange = Exchange(id, this, entry)
-    remote[id] = exchange
+    var existing: Exchange? = null
+    val exchange = synchronized(entry) {
+      val current = remote[id]
+      if (current != null) {
+        existing = current
+        null
+      } else if (id <= entry.highestRemoteId) {
+        null
+      } else {
+        entry.highestRemoteId = id
+        val created = Exchange(id, this, entry)
+        val raced = remote.putIfAbsent(id, created)
+        if (raced != null) {
+          existing = raced
+          null
+        } else {
+          created
+        }
+      }
+    }
+    if (existing != null) {
+      existing.deliver(frame)
+      return
+    }
+    if (exchange == null) return
     scope.launch {
       try {
         responder.serve(exchange, frame)

@@ -170,8 +170,13 @@ object LanDiscovery {
           probesSent++
           nextProbe = now + PROBE_SPACING_MILLIS
         }
-        socket.soTimeout = minOf(deadline - now, maxOf(1L, nextProbe - now), PROBE_SPACING_MILLIS)
-          .toInt().coerceAtLeast(1)
+        val remaining = deadline - now
+        val waitMillis = if (probesSent < PROBE_REPEATS) {
+          minOf(remaining, (nextProbe - now).coerceAtLeast(1L), PROBE_SPACING_MILLIS)
+        } else {
+          remaining
+        }
+        socket.soTimeout = waitMillis.coerceIn(1L, Int.MAX_VALUE.toLong()).toInt()
         val packet = DatagramPacket(buffer, buffer.size)
         try {
           socket.receive(packet)

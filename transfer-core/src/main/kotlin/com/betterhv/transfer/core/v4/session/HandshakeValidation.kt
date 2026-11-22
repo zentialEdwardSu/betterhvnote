@@ -58,16 +58,13 @@ class HandshakeReplayGuard(
         retryable = true,
       )
     }
-    val previous = lastClientTime[hello.deviceId]
-    if (previous != null && hello.clientTimeMs <= previous) {
-      return HandshakeVerdict.Reject(ErrorCode.ERROR_REPLAY_REJECTED, "Stale handshake timestamp")
-    }
     val nonce = clientNonce.joinToString("") { "%02x".format(it) }
     if (nonces.containsKey(nonce)) {
       return HandshakeVerdict.Reject(ErrorCode.ERROR_REPLAY_REJECTED, "Replayed handshake nonce")
     }
     nonces[nonce] = nowMs
-    lastClientTime[hello.deviceId] = hello.clientTimeMs
+    val previous = lastClientTime[hello.deviceId]
+    lastClientTime[hello.deviceId] = maxOf(previous ?: Long.MIN_VALUE, hello.clientTimeMs)
     return HandshakeVerdict.Accept
   }
 

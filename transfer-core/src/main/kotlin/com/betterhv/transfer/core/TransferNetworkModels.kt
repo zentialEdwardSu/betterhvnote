@@ -3,7 +3,6 @@ package com.betterhv.transfer.core
 import java.net.Inet4Address
 import java.net.InetAddress
 import java.text.Normalizer
-import java.util.UUID
 
 const val NOTELINK_LAN_PORT = 39817
 
@@ -97,8 +96,6 @@ data class DeviceCapabilities(
   }
 }
 
-data class CapabilityNegotiation(val remote: DeviceCapabilities, val ssidMatch: SsidMatch)
-
 enum class TransferErrorCode {
   UNSUPPORTED_PROTOCOL,
   UNSUPPORTED_MODE,
@@ -143,43 +140,6 @@ object TransferNetworkSecurity {
     local == null || remote == null -> SsidMatch.UNKNOWN
     local.contentEquals(remote) -> SsidMatch.MATCH
     else -> SsidMatch.MISMATCH
-  }
-
-  fun sessionKey(pairingKey: ByteArray, operationId: UUID, sessionNonce: ByteArray, purpose: String): ByteArray {
-    require(sessionNonce.size == SESSION_NONCE_BYTES)
-    require(purpose == "probe" || purpose == "file")
-    return TransferCrypto.hkdfSha256(
-      pairingKey,
-      sessionNonce,
-      "notelink:v2:$purpose:$operationId".encodeToByteArray(),
-      32,
-    )
-  }
-
-  const val SESSION_NONCE_BYTES = 16
-}
-
-object TransferRouteSelector {
-  /**
-   * Ordered candidates; callers may attempt the second route only after the LAN attempt fails.
-   *
-   * A missing SSID fingerprint (UNKNOWN) no longer blocks LAN: one side may be on Ethernet, or the
-   * platform may redact its SSID. The LAN channel is still authenticated by the pairing-key probe,
-   * so an unknown network identity only costs a failed probe, while an explicit MISMATCH means the
-   * devices are on different networks and LAN is skipped.
-   */
-  fun candidates(local: DeviceCapabilities, negotiation: CapabilityNegotiation): List<TransferMode> = buildList {
-    val remote = negotiation.remote
-    if (negotiation.ssidMatch != SsidMatch.MISMATCH && local.lanEndpoint != null && remote.lanEndpoint != null &&
-      TransferModes.contains(local.modes, TransferMode.LAN) && TransferModes.contains(remote.modes, TransferMode.LAN)
-    ) {
-      add(TransferMode.LAN)
-    }
-    if (remote.wifiDirectEndpoint != null && TransferModes.contains(local.modes, TransferMode.WIFI_DIRECT) &&
-      TransferModes.contains(remote.modes, TransferMode.WIFI_DIRECT)
-    ) {
-      add(TransferMode.WIFI_DIRECT)
-    }
   }
 }
 

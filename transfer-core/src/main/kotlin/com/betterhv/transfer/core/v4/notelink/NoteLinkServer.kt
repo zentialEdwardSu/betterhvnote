@@ -42,6 +42,7 @@ import com.betterhv.transfer.proto.v4.UpdateResult
 import com.betterhv.transfer.proto.v4.UpdateState
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -141,6 +142,7 @@ class NoteLinkServer(
   private val peers = ConcurrentHashMap<String, ControlPeer>()
   private val connections = ConcurrentHashMap<String, PeerConnection>()
   private val bySession = ConcurrentHashMap<Long, PeerConnection>()
+  private val sessionLock = Any()
   // E-ink tablets often run without network time; the nonce cache and per-device monotonic
   // timestamp still reject replays, so the wall-clock window only needs to catch gross errors.
   private val replayGuard = HandshakeReplayGuard(clockSkewMillis = CLOCK_SKEW_MILLIS)
@@ -175,7 +177,7 @@ class NoteLinkServer(
     val pairing = PairingRecords.Reassembler()
     val hello = ArrayList<ByteArray>()
     var helloCount = 0
-    var link: ChannelRecordLink? = null
+    @Volatile var link: ChannelRecordLink? = null
     var pairingMessageId = 1
   }
 
@@ -330,7 +332,7 @@ class NoteLinkServer(
     record.size > RecordCodec.HEADER_BYTES && (record[3].toInt() and RecordCodec.FLAG_HELLO) != 0
 
   private fun onPairingRecord(peer: ControlPeer, record: ByteArray) {
-    val frame = peer.pairing.add(record) ?: return
+    val frame = synchronized(peer) { peer.pairing.add(record) } ?: return
     val reply: PairingFrame = try {
       handlePairing(frame)
     } catch (error: PairingException) {
@@ -362,12 +364,14 @@ class NoteLinkServer(
   }
 
   private fun sendClear(peer: ControlPeer, frame: PairingFrame) {
-    val records = PairingRecords.encode(
-      frame,
-      response = true,
-      messageId = peer.pairingMessageId++,
-      maxFragmentBody = peer.maxRecordBytes - RecordCodec.HEADER_BYTES,
-    )
+    val records = synchronized(peer) {
+      PairingRecords.encode(
+        frame,
+        response = true,
+        messageId = peer.pairingMessageId++,
+        maxFragmentBody = peer.maxRecordBytes - RecordCodec.HEADER_BYTES,
+      )
+    }
     sendRecords(peer, records)
   }
 
@@ -377,21 +381,21 @@ class NoteLinkServer(
     }
   }
 
-  @Synchronized
   private fun onHelloRecord(peer: ControlPeer, record: ByteArray) {
-    val fragment = RecordCodec.parse(record)
-    if (fragment.header.isResponse) return
-    if (fragment.index == 0) {
-      peer.hello.clear()
-      peer.helloCount = fragment.count
-    } else if (fragment.index != peer.hello.size) {
-      peer.hello.clear()
-      return
+    val records = synchronized(peer) {
+      val fragment = RecordCodec.parse(record)
+      if (fragment.header.isResponse) return
+      if (fragment.index == 0) {
+        peer.hello.clear()
+        peer.helloCount = fragment.count
+      } else if (fragment.index != peer.hello.size) {
+        peer.hello.clear()
+        return
+      }
+      peer.hello += record
+      if (peer.hello.size < peer.helloCount) return
+      peer.hello.toList().also { peer.hello.clear() }
     }
-    peer.hello += record
-    if (peer.hello.size < peer.helloCount) return
-    val records = peer.hello.toList()
-    peer.hello.clear()
     val (reply, established) = try {
       newHandshake(peer.maxRecordBytes).accept(records)
     } catch (error: HandshakeException) {
@@ -401,8 +405,6 @@ class NoteLinkServer(
       return
     }
     val deviceId = established.clientHello.deviceId
-    peer.link?.close()
-    connections.remove(deviceId)?.close()
     val session = ProtocolSession(
       peerDeviceId = deviceId,
       sessionId = SessionKeys.sessionIdLong(established.sessionId),
@@ -410,33 +412,41 @@ class NoteLinkServer(
       capabilities = established.capabilities,
       initiator = false,
     )
-    val connection = PeerConnection(
-      session = session,
-      parentScope = scope,
-      responder = { exchange, first -> serve(deviceId, exchange, first) },
-      onClosed = { closed ->
-        connections.remove(deviceId, closed)
-        bySession.remove(session.sessionId, closed)
-        publishConnected()
-      },
-      onLinkClosed = { label, reason -> host.log("link $label closed peer=$deviceId: $reason") },
-      clock = clock,
-    )
-    val link = ChannelRecordLink(
-      label = peer.label,
-      maxRecordBytes = peer.maxRecordBytes,
-      sender = { peer.outbound.send(it) },
-      onClose = peer.onLinkClose,
-    )
-    sendRecords(peer, reply)
-    peer.link = link
-    connections[deviceId] = connection
-    bySession[session.sessionId] = connection
-    connection.attach(link, session.handshakeLinkCipher(peer.maxRecordBytes))
-    scope.launch {
-      connection.links.collect { publishConnected() }
+    synchronized(sessionLock) {
+      peer.link?.close()
+      connections.remove(deviceId)?.close()
+      val linksJob = java.util.concurrent.atomic.AtomicReference<Job?>()
+      val connection = PeerConnection(
+        session = session,
+        parentScope = scope,
+        responder = { exchange, first -> serve(deviceId, exchange, first) },
+        onClosed = { closed ->
+          linksJob.get()?.cancel()
+          val removed = connections.remove(deviceId, closed)
+          bySession.remove(session.sessionId, closed)
+          publishConnected()
+          if (removed && !connections.containsKey(deviceId)) {
+            host.onSessionChanged(deviceId, emptyList())
+          }
+        },
+        onLinkClosed = { label, reason -> host.log("link $label closed peer=$deviceId: $reason") },
+        clock = clock,
+      )
+      val link = ChannelRecordLink(
+        label = peer.label,
+        maxRecordBytes = peer.maxRecordBytes,
+        sender = { peer.outbound.send(it) },
+        onClose = peer.onLinkClose,
+      )
+      sendRecords(peer, reply)
+      peer.link = link
+      connections[deviceId] = connection
+      bySession[session.sessionId] = connection
+      linksJob.set(scope.launch { connection.links.collect { publishConnected() } })
+      connection.attach(link, session.handshakeLinkCipher(peer.maxRecordBytes))
+      if (!connection.isOpen) linksJob.get()?.cancel()
+      scope.launch { notifyQueue(connection) }
     }
-    scope.launch { notifyQueue(connection) }
     host.log("session up peer=$deviceId via=${peer.label} key=${peer.key} record=${peer.maxRecordBytes}")
   }
 

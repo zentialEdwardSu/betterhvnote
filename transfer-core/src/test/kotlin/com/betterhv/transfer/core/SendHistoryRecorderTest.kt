@@ -163,6 +163,21 @@ class SendHistoryRecorderTest {
     assertEquals(RequeueDecision.PayloadUnavailable, noPayloadNoText)
   }
 
+  @Test fun `requeue rejects app packages even when a payload path exists`() {
+    val entry = recorder.record(item(kind = ContentKind.APP_PACKAGE), "N10Pro", SendOutcome.SUCCEEDED)
+    recorder.attachPayload(entry, "history/app.apk")
+    val stored = requireNotNull(store.find(entry.id))
+
+    val decision = recorder.requeueDecision(
+      stored,
+      payloadExists = true,
+      pairedDeviceIds = setOf("note-a"),
+      currentDeviceId = "note-a",
+    )
+
+    assertEquals(RequeueDecision.PayloadUnavailable, decision)
+  }
+
   @Test fun `reconcile completes interrupted commits and reports orphans`() {
     val completedItem = item(position = 0)
     val pendingItem = item(position = 1)

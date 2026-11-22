@@ -4,10 +4,7 @@ import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
-import java.io.ByteArrayInputStream
-import java.io.ByteArrayOutputStream
 import java.util.UUID
-import javax.crypto.AEADBadTagException
 
 class TransferCoreTest {
   @Test fun `typed queue skips an earlier different kind`() {
@@ -73,71 +70,13 @@ class TransferCoreTest {
     )
   }
 
-  @Test fun `secure frames reject tampering and replay`() {
-    val key = TransferCrypto.randomBytes(32)
-    val sender = SecureFrameChannel(key, 1, 2)
-    val receiver = SecureFrameChannel(key, 2, 1)
-    val frame = sender.seal(MessageType.HEARTBEAT, UUID.randomUUID(), "hello".encodeToByteArray())
-    assertArrayEquals("hello".encodeToByteArray(), receiver.open(frame))
-    runCatching { receiver.open(frame) }.onSuccess { error("Replay should fail") }
-
-    val next = sender.seal(MessageType.HEARTBEAT, UUID.randomUUID(), "next".encodeToByteArray())
-    val corrupt = next.copy(payload = next.payload.clone().also { it[it.lastIndex] = (it.last() + 1).toByte() })
-    try {
-      SecureFrameChannel(key, 2, 1).open(corrupt)
-      error("Tampering should fail")
-    } catch (_: AEADBadTagException) { }
-  }
-
-  @Test fun `protocol frame round trips`() {
-    val frame = ProtocolFrame(MessageType.GET, UUID.randomUUID(), 42, byteArrayOf(1, 2, 3))
-    val bytes = ByteArrayOutputStream().also { ProtocolCodec.write(it, frame) }.toByteArray()
-    val decoded = ProtocolCodec.read(ByteArrayInputStream(bytes))
-    assertEquals(frame.type, decoded.type)
-    assertEquals(frame.requestId, decoded.requestId)
-    assertEquals(frame.counter, decoded.counter)
-    assertArrayEquals(frame.payload, decoded.payload)
-  }
-
-  @Test fun `ssid normalization fingerprint and session keys are stable`() {
+  @Test fun `ssid normalization and fingerprint are stable`() {
     val key = ByteArray(32) { it.toByte() }
     assertArrayEquals(
       TransferNetworkSecurity.ssidFingerprint(key, "\"Cafe WiFi\""),
       TransferNetworkSecurity.ssidFingerprint(key, "Cafe WiFi"),
     )
     assertNull(TransferNetworkSecurity.ssidFingerprint(key, "<unknown ssid>"))
-    val id = UUID.randomUUID()
-    val nonce = ByteArray(16) { 7 }
-    val probe = TransferNetworkSecurity.sessionKey(key, id, nonce, "probe")
-    val file = TransferNetworkSecurity.sessionKey(key, id, nonce, "file")
-    org.junit.Assert.assertFalse(probe.contentEquals(file))
-  }
-
-  @Test fun `route selector prefers lan and tolerates an unknown ssid`() {
-    val wifi = HighBandwidthEndpoint("12:34:56:78:9a:bc", "192.168.49.1", "DIRECT-BH", "password")
-    val local = DeviceCapabilities(
-      modes = TransferModes.ALL,
-      lanEndpoint = NetworkEndpoint("192.168.1.20"),
-      ssidFingerprint = ByteArray(8) { 1 },
-    )
-    val remote = DeviceCapabilities(
-      modes = TransferModes.ALL,
-      lanEndpoint = NetworkEndpoint("192.168.1.21"),
-      ssidFingerprint = ByteArray(8) { 1 },
-      wifiDirectEndpoint = wifi,
-    )
-    assertEquals(
-      listOf(TransferMode.LAN, TransferMode.WIFI_DIRECT),
-      TransferRouteSelector.candidates(local, CapabilityNegotiation(remote, SsidMatch.MATCH)),
-    )
-    assertEquals(
-      listOf(TransferMode.LAN, TransferMode.WIFI_DIRECT),
-      TransferRouteSelector.candidates(local, CapabilityNegotiation(remote, SsidMatch.UNKNOWN)),
-    )
-    assertEquals(
-      listOf(TransferMode.WIFI_DIRECT),
-      TransferRouteSelector.candidates(local, CapabilityNegotiation(remote, SsidMatch.MISMATCH)),
-    )
   }
 
   @Test fun `endpoint and capability validation reject unsafe values`() {

@@ -1,14 +1,15 @@
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 plugins {
-    id("org.jetbrains.kotlin.jvm")
-    id("com.android.lint")
-    id("dev.detekt")
-    id("com.google.protobuf")
+    alias(libs.plugins.kotlin.jvm)
+    alias(libs.plugins.android.lint)
+    alias(libs.plugins.protobuf)
 }
 
+val javaVersion = JavaVersion.toVersion(libs.versions.java.get())
+
 protobuf {
-    protoc { artifact = "com.google.protobuf:protoc:4.36.2" }
+    protoc { artifact = libs.protobuf.protoc.get().toString() }
     generateProtoTasks {
         all().forEach { task ->
             task.builtins.getByName("java").option("lite")
@@ -17,22 +18,12 @@ protobuf {
 }
 
 java {
-    sourceCompatibility = JavaVersion.VERSION_17
-    targetCompatibility = JavaVersion.VERSION_17
+    sourceCompatibility = javaVersion
+    targetCompatibility = javaVersion
 }
 
 kotlin {
-    compilerOptions { jvmTarget.set(JvmTarget.JVM_17) }
-    sourceSets {
-        main {
-            kotlin.srcDir("src/commonMain/kotlin")
-            kotlin.srcDir("src/main/kotlin")
-        }
-        test {
-            kotlin.srcDir("src/commonTest/kotlin")
-            kotlin.srcDir("src/test/kotlin")
-        }
-    }
+    compilerOptions { jvmTarget.set(JvmTarget.fromTarget(libs.versions.java.get())) }
 }
 
 lint {
@@ -41,8 +32,8 @@ lint {
 }
 
 dependencies {
-    api("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.11.0")
-    api("com.google.protobuf:protobuf-javalite:4.36.2")
+    api(libs.kotlinx.coroutines.core)
+    api(libs.protobuf.javalite)
     testImplementation(kotlin("test"))
-    testImplementation("junit:junit:4.13.2")
+    testImplementation(libs.junit)
 }

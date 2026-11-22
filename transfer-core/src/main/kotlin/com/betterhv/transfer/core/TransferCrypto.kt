@@ -77,10 +77,3 @@ object TransferCrypto {
     doFinal(input)
   }
 }
-
-class ReplayWindow(private var lastCounter: Long = -1L) {
-  @Synchronized fun accept(counter: Long) {
-    require(counter > lastCounter) { "Replayed or out-of-order frame: $counter <= $lastCounter" }
-    lastCounter = counter
-  }
-}

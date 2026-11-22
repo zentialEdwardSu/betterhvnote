@@ -4,6 +4,7 @@ import com.betterhv.transfer.core.ContentCounts
 import com.betterhv.transfer.core.ContentKind
 import com.betterhv.transfer.core.v4.codec.RecordCodec
 import com.betterhv.transfer.core.v4.lan.TcpAttach
+import com.betterhv.transfer.core.v4.lan.TcpRecordLink
 import com.betterhv.transfer.core.v4.pairing.PairingException
 import com.betterhv.transfer.core.v4.pairing.PairingInitiator
 import com.betterhv.transfer.core.v4.pairing.PairingOutcome
@@ -12,6 +13,7 @@ import com.betterhv.transfer.core.v4.session.ClientHandshake
 import com.betterhv.transfer.core.v4.session.Exchange
 import com.betterhv.transfer.core.v4.session.ExchangeException
 import com.betterhv.transfer.core.v4.session.HandshakeException
+import com.betterhv.transfer.core.v4.session.LinkCipher
 import com.betterhv.transfer.core.v4.session.PeerConnection
 import com.betterhv.transfer.core.v4.session.ProtocolSession
 import com.betterhv.transfer.core.v4.session.RecordLink
@@ -32,6 +34,7 @@ import com.betterhv.transfer.proto.v4.Request
 import com.betterhv.transfer.proto.v4.UpdateCheck
 import com.betterhv.transfer.proto.v4.UpdateResult
 import com.betterhv.transfer.proto.v4.UpdateState
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
@@ -40,7 +43,6 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.selects.select
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
@@ -171,11 +173,12 @@ object NoteLinkClient {
     )
     client.start().forEach { link.send(it) }
     val reply = ArrayList<ByteArray>()
+    val pairingReassembler = PairingRecords.Reassembler()
     val established = withTimeoutOrNull(HANDSHAKE_TIMEOUT_MILLIS) {
       while (true) {
         val record = link.receive() ?: throw HandshakeException(ErrorCode.ERROR_CONNECTION_REFUSED, "Link closed")
         if (PairingRecords.isPairingRecord(record)) {
-          val frame = PairingRecords.Reassembler().add(record) ?: continue
+          val frame = pairingReassembler.add(record) ?: continue
           val code = frame.result.error
           throw HandshakeException(code, describe(code), retryable = code == ErrorCode.ERROR_CLOCK_SKEW)
         }
@@ -226,9 +229,13 @@ object NoteLinkClient {
     // Attempts run in their own scope: the first link that authenticates wins at once, and the
     // slower candidates finish (or time out) in the background instead of delaying the caller.
     val dialScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    val winnerLock = Any()
+    val opened = ArrayList<TcpRecordLink>()
+    var closing = false
+    var winner: Pair<TcpRecordLink, LinkCipher>? = null
     val attempts = candidates.distinct().map { (host, port) ->
       dialScope.async {
-        runCatching {
+        val dialed = runCatching {
           TcpAttach.dial(
             host = host,
             port = port,
@@ -239,32 +246,50 @@ object NoteLinkClient {
             peerDeviceId = connection.peerDeviceId,
             connectTimeoutMillis = timeoutMillis.toInt(),
           )
-        }.onFailure { onDialFailure("$host:$port", it) }.getOrNull()
-      }
-    }
-    val winner = withTimeoutOrNull(timeoutMillis + ATTACH_GRACE_MILLIS) {
-      val pending = attempts.toMutableList()
-      while (pending.isNotEmpty()) {
-        val (deferred, value) = select {
-          pending.forEach { candidate -> candidate.onAwait { candidate to it } }
+        }.onFailure { error ->
+          if (error is CancellationException) throw error
+          onDialFailure("$host:$port", error)
+        }.getOrNull()
+        if (dialed != null) {
+          val closeImmediately = synchronized(winnerLock) {
+            if (closing) {
+              true
+            } else {
+              opened += dialed.first
+              false
+            }
+          }
+          if (closeImmediately) {
+            runCatching { dialed.first.close() }
+            return@async null
+          }
         }
-        pending.remove(deferred)
-        if (value != null) return@withTimeoutOrNull value
-      }
-      null
-    }
-    dialScope.launch {
-      attempts.forEach { attempt ->
-        val pair = runCatching { attempt.await() }.getOrNull()
-        if (pair != null && pair !== winner) pair.first.close()
+        dialed
       }
     }
-    if (winner == null) {
+    try {
+      winner = withTimeoutOrNull(timeoutMillis + ATTACH_GRACE_MILLIS) {
+        val pending = attempts.toMutableList()
+        while (pending.isNotEmpty()) {
+          val (deferred, value) = select {
+            pending.forEach { candidate -> candidate.onAwait { candidate to it } }
+          }
+          pending.remove(deferred)
+          if (value != null) return@withTimeoutOrNull value
+        }
+        null
+      }
+      val chosen = winner ?: return null
+      connection.attach(chosen.first, chosen.second)
+      return label
+    } finally {
+      val toClose = synchronized(winnerLock) {
+        closing = true
+        opened.filter { it !== winner?.first }
+      }
       dialScope.cancel()
-      return null
+      toClose.forEach { runCatching { it.close() } }
     }
-    connection.attach(winner.first, winner.second)
-    return label
   }
 
   fun lanCandidates(capabilities: CapabilitySet): List<Pair<String, Int>> = buildList {

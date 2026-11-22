@@ -35,13 +35,16 @@ class HandshakeValidationTest {
   }
 
   @Test
-  fun rejectsAnOlderTimestampForTheSameDevice() {
+  fun allowsClockRollbackAndSameMillisecondReconnectWithFreshNonce() {
     val guard = HandshakeReplayGuard()
     assertTrue(guard.check(hello(timeMs = now), nonce(1), now) is HandshakeVerdict.Accept)
-    val stale = guard.check(hello(timeMs = now - 1_000), nonce(2), now)
-    assertEquals(ErrorCode.ERROR_REPLAY_REJECTED, (stale as HandshakeVerdict.Reject).code)
-    val newer = guard.check(hello(timeMs = now + 1_000), nonce(3), now)
-    assertTrue(newer is HandshakeVerdict.Accept)
+    // Same millisecond reconnect with a fresh nonce succeeds.
+    assertTrue(guard.check(hello(timeMs = now), nonce(2), now) is HandshakeVerdict.Accept)
+    // NTP clock rollback within clockSkewMillis with a fresh nonce succeeds.
+    assertTrue(guard.check(hello(timeMs = now - 1_000), nonce(3), now) is HandshakeVerdict.Accept)
+    // Replaying any seen nonce is still rejected even with a newer timestamp.
+    val replayed = guard.check(hello(timeMs = now + 1_000), nonce(1), now)
+    assertEquals(ErrorCode.ERROR_REPLAY_REJECTED, (replayed as HandshakeVerdict.Reject).code)
   }
 
   @Test
