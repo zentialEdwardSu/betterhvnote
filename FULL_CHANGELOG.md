@@ -8,6 +8,8 @@ Release history for **BetterHvNote** (`note-v*`) and **NoteLink** (`notelink-v*`
 
 | Product | Version | Tag | Date | Since | Summary |
 | --- | --- | --- | --- | --- | --- |
+| BetterHvNote | [0.3.1](#betterhvnote-031) | `note-v0.3.1` | 2026-11-22 | `note-v0.3.0` | export, NoteLink v4 transport and stability fixes |
+| NoteLink | [0.3.1](#notelink-031) | `notelink-v0.3.1` | 2026-11-22 | `notelink-v0.3.0` | transport, Windows launcher/firewall, Android service and update fixes |
 | NoteLink | [0.3.0](#notelink-030) | `notelink-v0.3.0` | 2026-11-04 | `notelink-v0.2.6` | new transfer protocol support |
 | BetterHvNote | [0.3.0](#betterhvnote-030) | `note-v0.3.0` | 2026-11-04 | `note-v0.2.2` | new transfer protocol support |
 | BetterHvNote | [0.2.2](#betterhvnote-022) | `note-v0.2.2` | 2026-10-26 | `note-v0.2.1` | commands, tail eraser, backup and hardware bindings |
@@ -18,6 +20,75 @@ Release history for **BetterHvNote** (`note-v*`) and **NoteLink** (`notelink-v*`
 | NoteLink | [0.2.4](#notelink-024) | `notelink-v0.2.4` | 2026-09-09 | `notelink-v0.2.3` | support pdf sheersheet and fix pdf file inqueue bug |
 | NoteLink | [0.2.3](#notelink-023) | `notelink-v0.2.3` | 2026-09-06 | Initial | 18 commits (6 features, 1 improvement, 2 other, 9 maintenance) |
 | BetterHvNote | [0.1.0](#betterhvnote-010) | `note-v0.1.0` | 2026-09-06 | Initial | 20 commits (7 features, 1 fix, 2 improvements, 3 other, 7 maintenance) |
+
+---
+
+## BetterHvNote 0.3.1
+
+> **Tag:** [`note-v0.3.1`](https://github.com/zentialEdwardSu/betterhvnote/releases/tag/note-v0.3.1) · **Date:** 2026-11-22 · **Since:** [`note-v0.3.0`](https://github.com/zentialEdwardSu/betterhvnote/releases/tag/note-v0.3.0) · **10 commits** (3 fixes, 1 improvement, 6 maintenance) · [Full Diff](https://github.com/zentialEdwardSu/betterhvnote/compare/note-v0.3.0...note-v0.3.1)
+
+**Release Summary:** export, NoteLink v4 transport and stability fixes
+
+### Bug Fixes
+
+- **app**: fix PNG/PDF export, reorganize packages, drop legacy JNI and fix core bugs ([`b786293`](https://github.com/zentialEdwardSu/betterhvnote/commit/b78629337a348f6946fdee61c9638abec2b74792))
+- **transfer-android**: fix P2P spin loop, BLE replay retries and pairing store leaks ([`1cc5604`](https://github.com/zentialEdwardSu/betterhvnote/commit/1cc5604bbf19aa6340701aa531c642f629abb1ac))
+- **update-core**: isolate APK import, support download cancellation and harden URL checks ([`d312ee2`](https://github.com/zentialEdwardSu/betterhvnote/commit/d312ee2d7547dea32082b99e6b62f5fb5cc4837c))
+
+### Improvements & Refactoring
+
+- **transfer-core**: unify source sets, share NoteLinkI18n and fix v4 transport bugs ([`7d936f5`](https://github.com/zentialEdwardSu/betterhvnote/commit/7d936f5732023bfa9485948d79565b1f2bc56923))
+
+<details>
+<summary>Build, CI &amp; Maintenance (6 commits)</summary>
+
+- **docs**: rewrite README.md in English and update current features ([`3585e21`](https://github.com/zentialEdwardSu/betterhvnote/commit/3585e21a1849b5dde3a45e98d0460796ed180fd7))
+- **ci(release)**: rewrite changelog and release note generators in Python ([`5637b25`](https://github.com/zentialEdwardSu/betterhvnote/commit/5637b25c4fd633d0e6e5d23a816bf0959953a5e1))
+  - Replace PowerShell release tag and changelog scripts with stdlib Python 3 scripts under .github/scripts/.
+  - Generate per-product incremental GitHub Release notes comparing against the previous ancestor tag of the same product, filtering commits by product modules, grouping by Conventional Commit type, formatting commit bodies as nested lists, and attaching an artifact SHA-256 table.
+  - Regenerate FULL_CHANGELOG.md from all valid product git tags with a Release Index table and retry changelog pushes on concurrent updates to main.
+  - Ignore Python bytecode caches in .gitignore.
+- **docs**: update architecture docs and track engineering documentation ([`7b4ba4e`](https://github.com/zentialEdwardSu/betterhvnote/commit/7b4ba4e0d0478efa33d0099c1eff39787a592641))
+- **chore(ide)**: add Android Studio run, debug, build and test configurations ([`ada838c`](https://github.com/zentialEdwardSu/betterhvnote/commit/ada838c5e611ba710ad21841e3f4d8b3329056b9))
+- **ci**: run only lint and tests on regular pushes and update centralized build paths ([`e63e649`](https://github.com/zentialEdwardSu/betterhvnote/commit/e63e649a95057e10bef31e80bfa4b59ae0553542))
+- **build**: centralize build outputs, add version catalog and clean root scripts ([`2481f51`](https://github.com/zentialEdwardSu/betterhvnote/commit/2481f518d446e075945da8314ac5a5bcec34bd3c))
+
+</details>
+
+---
+
+## NoteLink 0.3.1
+
+> **Tag:** [`notelink-v0.3.1`](https://github.com/zentialEdwardSu/betterhvnote/releases/tag/notelink-v0.3.1) · **Date:** 2026-11-22 · **Since:** [`notelink-v0.3.0`](https://github.com/zentialEdwardSu/betterhvnote/releases/tag/notelink-v0.3.0) · **11 commits** (4 fixes, 2 improvements, 5 maintenance) · [Full Diff](https://github.com/zentialEdwardSu/betterhvnote/compare/notelink-v0.3.0...notelink-v0.3.1)
+
+**Release Summary:** transport, Windows launcher/firewall, Android service and update fixes
+
+### Bug Fixes
+
+- **phone-desktop**: relocate desktop sources, fix UTF-8 launcher, UI scans and firewall checks ([`03bf956`](https://github.com/zentialEdwardSu/betterhvnote/commit/03bf95692fa8d74410fb9ac0fa2f367e10bbe2ad))
+- **transfer-windows**: fix LAN gateway discovery, WinRT thread safety and DLL caching ([`f858bcc`](https://github.com/zentialEdwardSu/betterhvnote/commit/f858bcc1d25f6af6d6b18d8b1d0517e17fe3e1bd))
+- **transfer-android**: fix P2P spin loop, BLE replay retries and pairing store leaks ([`1cc5604`](https://github.com/zentialEdwardSu/betterhvnote/commit/1cc5604bbf19aa6340701aa531c642f629abb1ac))
+- **update-core**: isolate APK import, support download cancellation and harden URL checks ([`d312ee2`](https://github.com/zentialEdwardSu/betterhvnote/commit/d312ee2d7547dea32082b99e6b62f5fb5cc4837c))
+
+### Improvements & Refactoring
+
+- **phone-app**: organize subpackages and fix foreground service, share intake and queue locks ([`6be56a3`](https://github.com/zentialEdwardSu/betterhvnote/commit/6be56a3be3849fe80f43863e041494d47fa6e253))
+- **transfer-core**: unify source sets, share NoteLinkI18n and fix v4 transport bugs ([`7d936f5`](https://github.com/zentialEdwardSu/betterhvnote/commit/7d936f5732023bfa9485948d79565b1f2bc56923))
+
+<details>
+<summary>Build, CI &amp; Maintenance (5 commits)</summary>
+
+- **docs**: rewrite README.md in English and update current features ([`3585e21`](https://github.com/zentialEdwardSu/betterhvnote/commit/3585e21a1849b5dde3a45e98d0460796ed180fd7))
+- **ci(release)**: rewrite changelog and release note generators in Python ([`5637b25`](https://github.com/zentialEdwardSu/betterhvnote/commit/5637b25c4fd633d0e6e5d23a816bf0959953a5e1))
+  - Replace PowerShell release tag and changelog scripts with stdlib Python 3 scripts under .github/scripts/.
+  - Generate per-product incremental GitHub Release notes comparing against the previous ancestor tag of the same product, filtering commits by product modules, grouping by Conventional Commit type, formatting commit bodies as nested lists, and attaching an artifact SHA-256 table.
+  - Regenerate FULL_CHANGELOG.md from all valid product git tags with a Release Index table and retry changelog pushes on concurrent updates to main.
+  - Ignore Python bytecode caches in .gitignore.
+- **docs**: update architecture docs and track engineering documentation ([`7b4ba4e`](https://github.com/zentialEdwardSu/betterhvnote/commit/7b4ba4e0d0478efa33d0099c1eff39787a592641))
+- **chore(ide)**: add Android Studio run, debug, build and test configurations ([`ada838c`](https://github.com/zentialEdwardSu/betterhvnote/commit/ada838c5e611ba710ad21841e3f4d8b3329056b9))
+- **ci**: run only lint and tests on regular pushes and update centralized build paths ([`e63e649`](https://github.com/zentialEdwardSu/betterhvnote/commit/e63e649a95057e10bef31e80bfa4b59ae0553542))
+
+</details>
 
 ---
 
