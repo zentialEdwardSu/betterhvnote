@@ -1,22 +1,23 @@
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 plugins {
-    id("org.jetbrains.kotlin.jvm")
-    id("com.android.lint")
-    id("dev.detekt")
+    alias(libs.plugins.kotlin.jvm)
+    alias(libs.plugins.android.lint)
 }
 
+val javaVersion = JavaVersion.toVersion(libs.versions.java.get())
+
 java {
-    sourceCompatibility = JavaVersion.VERSION_17
-    targetCompatibility = JavaVersion.VERSION_17
+    sourceCompatibility = javaVersion
+    targetCompatibility = javaVersion
 }
 
 kotlin {
-    compilerOptions { jvmTarget.set(JvmTarget.JVM_17) }
+    compilerOptions { jvmTarget.set(JvmTarget.fromTarget(libs.versions.java.get())) }
 }
 
 dependencies {
-  implementation("com.google.code.gson:gson:2.14.0")
-  implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.11.0")
-  testImplementation(kotlin("test"))
+    implementation(libs.gson)
+    implementation(libs.kotlinx.coroutines.core)
+    testImplementation(kotlin("test"))
 }

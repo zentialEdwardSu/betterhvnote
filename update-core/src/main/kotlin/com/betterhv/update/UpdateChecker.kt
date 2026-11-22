@@ -32,9 +32,17 @@ class UpdateChecker(private val source: ReleaseSource = GitHubReleaseSource()) {
 
   companion object {
     fun isTrustedReleaseUrl(value: String): Boolean = runCatching {
-      val uri = URI(value)
-      uri.scheme == "https" && uri.host.equals("github.com", ignoreCase = true) &&
-        uri.path.startsWith("/zentialEdwardSu/betterhvnote/releases/")
+      val parsed = URI(value)
+      val uri = parsed.normalize()
+      uri.scheme.equals("https", ignoreCase = true) &&
+        uri.userInfo == null &&
+        uri.rawUserInfo == null &&
+        (uri.port == -1 || uri.port == 443) &&
+        uri.host?.equals("github.com", ignoreCase = true) == true &&
+        uri.path != null &&
+        uri.path.startsWith("/zentialEdwardSu/betterhvnote/releases/") &&
+        !parsed.rawPath.orEmpty().contains("..") &&
+        !uri.path.contains("..")
     }.getOrDefault(false)
   }
 }

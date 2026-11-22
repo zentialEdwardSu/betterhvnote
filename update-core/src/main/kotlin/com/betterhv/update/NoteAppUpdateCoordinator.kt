@@ -2,16 +2,30 @@ package com.betterhv.update
 
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.launch
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withContext
 import java.io.File
+import java.net.HttpURLConnection
+import java.nio.file.AtomicMoveNotSupportedException
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicLong
+import java.util.concurrent.atomic.AtomicReference
+import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
 
 sealed interface NoteAppUpdateTaskState {
   data object Resolving : NoteAppUpdateTaskState
@@ -33,14 +47,20 @@ class NoteAppUpdateCoordinator(
   cacheDirectory: File,
   private val resolver: NotePackageResolver = NotePackageResolver(),
   private val downloader: SecureReleaseDownloader = SecureReleaseDownloader(),
+  cleanStalePartsOnInit: Boolean = true,
   private val enqueue: (File, NotePackageDescriptor, String) -> UUID,
 ) : AutoCloseable {
   private val cache = cacheDirectory.canonicalFile.also(File::mkdirs)
   private val tasks = ConcurrentHashMap<UUID, Task>()
+  private val taskSequence = AtomicLong()
   private val mutableState = MutableStateFlow<NoteAppUpdateTaskState?>(null)
   val state: StateFlow<NoteAppUpdateTaskState?> = mutableState.asStateFlow()
 
   init {
+    if (cleanStalePartsOnInit) cleanupStalePartials()
+  }
+
+  private fun cleanupStalePartials() {
     cache.listFiles()?.filter { it.name.endsWith(".part") }?.forEach(File::delete)
   }
 
@@ -52,7 +72,8 @@ class NoteAppUpdateCoordinator(
       }
       return existing.state
     }
-    val task = Task(peerId, currentVersion)
+    pruneTerminalTasks()
+    val task = Task(peerId, currentVersion, taskSequence.incrementAndGet())
     val winner = tasks.putIfAbsent(operationId, task)
     if (winner != null) return begin(operationId, peerId, currentVersion)
     mutableState.value = task.state
@@ -91,38 +112,41 @@ class NoteAppUpdateCoordinator(
     return descriptor
   }
 
-  private fun resolveAndPrepare(task: Task) {
+  private suspend fun resolveAndPrepare(task: Task) {
     try {
+      currentCoroutineContext().ensureActive()
       when (val resolution = resolver.resolve(task.currentVersion)) {
         is NotePackageResolution.UpToDate -> {
+          currentCoroutineContext().ensureActive()
           update(task, NoteAppUpdateTaskState.UpToDate(resolution.latestVersion?.display))
         }
 
         is NotePackageResolution.Available -> {
+          currentCoroutineContext().ensureActive()
           val descriptor = resolution.descriptor
           val target = cachedFile(descriptor)
           if (!downloader.verify(target, descriptor)) {
             val temporary = File(cache, "download-${UUID.randomUUID()}.part")
             try {
-              update(task, NoteAppUpdateTaskState.Downloading(
-                descriptor.version.display,
-                0,
-                descriptor.apk.byteLength,
-              ))
-              downloader.download(
-                descriptor.apk.downloadUrl,
-                temporary,
-                descriptor.apk.byteLength,
-                descriptor.expectedSha256,
-              ) { done, total ->
-                update(task, NoteAppUpdateTaskState.Downloading(descriptor.version.display, done, total))
-              }
+              currentCoroutineContext().ensureActive()
+              update(
+                task,
+                NoteAppUpdateTaskState.Downloading(
+                  descriptor.version.display,
+                  0,
+                  descriptor.apk.byteLength,
+                ),
+              )
+              downloadCancellable(task, descriptor, temporary)
+              currentCoroutineContext().ensureActive()
               installCache(temporary, descriptor)
             } finally {
               temporary.delete()
             }
           }
+          currentCoroutineContext().ensureActive()
           val itemId = enqueue(cachedFile(descriptor), descriptor, task.peerId)
+          currentCoroutineContext().ensureActive()
           update(
             task,
             NoteAppUpdateTaskState.Ready(
@@ -142,6 +166,48 @@ class NoteAppUpdateCoordinator(
     }
   }
 
+  private suspend fun downloadCancellable(
+    task: Task,
+    descriptor: NotePackageDescriptor,
+    temporary: File,
+  ) = coroutineScope {
+    val activeConnection = AtomicReference<HttpURLConnection?>()
+    val downloadJob = launch(Dispatchers.IO) {
+      downloader.download(
+        url = descriptor.apk.downloadUrl,
+        destination = temporary,
+        expectedLength = descriptor.apk.byteLength,
+        expectedSha256 = descriptor.expectedSha256,
+        isActive = { isActive },
+        onConnection = { conn ->
+          activeConnection.set(conn)
+          if (!isActive) {
+            activeConnection.getAndSet(null)?.let { runCatching { it.disconnect() } }
+          }
+        },
+      ) { done, total ->
+        if (!isActive) throw CancellationException("Update download cancelled")
+        update(task, NoteAppUpdateTaskState.Downloading(descriptor.version.display, done, total))
+      }
+    }
+    try {
+      suspendCancellableCoroutine<Unit> { cont ->
+        cont.invokeOnCancellation {
+          activeConnection.getAndSet(null)?.let { runCatching { it.disconnect() } }
+          downloadJob.cancel()
+        }
+        downloadJob.invokeOnCompletion { cause ->
+          when {
+            cause == null -> cont.resume(Unit)
+            cont.isActive -> cont.resumeWithException(cause)
+          }
+        }
+      }
+    } finally {
+      withContext(NonCancellable) { downloadJob.join() }
+    }
+  }
+
   private fun cachedFile(descriptor: NotePackageDescriptor) =
     File(cache, "BetterHvNote-${descriptor.version.display}-android-arm64.apk")
 
@@ -150,14 +216,39 @@ class NoteAppUpdateCoordinator(
     mutableState.value = state
   }
 
+  private fun pruneTerminalTasks() {
+    if (tasks.size < MAX_CACHED_TASKS) return
+    val terminal = tasks.entries
+      .filter { (_, task) ->
+        val current = task.state
+        current is NoteAppUpdateTaskState.UpToDate ||
+          current is NoteAppUpdateTaskState.Ready ||
+          current is NoteAppUpdateTaskState.Failed
+      }
+      .sortedBy { it.value.sequence }
+    var excess = tasks.size - MAX_CACHED_TASKS + 1
+    for ((id, task) in terminal) {
+      if (excess <= 0) break
+      if (tasks.remove(id, task)) excess--
+    }
+  }
+
   private fun installCache(temporary: File, descriptor: NotePackageDescriptor) {
     val target = cachedFile(descriptor)
-    Files.move(
-      temporary.toPath(),
-      target.toPath(),
-      StandardCopyOption.REPLACE_EXISTING,
-      StandardCopyOption.ATOMIC_MOVE,
-    )
+    try {
+      Files.move(
+        temporary.toPath(),
+        target.toPath(),
+        StandardCopyOption.REPLACE_EXISTING,
+        StandardCopyOption.ATOMIC_MOVE,
+      )
+    } catch (_: AtomicMoveNotSupportedException) {
+      Files.move(
+        temporary.toPath(),
+        target.toPath(),
+        StandardCopyOption.REPLACE_EXISTING,
+      )
+    }
     cache.listFiles()?.filter { it.isFile && it.extension == "apk" && it != target }?.forEach(File::delete)
   }
 
@@ -166,8 +257,12 @@ class NoteAppUpdateCoordinator(
     tasks.clear()
   }
 
-  private class Task(val peerId: String, val currentVersion: String) {
+  private class Task(val peerId: String, val currentVersion: String, val sequence: Long) {
     @Volatile var state: NoteAppUpdateTaskState = NoteAppUpdateTaskState.Resolving
     @Volatile var job: Job? = null
+  }
+
+  companion object {
+    internal const val MAX_CACHED_TASKS = 32
   }
 }

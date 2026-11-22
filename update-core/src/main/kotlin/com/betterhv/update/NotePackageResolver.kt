@@ -1,5 +1,6 @@
 package com.betterhv.update
 
+import kotlinx.coroutines.CancellationException
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.FileOutputStream
@@ -66,12 +67,23 @@ class NotePackageResolver(
     }
 
     fun requireTrustedAsset(asset: ReleaseAsset, tagName: String) {
-      val uri = runCatching { URI(asset.downloadUrl) }.getOrNull()
+      val parsed = runCatching { URI(asset.downloadUrl) }.getOrNull()
         ?: throw IllegalArgumentException("Invalid release asset URL")
-      require(uri.scheme == "https" && uri.host.equals("github.com", ignoreCase = true)) {
+      val uri = parsed.normalize()
+      require(
+        uri.scheme.equals("https", ignoreCase = true) &&
+          uri.userInfo == null &&
+          uri.rawUserInfo == null &&
+          (uri.port == -1 || uri.port == 443) &&
+          uri.host?.equals("github.com", ignoreCase = true) == true,
+      ) {
         "Release asset is not hosted on GitHub"
       }
-      require(uri.path == "/zentialEdwardSu/betterhvnote/releases/download/$tagName/${asset.name}") {
+      require(
+        uri.path == "/zentialEdwardSu/betterhvnote/releases/download/$tagName/${asset.name}" &&
+          !parsed.rawPath.orEmpty().contains("..") &&
+          !uri.path.orEmpty().contains(".."),
+      ) {
         "Release asset URL does not match its release"
       }
     }
@@ -80,7 +92,9 @@ class NotePackageResolver(
   }
 }
 
-class SecureReleaseDownloader {
+class SecureReleaseDownloader(
+  private val connectionFactory: (URL) -> HttpURLConnection = { it.openConnection() as HttpURLConnection },
+) {
   fun readText(url: String): String {
     val output = ByteArrayOutputStream()
     open(url).use { input ->
@@ -100,21 +114,25 @@ class SecureReleaseDownloader {
     destination: File,
     expectedLength: Long,
     expectedSha256: ByteArray,
+    isActive: () -> Boolean = { true },
+    onConnection: (HttpURLConnection) -> Unit = {},
     progress: (Long, Long) -> Unit = { _, _ -> },
   ) {
     require(expectedLength in 1..NotePackageResolver.MAX_NOTE_PACKAGE_BYTES)
     destination.parentFile?.mkdirs()
     var received = 0L
     try {
-      open(url).use { input ->
+      if (!isActive()) throw CancellationException("Download cancelled")
+      open(url, onConnection).use { input ->
         FileOutputStream(destination).buffered().use { output ->
           val digest = MessageDigest.getInstance("SHA-256")
           val buffer = ByteArray(64 * 1024)
           while (true) {
+            if (!isActive()) throw CancellationException("Download cancelled")
             val count = input.read(buffer)
             if (count < 0) break
             received += count
-            require(received <= NotePackageResolver.MAX_NOTE_PACKAGE_BYTES) { "Note APK is too large" }
+            require(received <= expectedLength) { "Note APK length exceeds expected size" }
             digest.update(buffer, 0, count)
             output.write(buffer, 0, count)
             progress(received, expectedLength)
@@ -132,33 +150,44 @@ class SecureReleaseDownloader {
   fun verify(file: File, descriptor: NotePackageDescriptor): Boolean = file.isFile &&
     file.length() == descriptor.apk.byteLength && sha256(file).contentEquals(descriptor.expectedSha256)
 
-  private fun open(rawUrl: String): java.io.InputStream {
+  private fun open(rawUrl: String, onConnection: (HttpURLConnection) -> Unit = {}): java.io.InputStream {
     var current = URL(rawUrl)
     repeat(MAX_REDIRECTS + 1) {
       requireTrustedDownloadHost(current)
-      val connection = current.openConnection() as HttpURLConnection
-      connection.instanceFollowRedirects = false
-      connection.connectTimeout = CONNECT_TIMEOUT_MILLIS
-      connection.readTimeout = READ_TIMEOUT_MILLIS
-      connection.setRequestProperty("User-Agent", "BetterHvNote-UpdateDownloader")
-      val status = connection.responseCode
-      if (status in REDIRECT_CODES) {
-        val location = connection.getHeaderField("Location") ?: throw IOException("Redirect has no location")
-        connection.disconnect()
-        current = URL(current, location)
-      } else {
-        if (status !in 200..299) {
-          connection.disconnect()
-          throw IOException("GitHub returned HTTP $status")
+      val connection = connectionFactory(current)
+      onConnection(connection)
+      var handoff = false
+      try {
+        connection.instanceFollowRedirects = false
+        connection.connectTimeout = CONNECT_TIMEOUT_MILLIS
+        connection.readTimeout = READ_TIMEOUT_MILLIS
+        connection.setRequestProperty("User-Agent", "BetterHvNote-UpdateDownloader")
+        val status = connection.responseCode
+        if (status in REDIRECT_CODES) {
+          val location = connection.getHeaderField("Location") ?: throw IOException("Redirect has no location")
+          current = URL(current, location)
+        } else {
+          if (status !in 200..299) {
+            throw IOException("GitHub returned HTTP $status")
+          }
+          val stream = DisconnectingInputStream(connection)
+          handoff = true
+          return stream
         }
-        return DisconnectingInputStream(connection)
+      } finally {
+        if (!handoff) runCatching { connection.disconnect() }
       }
     }
     throw IOException("Too many release download redirects")
   }
 
   private fun requireTrustedDownloadHost(url: URL) {
-    require(url.protocol == "https" && url.host.lowercase() in TRUSTED_HOSTS) {
+    require(
+      url.protocol.equals("https", ignoreCase = true) &&
+        url.userInfo.isNullOrEmpty() &&
+        (url.port == -1 || url.port == 443) &&
+        url.host.lowercase() in TRUSTED_HOSTS,
+    ) {
       "Untrusted release download URL"
     }
   }

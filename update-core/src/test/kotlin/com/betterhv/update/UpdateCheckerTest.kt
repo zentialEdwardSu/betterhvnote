@@ -2,8 +2,10 @@ package com.betterhv.update
 
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertIs
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
 
 class UpdateCheckerTest {
   @Test
@@ -46,6 +48,35 @@ class UpdateCheckerTest {
     val failing = UpdateChecker(ReleaseSource { error("offline") })
     assertEquals("offline", assertIs<UpdateCheckState.Failed>(failing.check(UpdateProduct.NOTE, "1.0.0")).message)
     assertIs<UpdateCheckState.Failed>(failing.check(UpdateProduct.NOTE, "broken"))
+  }
+
+  @Test
+  fun `isTrustedReleaseUrl rejects path traversal userInfo and non-default ports`() {
+    val valid = "https://github.com/zentialEdwardSu/betterhvnote/releases/tag/note-v1.3.0"
+    val validWithDefaultPort = "https://github.com:443/zentialEdwardSu/betterhvnote/releases/tag/note-v1.3.0"
+    assertTrue(UpdateChecker.isTrustedReleaseUrl(valid))
+    assertTrue(UpdateChecker.isTrustedReleaseUrl(validWithDefaultPort))
+
+    assertFalse(
+      UpdateChecker.isTrustedReleaseUrl(
+        "https://github.com/zentialEdwardSu/betterhvnote/releases/tag/../../other",
+      ),
+    )
+    assertFalse(
+      UpdateChecker.isTrustedReleaseUrl(
+        "https://github.com/zentialEdwardSu/betterhvnote/releases/tag/note-v1.0.0/../other",
+      ),
+    )
+    assertFalse(
+      UpdateChecker.isTrustedReleaseUrl(
+        "https://user@github.com/zentialEdwardSu/betterhvnote/releases/tag/note-v1.3.0",
+      ),
+    )
+    assertFalse(
+      UpdateChecker.isTrustedReleaseUrl(
+        "https://github.com:8443/zentialEdwardSu/betterhvnote/releases/tag/note-v1.3.0",
+      ),
+    )
   }
 
   private fun release(
