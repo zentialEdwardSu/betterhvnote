@@ -10,6 +10,9 @@ import androidx.core.content.FileProvider
 import androidx.core.graphics.createBitmap
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import com.betterhv.note.sender.data.PhoneQueueRepository
+import com.betterhv.note.sender.share.ShareIntake
+import com.betterhv.note.sender.share.ShareRejectReason
 import com.betterhv.transfer.core.ContentKind
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue

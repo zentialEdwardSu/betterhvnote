@@ -1,4 +1,4 @@
-package com.betterhv.note.sender
+package com.betterhv.note.sender.service
 
 import android.util.Log
 import com.betterhv.transfer.core.TransferEvent

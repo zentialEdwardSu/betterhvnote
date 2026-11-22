@@ -6,6 +6,9 @@ import android.content.Intent
 import android.graphics.Bitmap
 import androidx.core.content.FileProvider
 import androidx.core.graphics.createBitmap
+import com.betterhv.note.sender.data.NoteLinkSettings
+import com.betterhv.note.sender.data.PhoneQueueRepository
+import com.betterhv.note.sender.service.PhonePairingMode
 import com.betterhv.transfer.android.AndroidPairingController
 import java.io.File
 
@@ -14,7 +17,7 @@ class DebugControlReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         val queue = PhoneQueueRepository(context)
         try {
-            val pairing = AndroidPairingController(context)
+            val pairing = AndroidPairingController.shared(context)
             when (intent.action) {
                 // Enters the code shown on the Note, exactly like the pairing dialog.
                 ACTION_PAIR -> PhonePairingMode.begin(

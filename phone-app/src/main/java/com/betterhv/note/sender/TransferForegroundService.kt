@@ -13,7 +13,12 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
 import androidx.core.content.edit
-import com.betterhv.note.sender.shared.noteLinkText
+import com.betterhv.note.sender.data.ExportInboxRepository
+import com.betterhv.note.sender.data.NoteLinkSettings
+import com.betterhv.note.sender.data.PhoneQueueRepository
+import com.betterhv.note.sender.service.NoteLinkTransferRuntime
+import com.betterhv.note.sender.service.PhoneCommandProcessor
+import com.betterhv.note.sender.service.PhonePairingMode
 import com.betterhv.transfer.android.AndroidNetworkInfoProvider
 import com.betterhv.transfer.android.AndroidPairingController
 import com.betterhv.transfer.android.AndroidSenderEndpoint
@@ -22,6 +27,7 @@ import com.betterhv.transfer.android.HighBandwidthSessionManager
 import com.betterhv.transfer.android.HostedGroupState
 import com.betterhv.transfer.core.NOTELINK_LAN_PORT
 import com.betterhv.transfer.core.TransferPhase
+import com.betterhv.transfer.core.i18n.noteLinkText
 import com.betterhv.transfer.core.v4.notelink.NoteLinkServer
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -42,11 +48,11 @@ class TransferForegroundService : Service() {
   // Android drops incoming broadcast datagrams in Wi-Fi power save unless a multicast lock is
   // held; without it the Note's LAN discovery probe never reaches this phone.
   private var multicastLock: android.net.wifi.WifiManager.MulticastLock? = null
-  private var foregroundStarted = false
+  @Volatile private var foregroundStarted = false
 
   override fun onCreate() {
     super.onCreate()
-    pairing = AndroidPairingController(this)
+    pairing = AndroidPairingController.shared(this)
     val settings = NoteLinkSettings(this)
     queue = PhoneQueueRepository(
       this,
@@ -84,15 +90,16 @@ class TransferForegroundService : Service() {
     }
     if (intent?.action == ACTION_PAUSE) {
       setReceiveEnabled(this, false)
+      if (!foregroundStarted) runCatching { showNotification() }
       stopSelf()
       return START_NOT_STICKY
     }
     if (!shouldRun()) {
+      if (!foregroundStarted) runCatching { showNotification() }
       stopSelf()
       return START_NOT_STICKY
     }
     showNotification()
-    foregroundStarted = true
     if (intent?.action == ACTION_SETTINGS_CHANGED) stopTransport()
     if (endpoint == null) startTransport()
     return START_STICKY
@@ -164,8 +171,9 @@ class TransferForegroundService : Service() {
     }
   }
 
+  @Synchronized
   private fun showNotification() {
-    val count = queue.items().size
+    val count = queue.itemFlow.value.size
     val displayName = NoteLinkSettings(this).displayName
     val open = PendingIntent.getActivity(
       this,
@@ -269,12 +277,17 @@ class TransferForegroundService : Service() {
       cancel
     )
     val notification = builder.build()
-    ServiceCompat.startForeground(
-      this,
-      NOTIFICATION_ID,
-      notification,
-      ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE,
-    )
+    if (!foregroundStarted) {
+      ServiceCompat.startForeground(
+        this,
+        NOTIFICATION_ID,
+        notification,
+        ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE,
+      )
+      foregroundStarted = true
+    } else {
+      getSystemService(NotificationManager::class.java)?.notify(NOTIFICATION_ID, notification)
+    }
   }
 
   private fun createChannel() {
@@ -300,9 +313,9 @@ class TransferForegroundService : Service() {
 
     fun sync(context: Context, hasItems: Boolean) {
       val intent = Intent(context, TransferForegroundService::class.java)
-      val paired = AndroidPairingController(context).pairedDevice != null
+      val paired = AndroidPairingController.shared(context).pairedDevice != null
       if (hasItems || PhonePairingMode.responder.value != null || (paired && isReceiveEnabled(context))) {
-        ContextCompat.startForegroundService(context, intent)
+        startForegroundSafely(context, intent)
       } else {
         context.stopService(intent)
       }
@@ -314,12 +327,22 @@ class TransferForegroundService : Service() {
     }
 
     fun settingsChanged(context: Context, hasItems: Boolean) {
-      val paired = AndroidPairingController(context).pairedDevice != null
+      val paired = AndroidPairingController.shared(context).pairedDevice != null
       if (hasItems || (paired && isReceiveEnabled(context))) {
-        ContextCompat.startForegroundService(
+        startForegroundSafely(
           context,
           Intent(context, TransferForegroundService::class.java).setAction(ACTION_SETTINGS_CHANGED),
         )
+      }
+    }
+
+    private fun startForegroundSafely(context: Context, intent: Intent) {
+      try {
+        ContextCompat.startForegroundService(context, intent)
+      } catch (e: SecurityException) {
+        Log.w(TAG, "Missing permission to start transfer service", e)
+      } catch (e: IllegalStateException) {
+        Log.w(TAG, "Cannot start transfer foreground service in current state", e)
       }
     }
 

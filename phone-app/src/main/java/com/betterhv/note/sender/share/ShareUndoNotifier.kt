@@ -1,4 +1,4 @@
-package com.betterhv.note.sender
+package com.betterhv.note.sender.share
 
 import android.Manifest
 import android.app.NotificationChannel
@@ -13,7 +13,13 @@ import android.widget.Toast
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
-import com.betterhv.note.sender.shared.noteLinkText
+import com.betterhv.note.sender.TransferForegroundService
+import com.betterhv.note.sender.data.PhoneQueueRepository
+import com.betterhv.transfer.core.i18n.noteLinkText
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.util.UUID
 
 /** Gives sharesheet imports a short, explicit way to remove the complete imported batch. */
@@ -54,12 +60,22 @@ object ShareUndoNotifier {
 class ShareUndoReceiver : BroadcastReceiver() {
   override fun onReceive(context: Context, intent: Intent) {
     val ids = intent.getStringArrayListExtra(ShareUndoNotifier.EXTRA_IDS).orEmpty()
-    PhoneQueueRepository(context).use { queue ->
-      ids.mapNotNull { value -> runCatching { UUID.fromString(value) }.getOrNull() }
-        .forEach(queue::delete)
-      TransferForegroundService.sync(context, queue.items().isNotEmpty())
+    val pendingResult = goAsync()
+    val appContext = context.applicationContext
+    CoroutineScope(Dispatchers.IO).launch {
+      try {
+        PhoneQueueRepository(appContext).use { queue ->
+          ids.mapNotNull { value -> runCatching { UUID.fromString(value) }.getOrNull() }
+            .forEach(queue::delete)
+          TransferForegroundService.sync(appContext, queue.items().isNotEmpty())
+        }
+        NotificationManagerCompat.from(appContext).cancel(ShareUndoNotifier.NOTIFICATION_ID)
+        withContext(Dispatchers.Main) {
+          Toast.makeText(appContext, noteLinkText("已撤销本次分享", "Share undone"), Toast.LENGTH_SHORT).show()
+        }
+      } finally {
+        pendingResult.finish()
+      }
     }
-    NotificationManagerCompat.from(context).cancel(ShareUndoNotifier.NOTIFICATION_ID)
-    Toast.makeText(context, noteLinkText("已撤销本次分享", "Share undone"), Toast.LENGTH_SHORT).show()
   }
 }

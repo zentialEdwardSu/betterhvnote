@@ -72,9 +72,11 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -94,9 +96,19 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.lifecycleScope
-import com.betterhv.note.sender.shared.NoteLinkLanguage
-import com.betterhv.note.sender.shared.displayName
-import com.betterhv.note.sender.shared.noteLinkText
+import com.betterhv.note.sender.data.ExportInboxRepository
+import com.betterhv.note.sender.data.InboxExport
+import com.betterhv.note.sender.data.InboxExportState
+import com.betterhv.note.sender.data.NoteLinkSettings
+import com.betterhv.note.sender.data.PhoneQueueRepository
+import com.betterhv.note.sender.service.NoteLinkTransferRuntime
+import com.betterhv.note.sender.service.PairingUiState
+import com.betterhv.note.sender.service.PhonePairingMode
+import com.betterhv.note.sender.share.ShareIntake
+import com.betterhv.note.sender.share.ShareIntakeResult
+import com.betterhv.note.sender.share.ShareRejectReason
+import com.betterhv.note.sender.share.ShareShortcutPublisher
+import com.betterhv.note.sender.share.ShareUndoNotifier
 import com.betterhv.transfer.android.AndroidPairingController
 import com.betterhv.transfer.android.TransferPermissions
 import com.betterhv.transfer.core.ContentKind
@@ -111,6 +123,11 @@ import com.betterhv.transfer.core.TransferLogEntry
 import com.betterhv.transfer.core.TransferLogLevel
 import com.betterhv.transfer.core.TransferModes
 import com.betterhv.transfer.core.TransferSnapshot
+import com.betterhv.transfer.core.i18n.NoteLinkI18n
+import com.betterhv.transfer.core.i18n.NoteLinkLanguage
+import com.betterhv.transfer.core.i18n.displayName
+import com.betterhv.transfer.core.i18n.noteLinkText
+import com.betterhv.transfer.core.i18n.text
 import com.betterhv.transfer.core.isActiveTransferPhase
 import com.betterhv.update.UpdateCheckState
 import com.betterhv.update.UpdateChecker
@@ -119,6 +136,7 @@ import com.betterhv.update.UpdateProduct
 import com.betterhv.update.UpdateUiState
 import com.betterhv.update.NoteAppUpdateCoordinator
 import com.betterhv.update.NoteAppUpdateTaskState
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -168,29 +186,58 @@ private val NoteLinkColorScheme = lightColorScheme(
 )
 
 class MainActivity : ComponentActivity() {
-  private lateinit var queue: PhoneQueueRepository
-  private lateinit var inbox: ExportInboxRepository
-  private lateinit var pairing: AndroidPairingController
-  private lateinit var shareIntake: ShareIntake
+  private data class AppDependencies(
+    val pairing: AndroidPairingController,
+    val queue: PhoneQueueRepository,
+    val inbox: ExportInboxRepository,
+    val shareIntake: ShareIntake,
+  )
+
+  private val dependencies = mutableStateOf<AppDependencies?>(null)
+  private val depsDeferred = CompletableDeferred<AppDependencies>()
   private val notice = mutableStateOf<String?>(null)
 
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
-    pairing = AndroidPairingController(this)
-    val settings = NoteLinkSettings(this)
-    queue = PhoneQueueRepository(
-      this,
-      sendOrder = { settings.sendOrder },
-      deviceName = { id ->
-        id?.let { deviceId -> pairing.pairedClients.firstOrNull { it.id == deviceId }?.name }
-      },
-    )
-    inbox = ExportInboxRepository(this)
-    shareIntake = ShareIntake(this, queue)
-    ShareShortcutPublisher.update(this, pairing.pairedDevice)
+    lifecycleScope.launch {
+      val deps = withContext(Dispatchers.IO) {
+        val pairing = AndroidPairingController.shared(applicationContext)
+        val settings = NoteLinkSettings(applicationContext)
+        val queue = PhoneQueueRepository(
+          applicationContext,
+          sendOrder = { settings.sendOrder },
+          deviceName = { id ->
+            id?.let { deviceId -> pairing.pairedClients.firstOrNull { it.id == deviceId }?.name }
+          },
+        )
+        val inbox = ExportInboxRepository(applicationContext)
+        val shareIntake = ShareIntake(applicationContext, queue)
+        ShareShortcutPublisher.update(applicationContext, pairing.pairedDevice)
+        AppDependencies(pairing, queue, inbox, shareIntake)
+      }
+      if (isDestroyed || isFinishing) {
+        withContext(Dispatchers.IO) {
+          deps.inbox.close()
+          deps.queue.close()
+        }
+        return@launch
+      }
+      dependencies.value = deps
+      depsDeferred.complete(deps)
+      startWaiting(deps.queue)
+    }
     if (savedInstanceState == null) consumeShareIntent(intent)
-    setContent { BetterHvSendApp(queue, inbox, pairing, notice.value) { notice.value = it } }
-    startWaiting()
+    setContent {
+      val activeLanguage by NoteLinkI18n.languageFlow.collectAsState()
+      CompositionLocalProvider(LocalNoteLinkLanguage provides activeLanguage) {
+        val deps = dependencies.value
+        if (deps == null) {
+          Box(Modifier.fillMaxSize())
+        } else {
+          BetterHvSendApp(deps.queue, deps.inbox, deps.pairing, notice.value) { notice.value = it }
+        }
+      }
+    }
   }
 
   override fun onNewIntent(intent: Intent) {
@@ -200,8 +247,12 @@ class MainActivity : ComponentActivity() {
   }
 
   override fun onDestroy() {
-    inbox.close()
-    queue.close()
+    val deps = dependencies.value
+    dependencies.value = null
+    if (deps != null) {
+      deps.inbox.close()
+      deps.queue.close()
+    }
     super.onDestroy()
   }
 
@@ -211,11 +262,12 @@ class MainActivity : ComponentActivity() {
     val sharedIntent = Intent(intent)
     lifecycleScope.launch {
       runCatching {
+        val deps = depsDeferred.await()
         val result = withContext(Dispatchers.IO) {
-          shareIntake.accept(sharedIntent, pairing.pairedDevice?.id)
+          deps.shareIntake.accept(sharedIntent, deps.pairing.pairedDevice?.id)
         }
         if (result.accepted.isNotEmpty()) {
-          startWaiting()
+          startWaiting(deps.queue)
           ShareUndoNotifier.show(this@MainActivity, result.accepted)
         }
         shareNotice(result)?.let { notice.value = it }
@@ -262,11 +314,20 @@ class MainActivity : ComponentActivity() {
     }
   }
 
-  private fun startWaiting() {
-    runCatching { TransferForegroundService.sync(this, queue.items().isNotEmpty()) }
-      .onFailure { notice.value = "Content was saved; grant Nearby devices permission to wait for sending" }
+  private fun startWaiting(queue: PhoneQueueRepository) {
+    lifecycleScope.launch {
+      runCatching {
+        withContext(Dispatchers.IO) {
+          TransferForegroundService.sync(this@MainActivity, queue.items().isNotEmpty())
+        }
+      }.onFailure {
+        notice.value = "Content was saved; grant Nearby devices permission to wait for sending"
+      }
+    }
   }
 }
+
+private val LocalNoteLinkLanguage = compositionLocalOf { NoteLinkLanguage.SYSTEM }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Suppress("MultiLineIfElse")
@@ -284,6 +345,8 @@ private fun BetterHvSendApp(
   val transfer by NoteLinkTransferRuntime.snapshot.collectAsState()
   val transferLog by NoteLinkTransferRuntime.eventHistory.collectAsState()
   val remoteNoteUpdate by NoteLinkTransferRuntime.noteUpdateState.collectAsState()
+  val activeLanguage = LocalNoteLinkLanguage.current
+  val t: (String, String) -> String = { zh, en -> activeLanguage.text(zh, en) }
   val scope = rememberCoroutineScope()
   var textDialog by remember { mutableStateOf<String?>(null) }
   var pairingDialog by remember { mutableStateOf(false) }
@@ -301,7 +364,16 @@ private fun BetterHvSendApp(
   var showSettings by remember { mutableStateOf(false) }
   var settingsMessage by remember { mutableStateOf<String?>(null) }
   var notePackageStatus by remember { mutableStateOf<String?>(null) }
-  val pairedDevices = remember(statusRevision) { pairing.pairedClients }
+  var pairedDevices by remember { mutableStateOf<List<PairedDevice>>(emptyList()) }
+  LaunchedEffect(pairing, statusRevision) {
+    pairedDevices = withContext(Dispatchers.IO) { pairing.pairedClients }
+  }
+  var resendableById by remember { mutableStateOf<Map<UUID, Boolean>>(emptyMap()) }
+  LaunchedEffect(queue, historyItems) {
+    resendableById = withContext(Dispatchers.IO) {
+      historyItems.associate { it.id to queue.canResend(it) }
+    }
+  }
   val selectedDevice = pairedDevices.maxByOrNull(PairedDevice::lastUsedAt)
   val nextQueueId = remember(items, sendOrder, selectedDevice?.id) {
     val pending = items.filter {
@@ -353,7 +425,7 @@ private fun BetterHvSendApp(
   val missingPermissions = remember(statusRevision) {
     TransferPermissions.missingPhonePermissions(context)
   }
-  val connectionStatus = remember(statusRevision, items.size, selectedDevice?.id, language) {
+  val connectionStatus = remember(statusRevision, items.size, selectedDevice?.id, activeLanguage) {
     phoneConnectionStatus(
       context,
       selectedDevice != null,
@@ -369,10 +441,10 @@ private fun BetterHvSendApp(
     statusRevision++
     if (TransferPermissions.hasAllPhonePermissions(context)) {
       TransferForegroundService.sync(context, items.isNotEmpty())
-      showNotice(noteLinkText("附近设备权限已授予", "Nearby devices permission granted"))
+      showNotice(t("附近设备权限已授予", "Nearby devices permission granted"))
     } else {
       showNotice(
-        noteLinkText(
+        t(
           "Items can still be queued without Nearby devices permission, but Note cannot connect",
           "Items can still be queued, but Note cannot connect without Nearby devices permission",
         ),
@@ -381,9 +453,12 @@ private fun BetterHvSendApp(
   }
   val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
     scope.launch {
-      runCatching { withContext(Dispatchers.IO) { uris.forEach { queue.enqueueImage(it, selectedDevice?.id) } } }
-        .onSuccess { TransferForegroundService.sync(queueContext(queue), queue.items().isNotEmpty()) }
-        .onFailure { showNotice("Could not add image: ${it.message}") }
+      runCatching {
+        withContext(Dispatchers.IO) {
+          uris.forEach { queue.enqueueImage(it, selectedDevice?.id) }
+          TransferForegroundService.sync(queueContext(queue), queue.items().isNotEmpty())
+        }
+      }.onFailure { showNotice("Could not add image: ${it.message}") }
     }
   }
   val pdfPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
@@ -391,16 +466,15 @@ private fun BetterHvSendApp(
       runCatching {
         withContext(Dispatchers.IO) {
           uris.forEach { queue.enqueuePdf(it, selectedDevice?.id) }
+          TransferForegroundService.sync(queueContext(queue), queue.items().isNotEmpty())
         }
-      }
-        .onSuccess { TransferForegroundService.sync(queueContext(queue), queue.items().isNotEmpty()) }
-        .onFailure { showNotice("Could not add PDF: ${it.message}") }
+      }.onFailure { showNotice("Could not add PDF: ${it.message}") }
     }
   }
   val apkPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
     if (uri == null) return@rememberLauncherForActivityResult
     scope.launch {
-      notePackageStatus = noteLinkText("正在校验 APK…", "Verifying APK...")
+      notePackageStatus = t("正在校验 APK…", "Verifying APK...")
       runCatching {
         withContext(Dispatchers.IO) {
           val temporary = File(context.cacheDir, "import-note-${UUID.randomUUID()}.apk")
@@ -413,13 +487,14 @@ private fun BetterHvSendApp(
               scope,
               File(context.filesDir, "note-update-cache"),
               enqueue = { _, _, _ -> UUID.randomUUID() },
+              cleanStalePartsOnInit = false,
             ).use { it.importLatest(temporary) }
           } finally {
             temporary.delete()
           }
         }
       }.onSuccess { descriptor ->
-        notePackageStatus = noteLinkText(
+        notePackageStatus = t(
           "已验证 BetterHvNote ${descriptor.version.display}",
           "Verified BetterHvNote ${descriptor.version.display}",
         )
@@ -430,13 +505,16 @@ private fun BetterHvSendApp(
     val uri = cameraUri
     if (ok && uri != null) {
       scope.launch {
-        runCatching { withContext(Dispatchers.IO) { queue.enqueueImage(uri, selectedDevice?.id) } }
-          .onSuccess { TransferForegroundService.sync(queueContext(queue), true) }
-          .onFailure {
-            showNotice(
-              "Could not add photo: ${it.message}",
-            )
+        runCatching {
+          withContext(Dispatchers.IO) {
+            queue.enqueueImage(uri, selectedDevice?.id)
+            TransferForegroundService.sync(queueContext(queue), true)
           }
+        }.onFailure {
+          showNotice(
+            "Could not add photo: ${it.message}",
+          )
+        }
         cameraFile?.delete()
         cameraFile = null
         cameraUri = null
@@ -472,9 +550,11 @@ private fun BetterHvSendApp(
           runCatching {
             settings.displayName = requestedName
             appDisplayName = settings.displayName
-            TransferForegroundService.settingsChanged(context, items.isNotEmpty())
           }.onSuccess {
-            settingsMessage = noteLinkText("显示名称已保存", "Display name saved")
+            scope.launch(Dispatchers.IO) {
+              TransferForegroundService.settingsChanged(context, queue.items().isNotEmpty())
+            }
+            settingsMessage = t("显示名称已保存", "Display name saved")
           }.onFailure {
             settingsMessage = it.message ?: "Save failed"
           }
@@ -490,13 +570,16 @@ private fun BetterHvSendApp(
         onClearSent = {
           scope.launch {
             runCatching {
-              withContext(Dispatchers.IO) { queue.clearCache() }
+              withContext(Dispatchers.IO) {
+                val removed = queue.clearCache()
+                TransferForegroundService.sync(context, queue.items().isNotEmpty())
+                removed
+              }
             }.onSuccess { removed ->
-              TransferForegroundService.sync(context, queue.items().isNotEmpty())
               settingsMessage = if (removed == 0) {
-                noteLinkText("没有可清理的发送缓存", "No send cache to clear")
+                t("没有可清理的发送缓存", "No send cache to clear")
               } else {
-                noteLinkText("已清理 $removed 项发送缓存", "Cleared $removed send-cache items")
+                t("已清理 $removed 项发送缓存", "Cleared $removed send-cache items")
               }
             }.onFailure {
               settingsMessage = "Could not clear send cache: ${it.message}"
@@ -509,9 +592,9 @@ private fun BetterHvSendApp(
               withContext(Dispatchers.IO) { inbox.clearCache() }
             }.onSuccess { removed ->
               settingsMessage = if (removed == 0) {
-                noteLinkText("没有可清理的接收缓存", "No receive cache to clear")
+                t("没有可清理的接收缓存", "No receive cache to clear")
               } else {
-                noteLinkText("已清理 $removed 项接收缓存", "Cleared $removed receive-cache items")
+                t("已清理 $removed 项接收缓存", "Cleared $removed receive-cache items")
               }
             }.onFailure {
               settingsMessage = "Could not clear receive cache: ${it.message}"
@@ -532,7 +615,7 @@ private fun BetterHvSendApp(
                 settingsMessage = null
                 showSettings = true
               }) {
-                Icon(Icons.Default.Settings, noteLinkText("设置", "Settings"))
+                Icon(Icons.Default.Settings, t("设置", "Settings"))
               }
             },
           )
@@ -546,12 +629,12 @@ private fun BetterHvSendApp(
               cameraFile = file
               cameraUri = FileProvider.getUriForFile(context, "${context.packageName}.files", file)
               camera.launch(cameraUri!!)
-            }) { Icon(Icons.Default.CameraAlt, noteLinkText("拍照", "Take photo")) }
+            }) { Icon(Icons.Default.CameraAlt, t("拍照", "Take photo")) }
             FloatingActionButton(onClick = { imagePicker.launch(arrayOf("image/*")) }) {
-              Icon(Icons.Default.AddPhotoAlternate, noteLinkText("选择图片", "Choose images"))
+              Icon(Icons.Default.AddPhotoAlternate, t("选择图片", "Choose images"))
             }
             FloatingActionButton(onClick = { pdfPicker.launch(arrayOf("application/pdf")) }) {
-              Icon(Icons.Default.PictureAsPdf, noteLinkText("选择 PDF", "Choose PDF"))
+              Icon(Icons.Default.PictureAsPdf, t("选择 PDF", "Choose PDF"))
             }
             FloatingActionButton(onClick = {
               val context = queueContext(queue)
@@ -566,7 +649,7 @@ private fun BetterHvSendApp(
               } else {
                 textDialog = value
               }
-            }) { Icon(Icons.Default.ContentPaste, noteLinkText("从剪贴板添加", "Add from clipboard")) }
+            }) { Icon(Icons.Default.ContentPaste, t("从剪贴板添加", "Add from clipboard")) }
           }
         },
       ) { padding ->
@@ -595,26 +678,32 @@ private fun BetterHvSendApp(
                 pairingDialog = true
               },
               onSelect = { id ->
-                pairing.markLastUsed(id)
-                ShareShortcutPublisher.update(queueContext(queue), pairing.pairedClient(id))
-                statusRevision++
+                scope.launch {
+                  withContext(Dispatchers.IO) {
+                    pairing.markLastUsed(id)
+                    ShareShortcutPublisher.update(queueContext(queue), pairing.pairedClient(id))
+                  }
+                  statusRevision++
+                }
               },
               onUnpair = { id ->
                 scope.launch {
-                  runCatching { withContext(Dispatchers.IO) { pairing.unpair(id) } }
-                    .onSuccess {
+                  runCatching {
+                    withContext(Dispatchers.IO) {
+                      pairing.unpair(id)
                       ShareShortcutPublisher.update(queueContext(queue), pairing.pairedDevice)
                       TransferForegroundService.sync(context, queue.items().isNotEmpty())
-                      statusRevision++
-                      showNotice(
-                        noteLinkText("已取消配对；队列内容保留", "Unpaired; queue contents were kept"),
-                      )
                     }
-                    .onFailure {
-                      showNotice(
-                        "Could not unpair: ${it.message}",
-                      )
-                    }
+                  }.onSuccess {
+                    statusRevision++
+                    showNotice(
+                      t("已取消配对；队列内容保留", "Unpaired; queue contents were kept"),
+                    )
+                  }.onFailure {
+                    showNotice(
+                      "Could not unpair: ${it.message}",
+                    )
+                  }
                 }
               },
               onPermissions = {
@@ -623,25 +712,33 @@ private fun BetterHvSendApp(
               onRefresh = {
                 statusRevision++
                 if (TransferPermissions.hasAllPhonePermissions(context)) {
-                  runCatching { TransferForegroundService.sync(context, queue.items().isNotEmpty()) }
-                    .onSuccess {
+                  scope.launch {
+                    runCatching {
+                      withContext(Dispatchers.IO) {
+                        TransferForegroundService.sync(context, queue.items().isNotEmpty())
+                      }
+                    }.onSuccess {
                       showNotice(
-                        noteLinkText("连接状态已刷新", "Connection status refreshed"),
+                        t("连接状态已刷新", "Connection status refreshed"),
                       )
-                    }
-                    .onFailure {
+                    }.onFailure {
                       showNotice(
                         "Refresh failed: ${it.message}",
                       )
                     }
+                  }
                 }
               },
               receiveEnabled = TransferForegroundService.isReceiveEnabled(context),
               onReceiveToggle = {
                 val enabled = !TransferForegroundService.isReceiveEnabled(context)
-                TransferForegroundService.setReceiveEnabled(context, enabled)
-                TransferForegroundService.sync(context, queue.items().isNotEmpty())
-                statusRevision++
+                scope.launch {
+                  withContext(Dispatchers.IO) {
+                    TransferForegroundService.setReceiveEnabled(context, enabled)
+                    TransferForegroundService.sync(context, queue.items().isNotEmpty())
+                  }
+                  statusRevision++
+                }
               },
             )
           }
@@ -660,22 +757,22 @@ private fun BetterHvSendApp(
           item {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
               Text(
-                noteLinkText("发送队列 · ${items.size} 项", "Send queue · ${items.size}"),
+                t("发送队列 · ${items.size} 项", "Send queue · ${items.size}"),
                 style = MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.SemiBold,
                 modifier = Modifier.weight(1f),
               )
-              Text(noteLinkText("顺序", "Order"), style = MaterialTheme.typography.labelMedium)
+              Text(t("顺序", "Order"), style = MaterialTheme.typography.labelMedium)
               TextButton(
                 onClick = {
                   sendOrder = SendOrder.QUEUE
                   settings.sendOrder = sendOrder
                   Log.i("NoteLink", "queue.order=${sendOrder.name}")
-                  showNotice(noteLinkText("发送顺序：队列（最早优先）", "Send order: queue (oldest first)"))
+                  showNotice(t("发送顺序：队列（最早优先）", "Send order: queue (oldest first)"))
                 },
               ) {
                 Text(
-                  noteLinkText("队列", "Queue"),
+                  t("队列", "Queue"),
                   fontWeight = if (sendOrder == SendOrder.QUEUE) FontWeight.Bold else FontWeight.Normal,
                 )
               }
@@ -684,11 +781,11 @@ private fun BetterHvSendApp(
                   sendOrder = SendOrder.STACK
                   settings.sendOrder = sendOrder
                   Log.i("NoteLink", "queue.order=${sendOrder.name}")
-                  showNotice(noteLinkText("发送顺序：栈（最新优先）", "Send order: stack (newest first)"))
+                  showNotice(t("发送顺序：栈（最新优先）", "Send order: stack (newest first)"))
                 },
               ) {
                 Text(
-                  noteLinkText("栈", "Stack"),
+                  t("栈", "Stack"),
                   fontWeight = if (sendOrder == SendOrder.STACK) FontWeight.Bold else FontWeight.Normal,
                 )
               }
@@ -697,7 +794,7 @@ private fun BetterHvSendApp(
           if (items.isEmpty()) {
             item {
               Text(
-                noteLinkText(
+                t(
                   "使用下方按钮拍照、选图或读取剪贴板；也可以从其他应用的分享菜单发送到这里。",
                   "Use the buttons below to take a photo, choose files, or read the clipboard. You can also share here from other apps.",
                 ),
@@ -708,60 +805,71 @@ private fun BetterHvSendApp(
             QueueCard(
               item,
               isNext = item.id == nextQueueId,
-              onUp = { queue.move(item.id, -1) },
-              onDown = { queue.move(item.id, 1) },
+              onUp = { scope.launch(Dispatchers.IO) { queue.move(item.id, -1) } },
+              onDown = { scope.launch(Dispatchers.IO) { queue.move(item.id, 1) } },
               onDelete = {
-                queue.delete(item.id)
-                TransferForegroundService.sync(queueContext(queue), queue.items().isNotEmpty())
+                scope.launch(Dispatchers.IO) {
+                  queue.delete(item.id)
+                  TransferForegroundService.sync(queueContext(queue), queue.items().isNotEmpty())
+                }
               },
             )
           }
           item {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
               Text(
-                noteLinkText("发送历史 · ${historyItems.size} 项", "Send history · ${historyItems.size}"),
+                t("发送历史 · ${historyItems.size} 项", "Send history · ${historyItems.size}"),
                 style = MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.SemiBold,
                 modifier = Modifier.weight(1f),
               )
               if (historyItems.isNotEmpty()) {
-                TextButton(onClick = { queue.clearHistory() }) { Text(noteLinkText("清空", "Clear")) }
+                TextButton(
+                  onClick = { scope.launch(Dispatchers.IO) { queue.clearHistory() } },
+                ) { Text(t("清空", "Clear")) }
               }
             }
           }
           if (historyItems.isEmpty()) {
             item {
-              Text(noteLinkText("成功发送或放弃的内容会记录在这里。", "Sent and abandoned items appear here."))
+              Text(t("成功发送或放弃的内容会记录在这里。", "Sent and abandoned items appear here."))
             }
           }
           items(historyItems, key = { it.id }) { entry ->
             HistoryCard(
               entry = entry,
-              resendable = queue.canResend(entry),
+              resendable = resendableById[entry.id] ?: false,
               onResend = {
                 scope.launch {
                   val newId = withContext(Dispatchers.IO) {
-                    queue.requeueHistory(entry.id, selectedDevice?.id, pairedDevices.map { it.id }.toSet())
+                    val created = queue.requeueHistory(
+                      entry.id,
+                      selectedDevice?.id,
+                      pairedDevices.map { it.id }.toSet(),
+                    )
+                    if (created != null) {
+                      TransferForegroundService.sync(queueContext(queue), queue.items().isNotEmpty())
+                    }
+                    created
                   }
                   if (newId == null) {
                     showNotice(
-                      noteLinkText(
+                      t(
                         "历史内容已清理，无法重新发送",
                         "The retained content was pruned; cannot send again",
                       ),
                     )
                   } else {
-                    TransferForegroundService.sync(queueContext(queue), queue.items().isNotEmpty())
-                    showNotice(noteLinkText("已重新加入发送队列", "Added back to the send queue"))
+                    showNotice(t("已重新加入发送队列", "Added back to the send queue"))
                   }
                 }
               },
-              onDelete = { queue.deleteHistory(entry.id) },
+              onDelete = { scope.launch(Dispatchers.IO) { queue.deleteHistory(entry.id) } },
             )
           }
           item {
             Text(
-              noteLinkText(
+              t(
                 "收到的导出 · ${inboxItems.count { it.state == InboxExportState.COMPLETE }} 项",
                 "Received exports · ${inboxItems.count { it.state == InboxExportState.COMPLETE }}",
               ),
@@ -772,7 +880,7 @@ private fun BetterHvSendApp(
           if (inboxItems.isEmpty()) {
             item {
               Text(
-                noteLinkText("Note 发送的 PDF 与 PNG 会保存在这里。", "PDF and PNG exports sent by Note appear here."),
+                t("Note 发送的 PDF 与 PNG 会保存在这里。", "PDF and PNG exports sent by Note appear here."),
               )
             }
           }
@@ -785,7 +893,7 @@ private fun BetterHvSendApp(
                   context.startActivity(viewExportIntent(context, item, uri))
                 }.onFailure {
                   showNotice(
-                    noteLinkText(
+                    t(
                       "Cannot open file: ${it.message ?: "no compatible app"}",
                       "Cannot open file: ${it.message ?: "no compatible app"}",
                     ),
@@ -798,7 +906,7 @@ private fun BetterHvSendApp(
                   context.startActivity(shareExportIntent(context, item, uri))
                 }.onFailure {
                   showNotice(
-                    noteLinkText(
+                    t(
                       "Cannot share file: ${it.message ?: "no compatible app"}",
                       "Cannot share file: ${it.message ?: "no compatible app"}",
                     ),
@@ -810,7 +918,7 @@ private fun BetterHvSendApp(
                   runCatching { withContext(Dispatchers.IO) { inbox.saveToDownloads(item) } }
                     .onSuccess {
                       showNotice(
-                        noteLinkText("已保存到 Downloads/NoteLink", "Saved to Downloads/NoteLink"),
+                        t("已保存到 Downloads/NoteLink", "Saved to Downloads/NoteLink"),
                       )
                     }
                     .onFailure {
@@ -820,7 +928,7 @@ private fun BetterHvSendApp(
                     }
                 }
               },
-              onDelete = { inbox.delete(item.artifactId) },
+              onDelete = { scope.launch(Dispatchers.IO) { inbox.delete(item.artifactId) } },
             )
           }
           item { Spacer(Modifier.height(96.dp)) }
@@ -833,22 +941,26 @@ private fun BetterHvSendApp(
         var value by remember(initial) { mutableStateOf(initial) }
         AlertDialog(
           onDismissRequest = { textDialog = null },
-          title = { Text(noteLinkText("加入文字", "Add text")) },
+          title = { Text(t("加入文字", "Add text")) },
           text = { OutlinedTextField(value, { value = it }, minLines = 3, maxLines = 8) },
           confirmButton = {
             Button(onClick = {
-              runCatching { queue.enqueueText(value, selectedDevice?.id) }
-                .onSuccess {
-                  TransferForegroundService.sync(queueContext(queue), true)
+              scope.launch {
+                runCatching {
+                  withContext(Dispatchers.IO) {
+                    queue.enqueueText(value, selectedDevice?.id)
+                    TransferForegroundService.sync(queueContext(queue), true)
+                  }
+                }.onSuccess {
                   textDialog = null
-                }
-                .onFailure { showNotice(it.message ?: "Could not add text") }
-            }) { Text(noteLinkText("加入队列", "Add to queue")) }
+                }.onFailure { showNotice(it.message ?: "Could not add text") }
+              }
+            }) { Text(t("加入队列", "Add to queue")) }
           },
           dismissButton = {
             OutlinedButton(
               onClick = { textDialog = null },
-            ) { Text(noteLinkText("取消", "Cancel")) }
+            ) { Text(t("取消", "Cancel")) }
           },
         )
       }
@@ -857,8 +969,10 @@ private fun BetterHvSendApp(
       if (pairingDialog) {
         LaunchedEffect(pairingState) {
           if (pairingState is PairingUiState.Paired) {
-            TransferForegroundService.setReceiveEnabled(context, true)
-            TransferForegroundService.sync(queueContext(queue), queue.items().isNotEmpty())
+            withContext(Dispatchers.IO) {
+              TransferForegroundService.setReceiveEnabled(context, true)
+              TransferForegroundService.sync(queueContext(queue), queue.items().isNotEmpty())
+            }
             statusRevision++
           }
         }
@@ -869,16 +983,16 @@ private fun BetterHvSendApp(
               pairingDialog = false
             }
           },
-          title = { Text(noteLinkText("与 Note 配对", "Pair with Note")) },
+          title = { Text(t("与 Note 配对", "Pair with Note")) },
           text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
               when (val state = pairingState) {
                 is PairingUiState.Paired -> Text(
-                  noteLinkText("已与 ${state.deviceName} 配对", "Paired with ${state.deviceName}"),
+                  t("已与 ${state.deviceName} 配对", "Paired with ${state.deviceName}"),
                 )
                 is PairingUiState.Waiting -> {
                   Text(
-                    noteLinkText(
+                    t(
                       "已输入 ${state.code}。保持此页面打开，在 Note 上点“配对”。",
                       "Code ${state.code} entered. Keep this open and tap Pair on the Note.",
                     ),
@@ -886,7 +1000,7 @@ private fun BetterHvSendApp(
                 }
                 else -> {
                   Text(
-                    noteLinkText(
+                    t(
                       "在 Note 的“设置 → NoteLink → 配对新设备”中会显示 6 位配对码，请在此输入：",
                       "On the Note open Settings > NoteLink > Pair new device and enter the 6-digit code shown there:",
                     ),
@@ -910,15 +1024,17 @@ private fun BetterHvSendApp(
               is PairingUiState.Paired -> Button(onClick = {
                 PhonePairingMode.cancel()
                 pairingDialog = false
-              }) { Text(noteLinkText("完成", "Done")) }
+              }) { Text(t("完成", "Done")) }
               is PairingUiState.Waiting -> Unit
               else -> Button(
                 enabled = pairingInput.length == 6,
                 onClick = {
                   PhonePairingMode.begin(pairingInput, pairing.localDeviceId, appDisplayName)
-                  TransferForegroundService.sync(queueContext(queue), queue.items().isNotEmpty())
+                  scope.launch(Dispatchers.IO) {
+                    TransferForegroundService.sync(queueContext(queue), queue.items().isNotEmpty())
+                  }
                 },
-              ) { Text(noteLinkText("开始配对", "Start pairing")) }
+              ) { Text(t("开始配对", "Start pairing")) }
             }
           },
           dismissButton = {
@@ -926,7 +1042,7 @@ private fun BetterHvSendApp(
               OutlinedButton(onClick = {
                 PhonePairingMode.cancel()
                 pairingDialog = false
-              }) { Text(noteLinkText("取消", "Cancel")) }
+              }) { Text(t("取消", "Cancel")) }
             }
           },
         )
@@ -944,9 +1060,11 @@ private fun PhoneTransferStatus(
   onCancel: () -> Unit,
 ) {
   if (!snapshot.phase.isActiveTransferPhase && (!showRecentEvents || log.isEmpty())) return
+  val activeLanguage = LocalNoteLinkLanguage.current
+  val t: (String, String) -> String = { zh, en -> activeLanguage.text(zh, en) }
   Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(8.dp)) {
     Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-      Text(noteLinkText("传输状态", "Transfer status"), style = MaterialTheme.typography.titleMedium)
+      Text(t("传输状态", "Transfer status"), style = MaterialTheme.typography.titleMedium)
       Text(
         listOfNotNull(
           "BLE",
@@ -957,27 +1075,27 @@ private fun PhoneTransferStatus(
           .joinToString(" · "),
       )
       Text(
-        "${noteLinkText("本端", "Local")} ${TransferModes.describe(snapshot.localModes)} · " +
-          "${noteLinkText("对端", "Remote")} ${TransferModes.describe(snapshot.remoteModes)}" +
-          " · ${noteLinkText("尝试", "attempt")} ${snapshot.attempt} · fallback ${snapshot.fallbackCount}",
+        "${t("本端", "Local")} ${TransferModes.describe(snapshot.localModes)} · " +
+          "${t("对端", "Remote")} ${TransferModes.describe(snapshot.remoteModes)}" +
+          " · ${t("尝试", "attempt")} ${snapshot.attempt} · fallback ${snapshot.fallbackCount}",
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
       )
       snapshot.endpoint?.let {
         Text(
-          "${noteLinkText(
+          "${t(
             "端点",
             "Endpoint",
-          )} ${endpointName ?: snapshot.deviceId ?: noteLinkText("未知设备", "Unknown device")} · ${it.host}:${it.port}",
+          )} ${endpointName ?: snapshot.deviceId ?: t("未知设备", "Unknown device")} · ${it.host}:${it.port}",
           style = MaterialTheme.typography.bodySmall,
         )
       }
       Text(
-        "Wi-Fi Direct ${noteLinkText(
+        "Wi-Fi Direct ${t(
           "组",
           "group",
-        )} ${if (snapshot.wifiDirectGroupReady) noteLinkText("已就绪", "ready") else noteLinkText("未就绪", "not ready")}" +
-          (snapshot.operationId?.let { " · ${noteLinkText("操作", "operation")} ${it.toString().take(8)}" } ?: ""),
+        )} ${if (snapshot.wifiDirectGroupReady) t("已就绪", "ready") else t("未就绪", "not ready")}" +
+          (snapshot.operationId?.let { " · ${t("操作", "operation")} ${it.toString().take(8)}" } ?: ""),
         style = MaterialTheme.typography.bodySmall,
       )
       if (snapshot.totalBytes > 0) {
@@ -987,8 +1105,8 @@ private fun PhoneTransferStatus(
         )
         Text(
           "${phoneFormatBytes(snapshot.bytesTransferred)} / ${phoneFormatBytes(snapshot.totalBytes)}" +
-            " · ${noteLinkText("当前", "current")} ${phoneFormatBytes(snapshot.bytesPerSecond)}/s" +
-            " · ${noteLinkText("平均", "average")} ${phoneFormatBytes(snapshot.averageBytesPerSecond)}/s" +
+            " · ${t("当前", "current")} ${phoneFormatBytes(snapshot.bytesPerSecond)}/s" +
+            " · ${t("平均", "average")} ${phoneFormatBytes(snapshot.averageBytesPerSecond)}/s" +
             (snapshot.etaMillis?.let { " · ETA ${phoneFormatDuration(it)}" } ?: ""),
           style = MaterialTheme.typography.bodySmall,
         )
@@ -999,12 +1117,12 @@ private fun PhoneTransferStatus(
       snapshot.lastFailure?.let {
         Text(
           "${it.code}: ${it.message} · ${if (it.recoverable) {
-            noteLinkText(
+            t(
               "可重试",
               "retryable",
             )
           } else {
-            noteLinkText("不可重试", "not retryable")
+            t("不可重试", "not retryable")
           }}",
           color = MaterialTheme.colorScheme.error,
         )
@@ -1012,11 +1130,11 @@ private fun PhoneTransferStatus(
       if (snapshot.canCancel) {
         OutlinedButton(onClick = onCancel) {
           Icon(Icons.Default.Cancel, null)
-          Text(noteLinkText("取消传输", "Cancel transfer"), Modifier.padding(start = 6.dp))
+          Text(t("取消传输", "Cancel transfer"), Modifier.padding(start = 6.dp))
         }
       }
       if (showRecentEvents && log.isNotEmpty()) {
-        Text(noteLinkText("最近事件", "Recent events"), style = MaterialTheme.typography.labelLarge)
+        Text(t("最近事件", "Recent events"), style = MaterialTheme.typography.labelLarge)
         Column(
           Modifier.fillMaxWidth().heightIn(max = 100.dp).verticalScroll(rememberScrollState()),
         ) {
@@ -1096,6 +1214,8 @@ private fun SettingsScreen(
   onOpenRelease: (String) -> Unit,
   onImportNotePackage: () -> Unit,
 ) {
+  val activeLanguage = LocalNoteLinkLanguage.current
+  val t: (String, String) -> String = { zh, en -> activeLanguage.text(zh, en) }
   var editedName by remember(displayName) { mutableStateOf(displayName) }
   var confirmation by remember { mutableStateOf<CacheToClear?>(null) }
   val nameError = runCatching { NoteLinkSettings.validateDisplayName(editedName) }
@@ -1104,10 +1224,10 @@ private fun SettingsScreen(
   Scaffold(
     topBar = {
       TopAppBar(
-        title = { Text(noteLinkText("设置", "Settings")) },
+        title = { Text(t("设置", "Settings")) },
         navigationIcon = {
           IconButton(onClick = onBack) {
-            Icon(Icons.AutoMirrored.Filled.ArrowBack, noteLinkText("返回", "Back"))
+            Icon(Icons.AutoMirrored.Filled.ArrowBack, t("返回", "Back"))
           }
         },
       )
@@ -1129,7 +1249,7 @@ private fun SettingsScreen(
       item { HorizontalDivider(Modifier.padding(horizontal = 20.dp)) }
       item {
         ListItem(
-          headlineContent = { Text(noteLinkText("显示最近传输事件", "Show recent transfer events")) },
+          headlineContent = { Text(t("显示最近传输事件", "Show recent transfer events")) },
           trailingContent = {
             Switch(
               checked = showRecentTransferEvents,
@@ -1141,7 +1261,7 @@ private fun SettingsScreen(
       item { HorizontalDivider(Modifier.padding(horizontal = 20.dp)) }
       item {
         Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp)) {
-          Text(noteLinkText("语言", "Language"), style = MaterialTheme.typography.titleMedium)
+          Text(t("语言", "Language"), style = MaterialTheme.typography.titleMedium)
           NoteLinkLanguage.entries.forEach { option ->
             OutlinedButton(
               onClick = { onLanguageChange(option) },
@@ -1159,7 +1279,7 @@ private fun SettingsScreen(
           verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
           Text(
-            noteLinkText("显示名称", "Display name"),
+            t("显示名称", "Display name"),
             style = MaterialTheme.typography.titleMedium,
             fontWeight = FontWeight.SemiBold,
           )
@@ -1168,7 +1288,7 @@ private fun SettingsScreen(
             onValueChange = { editedName = it },
             modifier = Modifier.fillMaxWidth(),
             singleLine = true,
-            label = { Text(noteLinkText("名称", "Name")) },
+            label = { Text(t("名称", "Name")) },
             isError = nameError != null,
             supportingText = nameError?.let { error -> { Text(error) } },
           )
@@ -1178,7 +1298,7 @@ private fun SettingsScreen(
             modifier = Modifier.align(Alignment.End),
           ) {
             Icon(Icons.Default.Save, null)
-            Text(noteLinkText("保存", "Save"))
+            Text(t("保存", "Save"))
           }
           message?.let { Text(it, color = MaterialTheme.colorScheme.primary) }
         }
@@ -1195,23 +1315,23 @@ private fun SettingsScreen(
       item { HorizontalDivider() }
       item {
         Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp)) {
-          Text(noteLinkText("Note 安装包", "Note package"), style = MaterialTheme.typography.titleMedium)
+          Text(t("Note 安装包", "Note package"), style = MaterialTheme.typography.titleMedium)
           Text(
-            notePackageStatus ?: noteLinkText(
+            notePackageStatus ?: t(
               "可导入最新正式版 APK；Note 请求更新时会优先复用。",
               "Import the latest stable APK to reuse when Note requests an update.",
             ),
             color = MaterialTheme.colorScheme.onSurfaceVariant,
           )
           OutlinedButton(onClick = onImportNotePackage, modifier = Modifier.padding(top = 8.dp)) {
-            Text(noteLinkText("导入 Note APK", "Import Note APK"))
+            Text(t("导入 Note APK", "Import Note APK"))
           }
         }
       }
       item { HorizontalDivider() }
       item {
         Text(
-          noteLinkText("缓存", "Cache"),
+          t("缓存", "Cache"),
           modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
           style = MaterialTheme.typography.titleMedium,
           fontWeight = FontWeight.SemiBold,
@@ -1219,34 +1339,34 @@ private fun SettingsScreen(
       }
       item {
         ListItem(
-          headlineContent = { Text(noteLinkText("发送缓存", "Send cache")) },
+          headlineContent = { Text(t("发送缓存", "Send cache")) },
           supportingContent = {
             Text(
-              noteLinkText("$sentCacheCount 项可清理", "$sentCacheCount items can be removed"),
+              t("$sentCacheCount 项可清理", "$sentCacheCount items can be removed"),
             )
           },
           trailingContent = {
             IconButton(
               onClick = { confirmation = CacheToClear.SENT },
               enabled = sentCacheCount > 0,
-            ) { Icon(Icons.Default.DeleteSweep, noteLinkText("清理发送缓存", "Clear send cache")) }
+            ) { Icon(Icons.Default.DeleteSweep, t("清理发送缓存", "Clear send cache")) }
           },
         )
       }
       item { HorizontalDivider(Modifier.padding(horizontal = 20.dp)) }
       item {
         ListItem(
-          headlineContent = { Text(noteLinkText("接收缓存", "Receive cache")) },
+          headlineContent = { Text(t("接收缓存", "Receive cache")) },
           supportingContent = {
             Text(
-              noteLinkText("$receivedCacheCount 项可清理", "$receivedCacheCount items can be removed"),
+              t("$receivedCacheCount 项可清理", "$receivedCacheCount items can be removed"),
             )
           },
           trailingContent = {
             IconButton(
               onClick = { confirmation = CacheToClear.RECEIVED },
               enabled = receivedCacheCount > 0,
-            ) { Icon(Icons.Default.DeleteSweep, noteLinkText("清理接收缓存", "Clear receive cache")) }
+            ) { Icon(Icons.Default.DeleteSweep, t("清理接收缓存", "Clear receive cache")) }
           },
         )
       }
@@ -1260,24 +1380,24 @@ private fun SettingsScreen(
       title = {
         Text(
           if (isSent) {
-            noteLinkText(
+            t(
               "清理发送缓存？",
               "Clear send cache?",
             )
           } else {
-            noteLinkText("清理接收缓存？", "Clear receive cache?")
+            t("清理接收缓存？", "Clear receive cache?")
           },
         )
       },
       text = {
         Text(
           if (isSent) {
-            noteLinkText(
+            t(
               "将删除待发送和发送失败的项目，正在传输的项目会保留。",
               "Pending and failed items will be deleted. Active transfers will be kept.",
             )
           } else {
-            noteLinkText(
+            t(
               "将删除已接收和接收失败的文件，正在接收的项目会保留。",
               "Received and failed files will be deleted. Active transfers will be kept.",
             )
@@ -1288,10 +1408,10 @@ private fun SettingsScreen(
         Button(onClick = {
           confirmation = null
           if (isSent) onClearSent() else onClearReceived()
-        }) { Text(noteLinkText("清理", "Clear")) }
+        }) { Text(t("清理", "Clear")) }
       },
       dismissButton = {
-        OutlinedButton(onClick = { confirmation = null }) { Text(noteLinkText("取消", "Cancel")) }
+        OutlinedButton(onClick = { confirmation = null }) { Text(t("取消", "Cancel")) }
       },
     )
   }
@@ -1299,16 +1419,18 @@ private fun SettingsScreen(
 
 @Composable
 private fun UpdateNoticeCard(info: UpdateInfo, onOpenRelease: () -> Unit, onDismiss: () -> Unit) {
+  val activeLanguage = LocalNoteLinkLanguage.current
+  val t: (String, String) -> String = { zh, en -> activeLanguage.text(zh, en) }
   Card(Modifier.fillMaxWidth()) {
     Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
       Text(
-        noteLinkText("发现新版本 ${info.latestVersion.display}", "New version ${info.latestVersion.display}"),
+        t("发现新版本 ${info.latestVersion.display}", "New version ${info.latestVersion.display}"),
         style = MaterialTheme.typography.titleMedium,
       )
       Text(info.releaseTitle, color = MaterialTheme.colorScheme.onSurfaceVariant)
       Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        Button(onClick = onOpenRelease) { Text(noteLinkText("查看 Release", "View release")) }
-        OutlinedButton(onClick = onDismiss) { Text(noteLinkText("关闭", "Close")) }
+        Button(onClick = onOpenRelease) { Text(t("查看 Release", "View release")) }
+        OutlinedButton(onClick = onDismiss) { Text(t("关闭", "Close")) }
       }
     }
   }
@@ -1321,29 +1443,31 @@ private fun UpdateSettingsCard(
   onCheck: () -> Unit,
   onOpenRelease: (String) -> Unit,
 ) {
+  val activeLanguage = LocalNoteLinkLanguage.current
+  val t: (String, String) -> String = { zh, en -> activeLanguage.text(zh, en) }
   val checkState = state.checkState
   Column(
     Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp),
     verticalArrangement = Arrangement.spacedBy(8.dp),
   ) {
     Text(
-      noteLinkText("应用更新", "App updates"),
+      t("应用更新", "App updates"),
       style = MaterialTheme.typography.titleMedium,
       fontWeight = FontWeight.SemiBold,
     )
-    Text(noteLinkText("当前版本 $currentVersion", "Current version $currentVersion"))
+    Text(t("当前版本 $currentVersion", "Current version $currentVersion"))
     Text(
       when (checkState) {
-        UpdateCheckState.Idle -> noteLinkText("尚未检查", "Not checked yet")
+        UpdateCheckState.Idle -> t("尚未检查", "Not checked yet")
 
-        UpdateCheckState.Checking -> noteLinkText("正在检查 GitHub Releases…", "Checking GitHub Releases...")
+        UpdateCheckState.Checking -> t("正在检查 GitHub Releases…", "Checking GitHub Releases...")
 
         is UpdateCheckState.UpToDate -> checkState.latestVersion?.let {
-          noteLinkText("已是最新版本（${it.display}）", "Up to date (${it.display})")
-        } ?: noteLinkText("暂无可用正式版本", "No stable release available")
+          t("已是最新版本（${it.display}）", "Up to date (${it.display})")
+        } ?: t("暂无可用正式版本", "No stable release available")
 
         is UpdateCheckState.UpdateAvailable ->
-          noteLinkText(
+          t(
             "发现新版本 ${checkState.info.latestVersion.display}：${checkState.info.releaseTitle}",
             "New version ${checkState.info.latestVersion.display}: ${checkState.info.releaseTitle}",
           )
@@ -1364,19 +1488,19 @@ private fun UpdateSettingsCard(
       OutlinedButton(onClick = onCheck, enabled = checkState !is UpdateCheckState.Checking) {
         Text(
           if (checkState is UpdateCheckState.Checking) {
-            noteLinkText(
+            t(
               "检查中",
               "Checking",
             )
           } else {
-            noteLinkText("检查更新", "Check for updates")
+            t("检查更新", "Check for updates")
           },
         )
       }
       (checkState as? UpdateCheckState.UpdateAvailable)?.let { available ->
         Button(
           onClick = { onOpenRelease(available.info.releaseUrl) },
-        ) { Text(noteLinkText("查看 Release", "View release")) }
+        ) { Text(t("查看 Release", "View release")) }
       }
     }
   }
@@ -1417,18 +1541,20 @@ private fun DeviceCard(
   receiveEnabled: Boolean,
   onReceiveToggle: () -> Unit,
 ) {
+  val activeLanguage = LocalNoteLinkLanguage.current
+  val t: (String, String) -> String = { zh, en -> activeLanguage.text(zh, en) }
   var deviceMenuExpanded by remember { mutableStateOf(false) }
   val selected = devices.firstOrNull { it.id == selectedDeviceId }
   Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(20.dp)) {
     Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
       Text(
         if (devices.isEmpty()) {
-          noteLinkText(
+          t(
             "尚未配对",
             "Not paired",
           )
         } else {
-          noteLinkText("已配对设备 · ${devices.size}", "Paired devices · ${devices.size}")
+          t("已配对设备 · ${devices.size}", "Paired devices · ${devices.size}")
         },
         style = MaterialTheme.typography.titleMedium,
       )
@@ -1452,7 +1578,7 @@ private fun DeviceCard(
         }
         IconButton(
           onClick = onRefresh,
-        ) { Icon(Icons.Default.Refresh, noteLinkText("刷新连接状态", "Refresh connection")) }
+        ) { Icon(Icons.Default.Refresh, t("刷新连接状态", "Refresh connection")) }
       }
       if (showPermissionButton || devices.isNotEmpty()) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -1460,7 +1586,7 @@ private fun DeviceCard(
             OutlinedButton(
               onClick = onPermissions,
               modifier = Modifier.weight(1f),
-            ) { Text(noteLinkText("授予权限", "Grant permission")) }
+            ) { Text(t("授予权限", "Grant permission")) }
           }
           if (devices.isNotEmpty()) {
             OutlinedButton(
@@ -1469,12 +1595,12 @@ private fun DeviceCard(
             ) {
               Text(
                 if (receiveEnabled) {
-                  noteLinkText(
+                  t(
                     "暂停接收",
                     "Pause receiving",
                   )
                 } else {
-                  noteLinkText("恢复接收", "Resume receiving")
+                  t("恢复接收", "Resume receiving")
                 },
               )
             }
@@ -1497,10 +1623,12 @@ private fun DeviceDropdown(
   onSelect: (String) -> Unit,
   onUnpair: (String) -> Unit,
 ) {
+  val activeLanguage = LocalNoteLinkLanguage.current
+  val t: (String, String) -> String = { zh, en -> activeLanguage.text(zh, en) }
   Box(Modifier.fillMaxWidth()) {
     OutlinedButton(onClick = { setExpanded(true) }, modifier = Modifier.fillMaxWidth()) {
-      Text(selectedDeviceName ?: noteLinkText("选择设备", "Select device"), modifier = Modifier.weight(1f))
-      Icon(Icons.Default.ArrowDropDown, noteLinkText("展开设备列表", "Expand device list"))
+      Text(selectedDeviceName ?: t("选择设备", "Select device"), modifier = Modifier.weight(1f))
+      Icon(Icons.Default.ArrowDropDown, t("展开设备列表", "Expand device list"))
     }
     DropdownMenu(expanded = expanded, onDismissRequest = { setExpanded(false) }) {
       devices.forEach { device ->
@@ -1519,7 +1647,7 @@ private fun DeviceDropdown(
             if (device.id == selectedDeviceId) {
               Icon(
                 Icons.Default.Check,
-                noteLinkText("当前设备", "Current device"),
+                t("当前设备", "Current device"),
               )
             }
           },
@@ -1527,13 +1655,13 @@ private fun DeviceDropdown(
             IconButton(onClick = {
               setExpanded(false)
               onUnpair(device.id)
-            }) { Icon(Icons.Default.Delete, noteLinkText("解绑 ${device.name}", "Unpair ${device.name}")) }
+            }) { Icon(Icons.Default.Delete, t("解绑 ${device.name}", "Unpair ${device.name}")) }
           },
         )
       }
       if (devices.isNotEmpty()) HorizontalDivider()
       DropdownMenuItem(
-        text = { Text(noteLinkText("新增设备", "Add device")) },
+        text = { Text(t("新增设备", "Add device")) },
         onClick = {
           setExpanded(false)
           onPair()
@@ -1552,22 +1680,24 @@ private fun QueueCard(
   onDown: () -> Unit,
   onDelete: () -> Unit,
 ) {
+  val activeLanguage = LocalNoteLinkLanguage.current
+  val t: (String, String) -> String = { zh, en -> activeLanguage.text(zh, en) }
   Card(Modifier.fillMaxWidth()) {
     Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
       Column(Modifier.weight(1f)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
           Text(
             when (item.kind) {
-              ContentKind.IMAGE -> noteLinkText("图片", "Image")
-              ContentKind.TEXT -> noteLinkText("文字", "Text")
+              ContentKind.IMAGE -> t("图片", "Image")
+              ContentKind.TEXT -> t("文字", "Text")
               ContentKind.PDF -> "PDF"
-              ContentKind.APP_PACKAGE -> noteLinkText("Note 安装包", "Note package")
+              ContentKind.APP_PACKAGE -> t("Note 安装包", "Note package")
             },
             fontWeight = FontWeight.Bold,
           )
           if (isNext) {
             Text(
-              noteLinkText("下一个发送", "Next"),
+              t("下一个发送", "Next"),
               color = MaterialTheme.colorScheme.primary,
               style = MaterialTheme.typography.labelSmall,
               modifier = Modifier.padding(start = 8.dp),
@@ -1577,9 +1707,9 @@ private fun QueueCard(
         Text(item.displayName.orEmpty(), maxLines = 2, overflow = TextOverflow.Ellipsis)
         Text("${item.state} · ${formatSize(item.byteLength)}", style = MaterialTheme.typography.bodySmall)
       }
-      IconButton(onClick = onUp) { Icon(Icons.Default.KeyboardArrowUp, noteLinkText("上移", "Move up")) }
-      IconButton(onClick = onDown) { Icon(Icons.Default.KeyboardArrowDown, noteLinkText("下移", "Move down")) }
-      IconButton(onClick = onDelete) { Icon(Icons.Default.Delete, noteLinkText("删除", "Delete")) }
+      IconButton(onClick = onUp) { Icon(Icons.Default.KeyboardArrowUp, t("上移", "Move up")) }
+      IconButton(onClick = onDown) { Icon(Icons.Default.KeyboardArrowDown, t("下移", "Move down")) }
+      IconButton(onClick = onDelete) { Icon(Icons.Default.Delete, t("删除", "Delete")) }
     }
   }
 }
@@ -1591,17 +1721,19 @@ private fun HistoryCard(
   onResend: () -> Unit,
   onDelete: () -> Unit,
 ) {
+  val activeLanguage = LocalNoteLinkLanguage.current
+  val t: (String, String) -> String = { zh, en -> activeLanguage.text(zh, en) }
   val outcome = when (entry.outcome) {
-    SendOutcome.SUCCEEDED -> noteLinkText("已发送", "Sent")
-    SendOutcome.FAILED -> noteLinkText("发送失败", "Failed")
+    SendOutcome.SUCCEEDED -> t("已发送", "Sent")
+    SendOutcome.FAILED -> t("发送失败", "Failed")
   }
-  val device = entry.destinationName ?: entry.destinationDeviceId ?: noteLinkText("未指定设备", "No device")
+  val device = entry.destinationName ?: entry.destinationDeviceId ?: t("未指定设备", "No device")
   val time = DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT).format(Date(entry.completedAt))
   Card(Modifier.fillMaxWidth()) {
     Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
       Column(Modifier.weight(1f)) {
         Text(
-          entry.displayName ?: noteLinkText("未命名内容", "Unnamed content"),
+          entry.displayName ?: t("未命名内容", "Unnamed content"),
           maxLines = 1,
           overflow = TextOverflow.Ellipsis,
           fontWeight = FontWeight.Medium,
@@ -1615,9 +1747,9 @@ private fun HistoryCard(
         }
       }
       IconButton(onClick = onResend, enabled = resendable) {
-        Icon(Icons.Default.Refresh, noteLinkText("重新发送", "Send again"))
+        Icon(Icons.Default.Refresh, t("重新发送", "Send again"))
       }
-      IconButton(onClick = onDelete) { Icon(Icons.Default.Delete, noteLinkText("删除", "Delete")) }
+      IconButton(onClick = onDelete) { Icon(Icons.Default.Delete, t("删除", "Delete")) }
     }
   }
 }
@@ -1636,17 +1768,19 @@ private fun InboxCard(
   onSave: () -> Unit,
   onDelete: () -> Unit,
 ) {
+  val activeLanguage = LocalNoteLinkLanguage.current
+  val t: (String, String) -> String = { zh, en -> activeLanguage.text(zh, en) }
   Card(Modifier.fillMaxWidth()) {
     Column(Modifier.padding(12.dp)) {
       Text(item.displayName, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis)
       Text(
         when (item.state) {
-          InboxExportState.RECEIVING -> noteLinkText(
+          InboxExportState.RECEIVING -> t(
             "接收中 · ${formatSize(item.byteLength)}",
             "Receiving · ${formatSize(item.byteLength)}",
           )
 
-          InboxExportState.COMPLETE -> noteLinkText(
+          InboxExportState.COMPLETE -> t(
             "已接收 · ${formatSize(item.byteLength)}",
             "Received · ${formatSize(item.byteLength)}",
           )
@@ -1659,13 +1793,13 @@ private fun InboxCard(
         if (item.state == InboxExportState.COMPLETE) {
           IconButton(
             onClick = onOpen,
-          ) { Icon(Icons.AutoMirrored.Filled.OpenInNew, noteLinkText("打开", "Open")) }
-          IconButton(onClick = onShare) { Icon(Icons.Default.Share, noteLinkText("分享", "Share")) }
+          ) { Icon(Icons.AutoMirrored.Filled.OpenInNew, t("打开", "Open")) }
+          IconButton(onClick = onShare) { Icon(Icons.Default.Share, t("分享", "Share")) }
           IconButton(
             onClick = onSave,
-          ) { Icon(Icons.Default.Download, noteLinkText("保存到 Downloads", "Save to Downloads")) }
+          ) { Icon(Icons.Default.Download, t("保存到 Downloads", "Save to Downloads")) }
         }
-        IconButton(onClick = onDelete) { Icon(Icons.Default.Delete, noteLinkText("删除", "Delete")) }
+        IconButton(onClick = onDelete) { Icon(Icons.Default.Delete, t("删除", "Delete")) }
       }
     }
   }

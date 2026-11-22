@@ -1,4 +1,4 @@
-package com.betterhv.note.sender
+package com.betterhv.note.sender.data
 
 import android.content.ContentValues
 import android.content.Context
@@ -38,6 +38,16 @@ import java.nio.file.StandardCopyOption
 import java.security.MessageDigest
 import java.util.UUID
 
+internal object PhoneHistoryPolicy {
+  fun shouldRetainPayload(kind: ContentKind): Boolean = kind != ContentKind.APP_PACKAGE
+
+  fun isResendable(
+    entry: SendHistoryEntry,
+    payloadExists: (SendHistoryEntry) -> Boolean,
+  ): Boolean = entry.kind != ContentKind.APP_PACKAGE &&
+    (entry.text != null || (entry.payloadPath != null && payloadExists(entry)))
+}
+
 class PhoneQueueRepository(
   context: Context,
   sendOrder: () -> SendOrder = { SendOrder.QUEUE },
@@ -62,6 +72,7 @@ class PhoneQueueRepository(
     reconcileHistory()
   }
 
+  @Synchronized
   fun enqueueImage(uri: Uri, destinationDeviceId: String?): QueueItem {
     val resolver = appContext.contentResolver
     val mime = resolver.getType(uri)?.takeIf { it.startsWith("image/") }
@@ -109,6 +120,7 @@ class PhoneQueueRepository(
     }
   }
 
+  @Synchronized
   fun enqueueText(text: String, destinationDeviceId: String?): QueueItem {
     val normalized = text.trim()
     require(normalized.isNotEmpty()) { "Text is empty" }
@@ -124,6 +136,7 @@ class PhoneQueueRepository(
     return item
   }
 
+  @Synchronized
   fun enqueuePdf(uri: Uri, destinationDeviceId: String?): QueueItem {
     val resolver = appContext.contentResolver
     val mime = resolver.getType(uri)
@@ -185,6 +198,7 @@ class PhoneQueueRepository(
     mimeType: String,
     displayName: String?,
     destinationDeviceId: String?,
+    precomputedSha256: ByteArray? = null,
   ): QueueItem {
     require(source.isFile) { "Shared image is missing" }
     require(mimeType.startsWith("image/")) { "Only images are supported" }
@@ -197,12 +211,18 @@ class PhoneQueueRepository(
       mimeType,
       displayName ?: "图片",
       destinationDeviceId,
+      precomputedSha256,
     )
   }
 
   /** Enqueues a PDF that ShareIntake already copied and classified from its bytes. */
   @Synchronized
-  fun enqueuePdfFile(source: File, displayName: String?, destinationDeviceId: String?): QueueItem {
+  fun enqueuePdfFile(
+    source: File,
+    displayName: String?,
+    destinationDeviceId: String?,
+    precomputedSha256: ByteArray? = null,
+  ): QueueItem {
     require(source.isFile) { "Shared PDF is missing" }
     require(source.length() in 1..TransferLimits.MAX_PDF_BYTES) {
       "PDF must be non-empty and cannot exceed 512 MiB"
@@ -214,6 +234,7 @@ class PhoneQueueRepository(
       "application/pdf",
       displayName ?: "文档.pdf",
       destinationDeviceId,
+      precomputedSha256,
     )
   }
 
@@ -223,13 +244,18 @@ class PhoneQueueRepository(
     mimeType: String,
     displayName: String,
     destinationDeviceId: String?,
+    precomputedSha256: ByteArray? = null,
   ): QueueItem {
+    if (precomputedSha256 != null) {
+      require(precomputedSha256.size == QueueItem.SHA256_BYTES) { "sha256 must contain 32 bytes" }
+    }
     val id = UUID.randomUUID()
     val target = File(outboxDir, "$id.bin")
     moveFile(source, target)
     return try {
+      val digest = precomputedSha256?.copyOf() ?: sha256(target)
       val item = QueueItem(
-        id, destinationDeviceId, kind, mimeType, target.length(), sha256(target),
+        id, destinationDeviceId, kind, mimeType, target.length(), digest,
         System.currentTimeMillis(), nextPosition(), QueueState.PENDING, displayName,
       )
       insertWithPayload(item, target.relativeTo(appContext.filesDir).path, null)
@@ -252,7 +278,7 @@ class PhoneQueueRepository(
 
   /** Whether a retained payload or text payload is still available for re-sending. */
   fun canResend(entry: SendHistoryEntry): Boolean =
-    entry.text != null || (entry.payloadPath != null && history.payloadExists(entry))
+    PhoneHistoryPolicy.isResendable(entry, history::payloadExists)
 
   /**
    * Re-queues a history entry without consuming it. The original destination wins while it is still
@@ -375,6 +401,7 @@ class PhoneQueueRepository(
     return removable.size
   }
 
+  @Synchronized
   fun move(id: UUID, delta: Int) {
     val ordered = items().map(QueueItem::id).toMutableList()
     val from = ordered.indexOf(id)
@@ -399,6 +426,7 @@ class PhoneQueueRepository(
     return orphans.size
   }
 
+  @Synchronized
   fun reassignPending(deviceId: String) {
     writable().beginTransaction()
     try {
@@ -411,6 +439,7 @@ class PhoneQueueRepository(
   }
 
   /** Re-targets only provisional `pending:` rows after the peer's real device id is learned. */
+  @Synchronized
   fun resolvePendingDestination(deviceId: String) {
     val pending = items().filter { it.destinationDeviceId?.startsWith("pending:") == true }
     if (pending.isEmpty()) return
@@ -424,6 +453,7 @@ class PhoneQueueRepository(
     publish()
   }
 
+  @Synchronized
   fun reassignDestination(oldDeviceId: String, newDeviceId: String) {
     writable().beginTransaction()
     try {
@@ -436,11 +466,13 @@ class PhoneQueueRepository(
     publish()
   }
 
+  @Synchronized
   override fun counts(): ContentCounts {
     val available = items().filter { it.state == QueueState.PENDING }
     return available.contentCounts()
   }
 
+  @Synchronized
   fun counts(destinationDeviceId: String): ContentCounts {
     val available = items().filter {
       it.state == QueueState.PENDING &&
@@ -456,6 +488,7 @@ class PhoneQueueRepository(
     count { it.kind == ContentKind.APP_PACKAGE },
   )
 
+  @Synchronized
   override fun leaseNext(kind: ContentKind, destinationDeviceId: String): SenderLease? {
     val item = coordinator.leaseNext(kind, destinationDeviceId) ?: return null
     publish()
@@ -640,9 +673,11 @@ class PhoneQueueRepository(
       SendOutcome.SUCCEEDED,
       text = text,
     )
-    val payload = payloadFile(item.id)
-    if (payload != null && payload.isFile) {
-      history.retainPayload(payload, entry.id)?.let { recorder.attachPayload(entry, it) }
+    if (PhoneHistoryPolicy.shouldRetainPayload(item.kind)) {
+      val payload = payloadFile(item.id)
+      if (payload != null && payload.isFile) {
+        history.retainPayload(payload, entry.id)?.let { recorder.attachPayload(entry, it) }
+      }
     }
     Log.i(TAG, "history.success kind=${item.kind} bytes=${item.byteLength}")
     publishHistory()
@@ -707,31 +742,39 @@ class PhoneQueueRepository(
     override var offer = TransferOffer(item)
       private set
     private var finished = false
-    override val payloadFile: File? get() = this@PhoneQueueRepository.payloadFile(offer.item.id)
-    override val text: String? get() = textValue(offer.item.id)
-    override fun heartbeat() {
-      if (!finished) {
-        offer = offer.copy(item = coordinator.heartbeat(offer.item.id))
+    override val payloadFile: File?
+      get() = synchronized(this@PhoneQueueRepository) {
+        if (finished) null else this@PhoneQueueRepository.payloadFile(offer.item.id)
       }
-      publish()
-    }
-
-    override fun markTransferring() {
-      if (!finished) {
-        offer = offer.copy(item = coordinator.transition(offer.item.id, QueueState.TRANSFERRING))
+    override val text: String?
+      get() = synchronized(this@PhoneQueueRepository) {
+        if (finished) null else textValue(offer.item.id)
       }
-      publish()
-    }
 
-    override fun markAwaitingCommit() {
-      if (!finished) {
-        offer = offer.copy(item = coordinator.transition(offer.item.id, QueueState.AWAITING_COMMIT))
-      }
-      publish()
-    }
-
-    override fun commit() {
+    override fun heartbeat(): Unit = synchronized(this@PhoneQueueRepository) {
       if (finished) return
+      requireActiveLease()
+      offer = offer.copy(item = coordinator.heartbeat(offer.item.id))
+      publish()
+    }
+
+    override fun markTransferring(): Unit = synchronized(this@PhoneQueueRepository) {
+      if (finished) return
+      requireActiveLease()
+      offer = offer.copy(item = coordinator.transition(offer.item.id, QueueState.TRANSFERRING))
+      publish()
+    }
+
+    override fun markAwaitingCommit(): Unit = synchronized(this@PhoneQueueRepository) {
+      if (finished) return
+      requireActiveLease()
+      offer = offer.copy(item = coordinator.transition(offer.item.id, QueueState.AWAITING_COMMIT))
+      publish()
+    }
+
+    override fun commit(): Unit = synchronized(this@PhoneQueueRepository) {
+      if (finished) return
+      requireActiveLease()
       val item = offer.item
       runCatching { recordSuccess(item) }
       payloadFile(item.id)?.delete()
@@ -741,11 +784,20 @@ class PhoneQueueRepository(
       publish()
     }
 
-    override fun release() {
-      if (!finished) {
+    override fun release(): Unit = synchronized(this@PhoneQueueRepository) {
+      if (finished) return
+      val current = find(offer.item.id)
+      if (current != null && (current.state in ACTIVE_LEASE_STATES || current.state == QueueState.FAILED)) {
         coordinator.release(offer.item.id)
-        finished = true
-        publish()
+      }
+      finished = true
+      publish()
+    }
+
+    private fun requireActiveLease() {
+      val current = find(offer.item.id)
+      check(current != null && current.state in ACTIVE_LEASE_STATES) {
+        "Lease for ${offer.item.id} is no longer active (${current?.state})"
       }
     }
   }
@@ -798,6 +850,7 @@ class PhoneQueueRepository(
 
   private companion object {
     const val TAG = "NoteLink"
+    val ACTIVE_LEASE_STATES = setOf(QueueState.LEASED, QueueState.TRANSFERRING, QueueState.AWAITING_COMMIT)
     val sharedItems = MutableStateFlow<List<QueueItem>>(emptyList())
     val sharedHistory = MutableStateFlow<List<SendHistoryEntry>>(emptyList())
     val PDF_MAGIC = "%PDF-".encodeToByteArray()

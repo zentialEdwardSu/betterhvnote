@@ -1,4 +1,4 @@
-package com.betterhv.note.sender
+package com.betterhv.note.sender.share
 
 import com.betterhv.transfer.core.ContentKind
 import com.betterhv.transfer.core.ContentSniffer

@@ -1,4 +1,4 @@
-package com.betterhv.note.sender
+package com.betterhv.note.sender.service
 
 import com.betterhv.transfer.core.v4.pairing.PairingResponder
 import kotlinx.coroutines.flow.MutableStateFlow

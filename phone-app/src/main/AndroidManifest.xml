@@ -71,7 +71,7 @@
             android:name=".TransferForegroundService"
             android:exported="false"
             android:foregroundServiceType="connectedDevice" />
-        <receiver android:name=".ShareUndoReceiver" android:exported="false" />
+        <receiver android:name=".share.ShareUndoReceiver" android:exported="false" />
         <receiver android:name=".ReceiveBootReceiver" android:exported="false">
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />

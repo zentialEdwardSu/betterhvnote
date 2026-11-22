@@ -1,12 +1,13 @@
-package com.betterhv.note.sender
+package com.betterhv.note.sender.share
 
 import android.content.Context
 import android.content.Intent
 import androidx.core.content.pm.ShortcutInfoCompat
 import androidx.core.content.pm.ShortcutManagerCompat
 import androidx.core.graphics.drawable.IconCompat
-import com.betterhv.note.sender.shared.noteLinkText
+import com.betterhv.note.sender.MainActivity
 import com.betterhv.transfer.core.PairedDevice
+import com.betterhv.transfer.core.i18n.noteLinkText
 
 object ShareShortcutPublisher {
   private const val ID = "send-to-paired-note"

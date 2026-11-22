@@ -1,4 +1,4 @@
-package com.betterhv.note.sender
+package com.betterhv.note.sender.data
 
 import android.content.ContentValues
 import android.content.Context
@@ -202,7 +202,16 @@ class ExportInboxRepository(context: Context) : AutoCloseable {
   }
 
   @Synchronized
-  fun find(id: UUID): InboxExport? = query().firstOrNull { it.artifactId == id }
+  fun find(id: UUID): InboxExport? = database.readableDatabase.query(
+    "inbox_exports",
+    COLUMNS,
+    "artifact_id=?",
+    arrayOf(id.toString()),
+    null,
+    null,
+    null,
+    "1",
+  ).use { cursor -> if (cursor.moveToFirst()) cursor.inboxExport() else null }
 
   @Synchronized
   private fun query(): List<InboxExport> = database.readableDatabase.query(
@@ -215,20 +224,23 @@ class ExportInboxRepository(context: Context) : AutoCloseable {
     "COALESCE(received_at, created_at) DESC",
   ).use { cursor ->
     buildList {
-      while (cursor.moveToNext()) {
-        add(
-          InboxExport(
-            UUID.fromString(cursor.getString(0)), cursor.getString(1), cursor.getString(2), cursor.getString(3),
-            cursor.getLong(
-              4,
-            ),
-            cursor.getBlob(5), cursor.getString(6), InboxExportState.valueOf(cursor.getString(7)),
-            cursor.getLong(8), if (cursor.isNull(9)) null else cursor.getLong(9), cursor.getString(10),
-          ),
-        )
-      }
+      while (cursor.moveToNext()) add(cursor.inboxExport())
     }
   }
+
+  private fun android.database.Cursor.inboxExport() = InboxExport(
+    UUID.fromString(getString(0)),
+    getString(1),
+    getString(2),
+    getString(3),
+    getLong(4),
+    getBlob(5),
+    getString(6),
+    InboxExportState.valueOf(getString(7)),
+    getLong(8),
+    if (isNull(9)) null else getLong(9),
+    getString(10),
+  )
 
   private fun publish() {
     sharedItems.value = query()

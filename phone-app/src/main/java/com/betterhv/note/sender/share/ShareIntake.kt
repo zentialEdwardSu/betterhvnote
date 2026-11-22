@@ -1,4 +1,4 @@
-package com.betterhv.note.sender
+package com.betterhv.note.sender.share
 
 import android.content.Context
 import android.content.Intent
@@ -7,11 +7,13 @@ import android.net.Uri
 import android.provider.OpenableColumns
 import android.util.Log
 import androidx.core.content.IntentCompat
+import com.betterhv.note.sender.data.PhoneQueueRepository
 import com.betterhv.transfer.core.ContentKind
 import com.betterhv.transfer.core.ContentSniffer
 import com.betterhv.transfer.core.TransferLimits
 import java.io.File
 import java.io.InputStream
+import java.security.MessageDigest
 import java.util.UUID
 
 data class ShareIntakeResult(
@@ -19,6 +21,76 @@ data class ShareIntakeResult(
   val rejected: List<ShareRejection>,
   val openedOnly: Boolean = false,
 )
+
+internal data class CopiedStream(val totalBytes: Long, val sha256: ByteArray)
+
+internal object ShareImageBounds {
+  fun validate(width: Int, height: Int): ShareRejectReason? {
+    if (width <= 0 || height <= 0) return ShareRejectReason.UNREADABLE
+    val pixels = width.toLong() * height.toLong()
+    return if (pixels > TransferLimits.MAX_IMAGE_PIXELS) ShareRejectReason.TOO_MANY_PIXELS else null
+  }
+}
+
+internal class ShareDedupeTracker(
+  private val clock: () -> Long,
+  private val dedupeWindowMillis: Long,
+) {
+  private val lock = Any()
+  private val inFlight = HashSet<String>()
+  private var lastFingerprint: String? = null
+  private var lastAcceptedAt = 0L
+
+  fun tryAcquire(fingerprint: String): Boolean = synchronized(lock) {
+    if (fingerprint in inFlight) return false
+    if (fingerprint == lastFingerprint && clock() - lastAcceptedAt <= dedupeWindowMillis) return false
+    inFlight += fingerprint
+    true
+  }
+
+  fun complete(fingerprint: String) = synchronized(lock) {
+    lastFingerprint = fingerprint
+    lastAcceptedAt = clock()
+  }
+
+  fun release(fingerprint: String) = synchronized(lock) {
+    inFlight -= fingerprint
+    Unit
+  }
+}
+
+@Suppress("ReturnCount")
+internal fun copyStreamWithSha256(
+  input: InputStream,
+  header: ByteArray,
+  target: File,
+  limit: Long,
+): CopiedStream? {
+  var total = header.size.toLong()
+  var exceeded = total > limit
+  val digest = MessageDigest.getInstance("SHA-256")
+  if (!exceeded) {
+    target.outputStream().buffered().use { output ->
+      output.write(header)
+      digest.update(header)
+      val buffer = ByteArray(COPY_BUFFER_BYTES)
+      while (!exceeded) {
+        val count = input.read(buffer)
+        if (count < 0) break
+        total += count
+        if (total > limit) {
+          exceeded = true
+        } else {
+          output.write(buffer, 0, count)
+          digest.update(buffer, 0, count)
+        }
+      }
+    }
+  }
+  return if (exceeded) null else CopiedStream(total, digest.digest())
+}
+
+private const val COPY_BUFFER_BYTES = 64 * 1024
 
 /**
  * Turns a share intent into queue entries one item at a time.
@@ -30,13 +102,12 @@ data class ShareIntakeResult(
 class ShareIntake(
   context: Context,
   private val queue: PhoneQueueRepository,
-  private val clock: () -> Long = System::currentTimeMillis,
-  private val dedupeWindowMillis: Long = DEDUPE_WINDOW_MILLIS,
+  clock: () -> Long = System::currentTimeMillis,
+  dedupeWindowMillis: Long = DEDUPE_WINDOW_MILLIS,
 ) {
   private val appContext = context.applicationContext
   private val limits = ShareLimits()
-  private var lastFingerprint: String? = null
-  private var lastAcceptedAt = 0L
+  private val dedupe = ShareDedupeTracker(clock, dedupeWindowMillis)
 
   fun accept(intent: Intent, destinationDeviceId: String?): ShareIntakeResult {
     val action = intent.action
@@ -45,17 +116,20 @@ class ShareIntake(
     val text = intent.getCharSequenceExtra(Intent.EXTRA_TEXT)?.toString()?.trim().orEmpty()
     if (uris.isEmpty() && text.isEmpty()) return openedOnly()
     val fingerprint = fingerprint(action, intent.type, uris, text)
-    if (isDuplicate(fingerprint)) return openedOnly()
+    if (!dedupe.tryAcquire(fingerprint)) return openedOnly()
 
-    val accepted = mutableListOf<UUID>()
-    val rejected = mutableListOf<ShareRejection>()
-    uris.forEach { uri -> acceptStream(uri, intent.type, destinationDeviceId, accepted, rejected) }
-    if (text.isNotEmpty()) acceptText(text, destinationDeviceId, accepted, rejected)
-    rejected.forEach { Log.i(TAG, "share.reject reason=${it.reason} type=${it.detectedType}") }
-    Log.i(TAG, "share.accept accepted=${accepted.size} rejected=${rejected.size}")
-    lastFingerprint = fingerprint
-    lastAcceptedAt = clock()
-    return ShareIntakeResult(accepted, rejected)
+    return try {
+      val accepted = mutableListOf<UUID>()
+      val rejected = mutableListOf<ShareRejection>()
+      uris.forEach { uri -> acceptStream(uri, intent.type, destinationDeviceId, accepted, rejected) }
+      if (text.isNotEmpty()) acceptText(text, destinationDeviceId, accepted, rejected)
+      rejected.forEach { Log.i(TAG, "share.reject reason=${it.reason} type=${it.detectedType}") }
+      Log.i(TAG, "share.accept accepted=${accepted.size} rejected=${rejected.size}")
+      dedupe.complete(fingerprint)
+      ShareIntakeResult(accepted, rejected)
+    } finally {
+      dedupe.release(fingerprint)
+    }
   }
 
   private fun acceptStream(
@@ -95,8 +169,8 @@ class ShareIntake(
           )
           return
         }
-        val total = copyWithLimit(stream, header.copyOf(headerLength), temp, limit)
-        if (total == null) {
+        val copied = copyStreamWithSha256(stream, header.copyOf(headerLength), temp, limit)
+        if (copied == null) {
           rejected += ShareRejection(
             displayName,
             sniffed.mimeType,
@@ -105,20 +179,18 @@ class ShareIntake(
           )
           return
         }
-        if (total == 0L) {
+        if (copied.totalBytes == 0L) {
           rejected += ShareRejection(displayName, sniffed.mimeType, ShareRejectReason.EMPTY)
           return
         }
-        if (sniffed.kind == ContentKind.IMAGE && !withinPixelLimit(temp)) {
-          rejected += ShareRejection(
-            displayName,
-            sniffed.mimeType,
-            ShareRejectReason.TOO_MANY_PIXELS
-          )
-          return
+        if (sniffed.kind == ContentKind.IMAGE) {
+          checkImageDimensions(temp)?.let { reason ->
+            rejected += ShareRejection(displayName, sniffed.mimeType, reason)
+            return
+          }
         }
         val planned = SharePlanner.plan(
-          listOf(SharedPayload(displayName, declaredMime, total, header.copyOf(headerLength))),
+          listOf(SharedPayload(displayName, declaredMime, copied.totalBytes, header.copyOf(headerLength))),
           limits,
         )
         val share = planned.accepted.firstOrNull()
@@ -126,7 +198,7 @@ class ShareIntake(
           rejected += planned.rejected
           return
         }
-        accepted += enqueue(share, temp, displayName, destinationDeviceId)
+        accepted += enqueue(share, temp, copied.sha256, displayName, destinationDeviceId)
       }
     } catch (_: Throwable) {
       rejected += ShareRejection(displayName, declaredMime, ShareRejectReason.UNREADABLE)
@@ -156,47 +228,19 @@ class ShareIntake(
   private fun enqueue(
     share: PlannedShare,
     temp: File,
+    sha256: ByteArray,
     displayName: String?,
-    destination: String?
+    destination: String?,
   ): UUID =
     when (share.kind) {
-      ContentKind.PDF -> queue.enqueuePdfFile(temp, displayName, destination).id
-      else -> queue.enqueueImageFile(temp, share.mimeType, displayName, destination).id
+      ContentKind.PDF -> queue.enqueuePdfFile(temp, displayName, destination, sha256).id
+      else -> queue.enqueueImageFile(temp, share.mimeType, displayName, destination, sha256).id
     }
 
-  @Suppress("ReturnCount")
-  private fun copyWithLimit(
-    input: InputStream,
-    header: ByteArray,
-    target: File,
-    limit: Long
-  ): Long? {
-    var total = header.size.toLong()
-    var exceeded = total > limit
-    if (!exceeded) {
-      target.outputStream().buffered().use { output ->
-        output.write(header)
-        val buffer = ByteArray(COPY_BUFFER_BYTES)
-        while (!exceeded) {
-          val count = input.read(buffer)
-          if (count < 0) break
-          total += count
-          if (total > limit) {
-            exceeded = true
-          } else {
-            output.write(buffer, 0, count)
-          }
-        }
-      }
-    }
-    return if (exceeded) null else total
-  }
-
-  private fun withinPixelLimit(file: File): Boolean {
+  private fun checkImageDimensions(file: File): ShareRejectReason? {
     val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
     BitmapFactory.decodeFile(file.absolutePath, options)
-    if (options.outWidth <= 0 || options.outHeight <= 0) return false
-    return options.outWidth.toLong() * options.outHeight.toLong() <= TransferLimits.MAX_IMAGE_PIXELS
+    return ShareImageBounds.validate(options.outWidth, options.outHeight)
   }
 
   private fun queryDisplayName(uri: Uri): String? = runCatching {
@@ -206,9 +250,6 @@ class ShareIntake(
 
   private fun resolveMime(uri: Uri, intentMime: String?): String? =
     runCatching { appContext.contentResolver.getType(uri) }.getOrNull() ?: intentMime
-
-  private fun isDuplicate(fingerprint: String): Boolean =
-    fingerprint == lastFingerprint && clock() - lastAcceptedAt <= dedupeWindowMillis
 
   private fun fingerprint(action: String?, type: String?, uris: List<Uri>, text: String): String =
     buildString {
@@ -253,7 +294,6 @@ class ShareIntake(
   private companion object {
     const val TAG = "NoteLinkShare"
     const val DEDUPE_WINDOW_MILLIS = 2_000L
-    const val COPY_BUFFER_BYTES = 64 * 1024
     const val UNKNOWN_TYPE = "unknown"
   }
 }

@@ -1,7 +1,13 @@
-package com.betterhv.note.sender
+package com.betterhv.note.sender.service
 
 import android.content.Context
 import android.util.Log
+import com.betterhv.note.sender.BuildConfig
+import com.betterhv.note.sender.data.ExportInboxRepository
+import com.betterhv.note.sender.data.InboxBeginResult
+import com.betterhv.note.sender.data.NoteLinkSettings
+import com.betterhv.note.sender.data.PhoneQueueRepository
+import com.betterhv.note.sender.share.ShareShortcutPublisher
 import com.betterhv.transfer.android.AndroidNetworkInfoProvider
 import com.betterhv.transfer.android.AndroidPairingController
 import com.betterhv.transfer.android.HighBandwidthSessionManager
@@ -10,6 +16,7 @@ import com.betterhv.transfer.core.ContentCounts
 import com.betterhv.transfer.core.ContentKind
 import com.betterhv.transfer.core.ExportTransferOffer
 import com.betterhv.transfer.core.NOTELINK_LAN_PORT
+import com.betterhv.transfer.core.QueueState
 import com.betterhv.transfer.core.TransferErrorCode
 import com.betterhv.transfer.core.TransferEvent
 import com.betterhv.transfer.core.TransferFailure
@@ -142,6 +149,7 @@ class PhoneCommandProcessor(
 
   override fun counts(peerDeviceId: String): ContentCounts {
     queue.releaseExpired()
+    if (leases.isNotEmpty()) pruneInactiveLeases()
     return queue.counts(peerDeviceId)
   }
 
@@ -175,23 +183,26 @@ class PhoneCommandProcessor(
   }
 
   override fun leased(peerDeviceId: String, itemId: UUID): HostLease? {
-    val (owner, lease) = leases[itemId] ?: return null
-    if (owner != peerDeviceId) return null
-    runCatching { lease.heartbeat() }
-    return hostLease(lease)
+    val lease = activeLease(peerDeviceId, itemId) ?: return null
+    return runCatching {
+      lease.heartbeat()
+      hostLease(lease)
+    }.onFailure {
+      leases.remove(itemId)
+    }.getOrNull()
   }
 
   override fun heartbeat(peerDeviceId: String, itemId: UUID): Boolean {
-    val (owner, lease) = leases[itemId] ?: return false
-    if (owner != peerDeviceId) return false
-    return runCatching { lease.heartbeat() }.isSuccess
+    val lease = activeLease(peerDeviceId, itemId) ?: return false
+    return runCatching { lease.heartbeat() }
+      .onFailure { leases.remove(itemId) }
+      .isSuccess
   }
 
   override fun commit(peerDeviceId: String, itemId: UUID): Boolean {
-    val entry = leases[itemId] ?: return false
-    if (entry.first != peerDeviceId) return false
+    val lease = activeLease(peerDeviceId, itemId) ?: return false
     leases.remove(itemId)
-    return runCatching { entry.second.commit() }
+    return runCatching { lease.commit() }
       .onSuccess {
         pairing.markLastUsed(peerDeviceId)
         onQueueChanged()
@@ -201,10 +212,32 @@ class PhoneCommandProcessor(
   }
 
   override fun release(peerDeviceId: String, itemId: UUID): Boolean {
-    val entry = leases[itemId] ?: return false
-    if (entry.first != peerDeviceId) return false
+    val lease = activeLease(peerDeviceId, itemId) ?: return false
     leases.remove(itemId)
-    return runCatching { entry.second.release() }.onSuccess { onQueueChanged() }.isSuccess
+    return runCatching { lease.release() }.onSuccess { onQueueChanged() }.isSuccess
+  }
+
+  private fun pruneInactiveLeases() {
+    val activeIds = queue.items()
+      .asSequence()
+      .filter { it.state in ACTIVE_LEASE_STATES }
+      .mapTo(HashSet()) { it.id }
+    leases.entries.removeIf { (id, _) -> id !in activeIds }
+  }
+
+  private fun activeLease(peerDeviceId: String, itemId: UUID): SenderLease? {
+    val (owner, lease) = leases[itemId] ?: return null
+    if (owner != peerDeviceId) return null
+    val current = queue.find(itemId)
+    if (
+      current == null ||
+      current.state !in ACTIVE_LEASE_STATES ||
+      (current.destinationDeviceId != null && current.destinationDeviceId != peerDeviceId)
+    ) {
+      leases.remove(itemId)
+      return null
+    }
+    return lease
   }
 
   override fun push(peerDeviceId: String, offer: PushOffer): PushDecision {
@@ -355,5 +388,6 @@ class PhoneCommandProcessor(
     const val TRANSPORT_LAN = 1
     const val TRANSPORT_P2P = 2
     const val P2P_READY_MILLIS = 40_000L
+    val ACTIVE_LEASE_STATES = setOf(QueueState.LEASED, QueueState.TRANSFERRING, QueueState.AWAITING_COMMIT)
   }
 }

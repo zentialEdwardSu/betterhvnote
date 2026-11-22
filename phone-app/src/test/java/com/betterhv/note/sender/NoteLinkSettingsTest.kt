@@ -1,6 +1,7 @@
 package com.betterhv.note.sender
 
-import com.betterhv.note.sender.shared.NoteLinkLanguage
+import com.betterhv.note.sender.data.NoteLinkSettings
+import com.betterhv.transfer.core.i18n.NoteLinkLanguage
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertThrows
 import org.junit.Test

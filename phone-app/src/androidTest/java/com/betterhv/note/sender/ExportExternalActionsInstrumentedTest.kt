@@ -10,6 +10,8 @@ import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.core.content.IntentCompat
 import androidx.core.net.toUri
+import com.betterhv.note.sender.data.InboxExport
+import com.betterhv.note.sender.data.InboxExportState
 import java.util.UUID
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull

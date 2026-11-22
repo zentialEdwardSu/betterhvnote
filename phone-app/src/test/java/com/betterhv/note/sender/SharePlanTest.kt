@@ -1,5 +1,11 @@
 package com.betterhv.note.sender
 
+import com.betterhv.note.sender.share.PlannedShare
+import com.betterhv.note.sender.share.ShareLimits
+import com.betterhv.note.sender.share.SharePlanner
+import com.betterhv.note.sender.share.ShareRejectReason
+import com.betterhv.note.sender.share.ShareRejection
+import com.betterhv.note.sender.share.SharedPayload
 import com.betterhv.transfer.core.ContentKind
 import com.betterhv.transfer.core.TransferLimits
 import org.junit.Assert.assertEquals

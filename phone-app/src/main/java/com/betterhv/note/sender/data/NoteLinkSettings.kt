@@ -1,10 +1,10 @@
-package com.betterhv.note.sender
+package com.betterhv.note.sender.data
 
 import android.content.Context
 import androidx.core.content.edit
-import com.betterhv.note.sender.shared.NoteLinkI18n
-import com.betterhv.note.sender.shared.NoteLinkLanguage
 import com.betterhv.transfer.core.SendOrder
+import com.betterhv.transfer.core.i18n.NoteLinkI18n
+import com.betterhv.transfer.core.i18n.NoteLinkLanguage
 
 class NoteLinkSettings(context: Context) {
   private val preferences = context.applicationContext.getSharedPreferences(PREFERENCES, Context.MODE_PRIVATE)

@@ -1,4 +1,4 @@
-package com.betterhv.note.sender
+package com.betterhv.note.sender.data
 
 import android.content.ContentValues
 import android.content.Context
