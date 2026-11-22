@@ -12,17 +12,17 @@ build/
 .cxx
 .claude/
 .kotlin/
-hvNote/
-tools/
+/hvNote/
 
 # make github happy
-*.zip 
+**/build/**/*.zip
+dist/
 
 # Keep repository-facing docs only; implementation notes and plans stay local.
 *.md
 !CLAUDE.md
 !README.md
 !FULL_CHANGELOG.md
-!docs/
-docs/*
-!docs/code-review.md
+docs/**
+!docs/**/
+!docs/**/*.md

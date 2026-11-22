@@ -1,65 +1,85 @@
+import com.android.build.api.dsl.ApplicationExtension
+import com.android.build.api.dsl.LibraryExtension
+import com.android.build.api.dsl.Lint
+import dev.detekt.gradle.extensions.DetektExtension
+
 plugins {
-    id("com.android.application") version "9.3.2" apply false
-    id("com.android.library") version "9.3.2" apply false
-    id("com.android.lint") version "9.3.2" apply false
-    id("org.jetbrains.kotlin.jvm") version "2.4.10" apply false
-    id("org.jetbrains.kotlin.plugin.compose") version "2.4.10" apply false
-    id("org.jetbrains.compose") version "1.12.0" apply false
-    id("app.cash.sqldelight") version "2.3.2" apply false
-    id("dev.detekt") version "2.0.0-alpha.6" apply false
-    id("com.google.protobuf") version "0.10.0" apply false
+    alias(libs.plugins.android.application) apply false
+    alias(libs.plugins.android.library) apply false
+    alias(libs.plugins.android.lint) apply false
+    alias(libs.plugins.kotlin.jvm) apply false
+    alias(libs.plugins.kotlin.compose) apply false
+    alias(libs.plugins.jetbrains.compose) apply false
+    alias(libs.plugins.sqldelight) apply false
+    alias(libs.plugins.detekt) apply false
+    alias(libs.plugins.protobuf) apply false
 }
 
-subprojects {
-    pluginManager.withPlugin("org.jetbrains.kotlin.jvm") {
-        pluginManager.apply("dev.detekt")
+fun Lint.configureSharedLint(includeReleaseBuilds: Boolean = true) {
+    abortOnError = true
+    warningsAsErrors = true
+    checkDependencies = true
+    if (includeReleaseBuilds) {
+        checkReleaseBuilds = true
     }
-    pluginManager.withPlugin("org.jetbrains.kotlin.android") {
-        pluginManager.apply("dev.detekt")
+    checkTestSources = true
+    // Dependency upgrades are handled explicitly; an available update must not fail CI.
+    disable += "GradleDependency"
+    disable += "AndroidGradlePluginVersion"
+}
+
+fun Project.configureReleaseSigning(extension: ApplicationExtension) {
+    val releaseStoreFile = providers.environmentVariable("ANDROID_RELEASE_KEYSTORE_FILE")
+    val releaseStorePassword = providers.environmentVariable("ANDROID_RELEASE_STORE_PASSWORD")
+    val releaseKeyAlias = providers.environmentVariable("ANDROID_RELEASE_KEY_ALIAS")
+    val releaseSigningReady = listOf(
+        releaseStoreFile,
+        releaseStorePassword,
+        releaseKeyAlias,
+    ).all { it.isPresent }
+
+    if (releaseSigningReady) {
+        val releaseSigning = extension.signingConfigs.create("release") {
+            storeFile = file(releaseStoreFile.get())
+            storeType = "PKCS12"
+            storePassword = releaseStorePassword.get()
+            keyAlias = releaseKeyAlias.get()
+            keyPassword = releaseStorePassword.get()
+        }
+        extension.buildTypes.getByName("release").signingConfig = releaseSigning
+    }
+}
+
+val detektPluginId = libs.plugins.detekt.get().pluginId
+val detektKtlintWrapper = libs.detekt.rules.ktlint.wrapper
+
+subprojects {
+    layout.buildDirectory.set(rootProject.layout.buildDirectory.dir(name))
+
+    pluginManager.withPlugin("org.jetbrains.kotlin.jvm") {
+        pluginManager.apply(detektPluginId)
     }
     pluginManager.withPlugin("com.android.application") {
-        extensions.configure<com.android.build.api.dsl.ApplicationExtension> {
-            lint {
-                abortOnError = true
-                warningsAsErrors = true
-                checkDependencies = true
-                checkReleaseBuilds = true
-                checkTestSources = true
-                // Dependency upgrades are handled explicitly; an available update must not fail CI.
-                disable += "GradleDependency"
-                disable += "AndroidGradlePluginVersion"
-            }
+        pluginManager.apply(detektPluginId)
+        extensions.configure<ApplicationExtension> {
+            lint { configureSharedLint() }
+            configureReleaseSigning(this)
         }
     }
     pluginManager.withPlugin("com.android.library") {
-        extensions.configure<com.android.build.api.dsl.LibraryExtension> {
-            lint {
-                abortOnError = true
-                warningsAsErrors = true
-                checkDependencies = true
-                checkReleaseBuilds = true
-                checkTestSources = true
-                disable += "GradleDependency"
-                disable += "AndroidGradlePluginVersion"
-            }
+        pluginManager.apply(detektPluginId)
+        extensions.configure<LibraryExtension> {
+            lint { configureSharedLint() }
         }
     }
     pluginManager.withPlugin("com.android.lint") {
-        extensions.configure<com.android.build.api.dsl.Lint> {
-            abortOnError = true
-            warningsAsErrors = true
-            checkDependencies = true
-            checkTestSources = true
-            disable += "GradleDependency"
-                disable += "AndroidGradlePluginVersion"
+        extensions.configure<Lint> {
+            configureSharedLint(includeReleaseBuilds = false)
         }
     }
     pluginManager.withPlugin("dev.detekt") {
-        dependencies.add(
-            "detektPlugins",
-            "dev.detekt:detekt-rules-ktlint-wrapper:2.0.0-alpha.6",
-        )
-        extensions.configure<dev.detekt.gradle.extensions.DetektExtension> {
+        dependencies.add("detektPlugins", detektKtlintWrapper)
+        extensions.configure<DetektExtension> {
             config.setFrom(rootProject.file("config/detekt/detekt.yml"))
             buildUponDefaultConfig = false
             allRules = false

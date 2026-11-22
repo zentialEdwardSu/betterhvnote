@@ -14,7 +14,7 @@ def write_icon(module: str, source: Path) -> None:
     if not source.exists():
         raise SystemExit(f"Missing source image: {source}")
     res = ROOT / module / "src/main/res"
-    adaptive = res / "mipmap-anydpi-v26"
+    adaptive = res / "mipmap-anydpi"
     adaptive_v33 = res / "mipmap-anydpi-v33"
     foreground_dir = res / "drawable-nodpi"
     adaptive.mkdir(parents=True, exist_ok=True)
